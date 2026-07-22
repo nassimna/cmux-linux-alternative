@@ -1,0 +1,17 @@
+Agent Workspace
+Copyright 2026 Agent Workspace contributors
+
+This repository is an independent implementation. At Milestone 0, no third-party application source
+files or visual assets have been copied or adapted into this repository.
+
+Third-party dependencies remain governed by their respective licenses. If source is copied or
+adapted in the future, this file must record its project, source URL, revision, affected files,
+license, and the nature of the modification before that change is merged.
+
+JetBrains Mono
+Copyright 2020 The JetBrains Mono Project Authors
+Source: https://github.com/JetBrains/JetBrainsMono
+Bundled through @fontsource-variable/jetbrains-mono 5.2.8
+License: SIL Open Font License 1.1
+The unmodified variable webfont is bundled as the application's default UI and terminal typeface.
+The complete font license is included in packaged applications under licenses/.

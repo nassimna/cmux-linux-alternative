@@ -1,0 +1,10 @@
+node_modules
+target
+out
+dist
+release
+coverage
+test-results
+playwright-report
+pnpm-lock.yaml
+packages/protocol-client/src/generated

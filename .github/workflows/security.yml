@@ -1,0 +1,112 @@
+name: Security and supply chain
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  schedule:
+    - cron: '41 4 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  dependencies:
+    name: Dependency vulnerability gates
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      contents: read
+      checks: write
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - name: Install pnpm
+        uses: pnpm/action-setup@008330803749db0355799c700092d9a85fd074e9 # v6.0.9
+        with:
+          version: 10.34.5
+      - name: Install Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22.20.0
+          cache: pnpm
+      - name: Install JavaScript dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Fail on high or critical JavaScript advisories
+        run: pnpm audit --prod --audit-level high
+      - name: Record production license inventory
+        run: |
+          mkdir -p security-evidence
+          pnpm licenses list --prod --json > security-evidence/pnpm-licenses.json
+      - name: Audit locked Rust dependencies without ignored advisories
+        uses: rustsec/audit-check@69366f33c96575abad1ee0dba8212993eecbe998 # v2.0.0
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Upload license evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: dependency-license-evidence
+          path: security-evidence/pnpm-licenses.json
+          if-no-files-found: error
+          retention-days: 30
+
+  artifact:
+    name: Package SBOM and vulnerability gate
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - name: Install pnpm
+        uses: pnpm/action-setup@008330803749db0355799c700092d9a85fd074e9 # v6.0.9
+        with:
+          version: 10.34.5
+      - name: Install Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22.20.0
+          cache: pnpm
+      - name: Install Rust toolchain
+        run: rustup toolchain install 1.96.0 --profile minimal
+      - name: Build feed-free release packages
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm package:linux
+          mkdir -p security-evidence
+      - name: Create SPDX JSON SBOM
+        uses: anchore/sbom-action@f8bdd1d8ac5e901a77a92f111440fdb1b593736b # v0.20.6
+        with:
+          path: release
+          syft-version: 1.48.0
+          format: spdx-json
+          output-file: security-evidence/agent-workspace.spdx.json
+          upload-artifact: false
+          upload-release-assets: false
+      - name: Create CycloneDX JSON SBOM
+        uses: anchore/sbom-action@f8bdd1d8ac5e901a77a92f111440fdb1b593736b # v0.20.6
+        with:
+          path: release
+          syft-version: 1.48.0
+          format: cyclonedx-json
+          output-file: security-evidence/agent-workspace.cyclonedx.json
+          upload-artifact: false
+          upload-release-assets: false
+      - name: Fail on high or critical packaged-artifact vulnerabilities
+        uses: anchore/scan-action@0d444ed77d83ee2ba7f5ced0d90d640a1281d762 # v7.3.0
+        with:
+          path: release
+          grype-version: 0.116.0
+          fail-build: true
+          severity-cutoff: high
+          output-format: sarif
+          output-file: security-evidence/grype.sarif
+      - name: Upload security evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: packaged-security-evidence
+          path: security-evidence
+          if-no-files-found: warn
+          retention-days: 30

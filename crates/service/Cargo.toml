@@ -1,0 +1,37 @@
+[package]
+name = "agent-workspace-service"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "agent-workspace-service"
+path = "src/main.rs"
+
+[dependencies]
+agent-workspace-config.workspace = true
+agent-workspace-control-server.workspace = true
+agent-workspace-core.workspace = true
+agent-workspace-diagnostics.workspace = true
+agent-workspace-notification-runtime.workspace = true
+agent-workspace-process-containment.workspace = true
+agent-workspace-protocol.workspace = true
+agent-workspace-storage.workspace = true
+agent-workspace-terminal-runtime.workspace = true
+agent-workspace-runtime.workspace = true
+clap.workspace = true
+env = "=1.0.1"
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+rusqlite.workspace = true
+tempfile.workspace = true
+
+[lints]
+workspace = true

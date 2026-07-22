@@ -1,0 +1,7 @@
+# GitHub requires every active CODEOWNERS rule to name an existing user, team, or email address.
+# This repository does not yet have a stable public owner/team identity, so no fabricated owner is
+# activated here. During repository transfer, replace OWNER with the real organization and enable:
+#
+# * @OWNER/maintainers
+# /docs/ @OWNER/maintainers
+# /.github/ @OWNER/maintainers

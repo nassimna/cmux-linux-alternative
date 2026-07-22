@@ -1,0 +1,19 @@
+{
+  "name": "@agent-workspace/design-tokens",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Project-owned visual design tokens for Agent Workspace interfaces",
+  "license": "GPL-3.0-or-later",
+  "sideEffects": [
+    "**/*.css"
+  ],
+  "exports": {
+    "./foundation.css": "./src/foundation.css",
+    "./terminal-theme": "./src/terminal-theme.ts",
+    "./tokens.css": "./src/tokens.css",
+    "./tailwind.css": "./src/tailwind.css"
+  },
+  "files": [
+    "src"
+  ]
+}

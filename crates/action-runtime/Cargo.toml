@@ -1,0 +1,23 @@
+[package]
+name = "agent-workspace-action-runtime"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+agent-workspace-config.workspace = true
+command-fds = { version = "0.3.3", features = ["tokio"] }
+rustix = { workspace = true, features = ["fs"] }
+sha2 = "0.10.9"
+serde_json.workspace = true
+subtle.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[lints]
+workspace = true

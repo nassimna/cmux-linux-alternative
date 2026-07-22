@@ -1,0 +1,47 @@
+[package]
+name = "agent-workspace-control-server"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+async-trait.workspace = true
+agent-workspace-agent-adapter.workspace = true
+agent-workspace-agent-session-runtime.workspace = true
+agent-workspace-action-runtime.workspace = true
+agent-workspace-config.workspace = true
+agent-workspace-core.workspace = true
+agent-workspace-protocol.workspace = true
+agent-workspace-storage.workspace = true
+agent-workspace-content.workspace = true
+agent-workspace-content-index.workspace = true
+agent-workspace-terminal-runtime.workspace = true
+agent-workspace-runtime.workspace = true
+base64.workspace = true
+interprocess.workspace = true
+listeners.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2 = "0.10.9"
+subtle.workspace = true
+sysinfo.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+uuid.workspace = true
+zeroize.workspace = true
+
+[target.'cfg(unix)'.dependencies]
+rustix.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+widestring.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true
+rusqlite.workspace = true
+tempfile.workspace = true
+
+[lints]
+workspace = true

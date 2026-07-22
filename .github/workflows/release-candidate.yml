@@ -1,0 +1,475 @@
+name: Release candidate
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Exact package version (without v prefix)
+        required: true
+        type: string
+      channel:
+        description: Promotion channel
+        required: true
+        type: choice
+        options: [beta, stable]
+      create_draft_release:
+        description: Create a draft release (dispatch must target the matching existing tag)
+        required: true
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-candidate-${{ inputs.version }}
+  cancel-in-progress: false
+
+jobs:
+  package:
+    name: Validate and build release candidate
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    outputs:
+      prerelease: ${{ steps.release-gate.outputs.prerelease }}
+    steps:
+      - name: Check out clean release ref
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          clean: true
+          fetch-depth: 1
+      - name: Install pnpm
+        uses: pnpm/action-setup@008330803749db0355799c700092d9a85fd074e9 # v6.0.9
+        with:
+          version: 10.34.5
+      - name: Install Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22.20.0
+          cache: pnpm
+      - name: Install Rust toolchain
+        run: rustup toolchain install 1.96.0 --profile minimal --component clippy,rustfmt
+      - name: Install frozen dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Enforce version, channel, tag, and changelog
+        id: release-gate
+        env:
+          VERSION: ${{ inputs.version }}
+          CHANNEL: ${{ inputs.channel }}
+          CREATE_DRAFT: ${{ inputs.create_draft_release }}
+          REF_NAME: ${{ github.ref_name }}
+          REF_TYPE: ${{ github.ref_type }}
+        run: |
+          args=(--version "$VERSION" --mode candidate --notes-output release-notes.md)
+          if [[ "$CREATE_DRAFT" == true ]]; then
+            [[ "$REF_TYPE" == tag ]] || { echo 'Draft creation requires dispatching the matching existing tag.' >&2; exit 1; }
+            args+=(--tag "$REF_NAME")
+          fi
+          if [[ "$CHANNEL" == stable && "$VERSION" == *-* ]]; then
+            echo 'Stable channel cannot use a prerelease version.' >&2
+            exit 1
+          fi
+          if [[ "$CHANNEL" == beta && "$VERSION" != *-* ]]; then
+            echo 'Beta channel requires a semantic-version prerelease suffix.' >&2
+            exit 1
+          fi
+          result=$(node scripts/release/validate-release.mjs "${args[@]}")
+          prerelease=$(node -e 'process.stdout.write(String(JSON.parse(process.argv[1]).prerelease))' "$result")
+          echo "prerelease=$prerelease" >> "$GITHUB_OUTPUT"
+      - name: Verify generated protocol bindings
+        run: |
+          pnpm generate:protocol
+          git diff --exit-code -- packages/protocol-client/src/generated
+      - name: Run complete validation gate
+        run: pnpm validate
+      - name: Install virtual display prerequisite
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends xvfb
+      - name: Run direct accessibility validation under Xvfb
+        id: accessibility-validation
+        continue-on-error: true
+        env:
+          AGENT_WORKSPACE_EVIDENCE_DIR: ${{ github.workspace }}/release-validation/accessibility/evidence
+          PLAYWRIGHT_HTML_OUTPUT_DIR: ${{ github.workspace }}/release-validation/accessibility/report
+          PLAYWRIGHT_JSON_OUTPUT_FILE: ${{ github.workspace }}/release-validation/accessibility/test-results/results.json
+        run: >-
+          xvfb-run -a pnpm --filter @agent-workspace/desktop test:a11y
+          --output=${{ github.workspace }}/release-validation/accessibility/test-results
+          --reporter=line,html,json
+      - name: Run Linux visual regression validation under Xvfb
+        id: visual-validation
+        continue-on-error: true
+        env:
+          AGENT_WORKSPACE_EVIDENCE_DIR: ${{ github.workspace }}/release-validation/visual/evidence
+          PLAYWRIGHT_HTML_OUTPUT_DIR: ${{ github.workspace }}/release-validation/visual/report
+          PLAYWRIGHT_JSON_OUTPUT_FILE: ${{ github.workspace }}/release-validation/visual/test-results/results.json
+        run: >-
+          xvfb-run -a pnpm --filter @agent-workspace/desktop test:visual
+          --output=${{ github.workspace }}/release-validation/visual/test-results
+          --reporter=line,html,json
+      - name: Run corrupt-database recovery validation under Xvfb
+        id: recovery-validation
+        continue-on-error: true
+        env:
+          AGENT_WORKSPACE_EVIDENCE_DIR: ${{ github.workspace }}/release-validation/recovery/evidence
+          PLAYWRIGHT_HTML_OUTPUT_DIR: ${{ github.workspace }}/release-validation/recovery/report
+          PLAYWRIGHT_JSON_OUTPUT_FILE: ${{ github.workspace }}/release-validation/recovery/test-results/results.json
+        run: >-
+          xvfb-run -a pnpm --filter @agent-workspace/desktop exec playwright test e2e/persistence-recovery.spec.mjs
+          --workers=1
+          --timeout=30000
+          --grep='corrupt database enters private recovery UI without mutating the source'
+          --output=${{ github.workspace }}/release-validation/recovery/test-results
+          --reporter=line,html,json
+      - name: Verify accessibility, visual, and recovery validation evidence
+        id: ui-evidence-validation
+        if: always()
+        continue-on-error: true
+        run: |
+          node --input-type=module <<'EOF'
+          import { stat } from 'node:fs/promises'
+
+          const expectedFiles = [
+            'release-validation/accessibility/evidence/01-initial-workspace.png',
+            'release-validation/accessibility/evidence/01-screen-reader-control.png',
+            'release-validation/accessibility/evidence/02-settings.png',
+            'release-validation/accessibility/evidence/03-notification-attention.png',
+            'release-validation/accessibility/evidence/04-zoom-200.png',
+            'release-validation/accessibility/evidence/05-zoom-400.png',
+            'release-validation/accessibility/evidence/06-forced-colors.png',
+            'release-validation/accessibility/report/index.html',
+            'release-validation/accessibility/test-results/results.json',
+            'release-validation/visual/evidence/command-palette-dark.png',
+            'release-validation/visual/evidence/notification-attention-light.png',
+            'release-validation/visual/evidence/notification-center-light.png',
+            'release-validation/visual/evidence/service-failure-dark.png',
+            'release-validation/visual/evidence/settings-light.png',
+            'release-validation/visual/evidence/workspace-dark.png',
+            'release-validation/visual/evidence/workspace-empty-replacement-dark.png',
+            'release-validation/visual/evidence/workspace-four-pane-dark.png',
+            'release-validation/visual/evidence/workspace-fractional-scale-dark.png',
+            'release-validation/visual/evidence/workspace-hover-focus-dark.png',
+            'release-validation/visual/evidence/workspace-light.png',
+            'release-validation/visual/evidence/workspace-sidebar-collapsed-dark.png',
+            'release-validation/visual/report/index.html',
+            'release-validation/visual/test-results/results.json',
+            'release-validation/recovery/evidence/corrupt-database-recovery-linux.png',
+            'release-validation/recovery/report/index.html',
+            'release-validation/recovery/test-results/results.json'
+          ]
+          const missingFiles = []
+          for (const file of expectedFiles) {
+            const metadata = await stat(file).catch(() => undefined)
+            if (!metadata?.isFile() || metadata.size === 0) missingFiles.push(file)
+          }
+          if (missingFiles.length > 0) {
+            throw new Error(`Missing or empty release UI validation evidence:\n${missingFiles.join('\n')}`)
+          }
+          EOF
+      - name: Upload accessibility, visual, and recovery validation evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: release-ui-validation-${{ inputs.version }}
+          path: release-validation
+          if-no-files-found: error
+          retention-days: 90
+      - name: Enforce accessibility, visual, and recovery validation results
+        if: steps.accessibility-validation.outcome == 'failure' || steps.visual-validation.outcome == 'failure' || steps.recovery-validation.outcome == 'failure' || steps.ui-evidence-validation.outcome == 'failure'
+        run: exit 1
+      - name: Build feed-free AppImage, deb, and rpm
+        run: pnpm package:linux
+      - name: Verify the exact checksum set
+        env:
+          VERSION: ${{ inputs.version }}
+        run: scripts/release/verify-downloaded-artifacts.sh release "$VERSION"
+      - name: Attest build provenance for primary artifacts and checksums
+        uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a # v3.0.0
+        with:
+          subject-path: |
+            release/agent-workspace-*-x86_64.AppImage
+            release/agent-workspace-*-x86_64.deb
+            release/agent-workspace-*-x86_64.rpm
+            release/SHA256SUMS
+      - name: Upload release candidate bundle
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: release-candidate-${{ inputs.version }}
+          path: |
+            release/agent-workspace-*-x86_64.AppImage
+            release/agent-workspace-*-x86_64.deb
+            release/agent-workspace-*-x86_64.rpm
+            release/SHA256SUMS
+            release-notes.md
+          if-no-files-found: error
+          retention-days: 90
+
+  clean-install:
+    name: Clean ${{ matrix.os }} ${{ matrix.type }} ${{ matrix.display }} ${{ matrix.rendering }} smoke
+    needs: package
+    runs-on: ubuntu-latest
+    container: ${{ matrix.image }}
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: Ubuntu 24.04
+            family: ubuntu
+            type: deb
+            display: x11
+            rendering: default
+            launch_args: ''
+            image: ubuntu:24.04@sha256:4fbb8e6a8395de5a7550b33509421a2bafbc0aab6c06ba2cef9ebffbc7092d90
+          - os: Ubuntu 24.04
+            family: ubuntu
+            type: appimage
+            display: x11
+            rendering: default
+            launch_args: ''
+            image: ubuntu:24.04@sha256:4fbb8e6a8395de5a7550b33509421a2bafbc0aab6c06ba2cef9ebffbc7092d90
+          - os: Ubuntu 24.04
+            family: ubuntu
+            type: appimage
+            display: x11
+            rendering: software
+            launch_args: --disable-gpu
+            image: ubuntu:24.04@sha256:4fbb8e6a8395de5a7550b33509421a2bafbc0aab6c06ba2cef9ebffbc7092d90
+          - os: Ubuntu 24.04
+            family: ubuntu
+            type: appimage
+            display: wayland
+            rendering: weston-pixman
+            launch_args: ''
+            image: ubuntu:24.04@sha256:4fbb8e6a8395de5a7550b33509421a2bafbc0aab6c06ba2cef9ebffbc7092d90
+          - os: Fedora 42
+            family: fedora
+            type: rpm
+            display: x11
+            rendering: default
+            launch_args: ''
+            image: fedora:42@sha256:99e203b80b1c3d8f7e161ec10a68fd02b081ef83a3963553e513c82846b97814
+          - os: Arch Linux
+            family: arch
+            type: appimage
+            display: x11
+            rendering: default
+            launch_args: ''
+            image: archlinux:base-20260712.0.555161@sha256:fe6972d4dc1f660c0c10f4c41b2de8986bab89e7e2955378f8beadb8ebcd7433
+    steps:
+      - name: Bootstrap Ubuntu image
+        if: matrix.family == 'ubuntu'
+        run: apt-get update && apt-get install -y --no-install-recommends ca-certificates coreutils git procps xvfb
+      - name: Bootstrap Fedora image
+        if: matrix.family == 'fedora'
+        run: dnf install -y ca-certificates coreutils findutils git procps-ng rpm xorg-x11-server-Xvfb
+      - name: Bootstrap Arch Linux image
+        if: matrix.family == 'arch'
+        run: pacman -Syu --noconfirm --needed ca-certificates coreutils file findutils git procps-ng xorg-server-xvfb xorg-xauth alsa-lib gtk3 nss libxss mesa
+      - name: Install headless Wayland compositor
+        if: matrix.family == 'ubuntu' && matrix.display == 'wayland'
+        run: apt-get install -y --no-install-recommends weston
+      - name: Install Ubuntu AppImage runtime
+        if: matrix.family == 'ubuntu' && matrix.type == 'appimage'
+        run: apt-get install -y --no-install-recommends libasound2t64 libgbm1 libgtk-3-0 libnss3 libxss1
+      - name: Check out release probes
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - name: Download exact candidate bundle
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: release-candidate-${{ inputs.version }}
+          path: release-download
+      - name: Verify downloaded checksums
+        env:
+          VERSION: ${{ inputs.version }}
+        run: scripts/release/verify-downloaded-artifacts.sh release-download "$VERSION"
+      - name: Inspect, install, and launch deb
+        if: matrix.type == 'deb'
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          artifact="release-download/agent-workspace-${VERSION}-x86_64.deb"
+          scripts/release/inspect-artifact.sh deb "$artifact"
+          apt-get install -y "./$artifact"
+          scripts/release/launch-probe.sh "$(command -v agent-workspace)"
+      - name: Inspect and launch AppImage
+        if: matrix.type == 'appimage'
+        env:
+          DISPLAY_SERVER: ${{ matrix.display }}
+          LAUNCH_ARGS: ${{ matrix.launch_args }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          artifact="$(realpath "release-download/agent-workspace-${VERSION}-x86_64.AppImage")"
+          scripts/release/inspect-artifact.sh appimage "$artifact"
+          scratch=$(mktemp -d)
+          cd "$scratch"
+          chmod +x "$artifact"
+          "$artifact" --appimage-extract >/dev/null
+          weston_pid=''
+          wayland_runtime=''
+          cleanup_wayland() {
+            if [[ -n $weston_pid ]]; then
+              kill -TERM "$weston_pid" 2>/dev/null || true
+              for _ in {1..20}; do
+                kill -0 "$weston_pid" 2>/dev/null || break
+                sleep 0.1
+              done
+              kill -KILL "$weston_pid" 2>/dev/null || true
+              wait "$weston_pid" 2>/dev/null || true
+            fi
+            if [[ -n $wayland_runtime ]]; then rm -rf "$wayland_runtime"; fi
+          }
+          trap cleanup_wayland EXIT
+          if [[ $DISPLAY_SERVER == wayland ]]; then
+            wayland_runtime=$(mktemp -d)
+            chmod 700 "$wayland_runtime"
+            export XDG_RUNTIME_DIR="$wayland_runtime"
+            export XDG_SESSION_TYPE=wayland
+            export WAYLAND_DISPLAY=agent-workspace-wayland
+            unset DISPLAY
+            weston --backend=headless --renderer=pixman --shell=kiosk --socket="$WAYLAND_DISPLAY" --idle-time=0 --no-config --log="$wayland_runtime/weston.log" &
+            weston_pid=$!
+            wayland_ready=0
+            for _ in {1..100}; do
+              if [[ -S $wayland_runtime/$WAYLAND_DISPLAY ]]; then wayland_ready=1; break; fi
+              if ! kill -0 "$weston_pid" 2>/dev/null; then break; fi
+              sleep 0.1
+            done
+            if [[ $wayland_ready != 1 ]]; then
+              cat "$wayland_runtime/weston.log" >&2 || true
+              echo 'headless Wayland compositor did not become ready' >&2
+              exit 1
+            fi
+          fi
+          if [[ -n $LAUNCH_ARGS ]]; then
+            "$GITHUB_WORKSPACE/scripts/release/launch-probe.sh" "$scratch/squashfs-root/AppRun" "$LAUNCH_ARGS"
+          else
+            "$GITHUB_WORKSPACE/scripts/release/launch-probe.sh" "$scratch/squashfs-root/AppRun"
+          fi
+      - name: Inspect, install, and launch rpm
+        if: matrix.type == 'rpm'
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          artifact="release-download/agent-workspace-${VERSION}-x86_64.rpm"
+          scripts/release/inspect-artifact.sh rpm "$artifact"
+          dnf install -y "./$artifact"
+          scripts/release/launch-probe.sh "$(command -v agent-workspace)"
+
+  security:
+    name: Release security evidence
+    needs: package
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      checks: write
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - name: Install pnpm
+        uses: pnpm/action-setup@008330803749db0355799c700092d9a85fd074e9 # v6.0.9
+        with:
+          version: 10.34.5
+      - name: Install Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22.20.0
+          cache: pnpm
+      - name: Install dependencies and run JavaScript audit
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm audit --prod --audit-level high
+          mkdir -p security-evidence
+          pnpm licenses list --prod --json > security-evidence/pnpm-licenses.json
+      - name: Audit locked Rust dependencies without ignored advisories
+        uses: rustsec/audit-check@69366f33c96575abad1ee0dba8212993eecbe998 # v2.0.0
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Download exact candidate bundle
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: release-candidate-${{ inputs.version }}
+          path: release-download
+      - name: Verify downloaded checksums
+        env:
+          VERSION: ${{ inputs.version }}
+        run: scripts/release/verify-downloaded-artifacts.sh release-download "$VERSION"
+      - name: Create SPDX JSON SBOM
+        uses: anchore/sbom-action@f8bdd1d8ac5e901a77a92f111440fdb1b593736b # v0.20.6
+        with:
+          path: release-download
+          syft-version: 1.48.0
+          format: spdx-json
+          output-file: security-evidence/agent-workspace-${{ inputs.version }}.spdx.json
+          upload-artifact: false
+          upload-release-assets: false
+      - name: Create CycloneDX JSON SBOM
+        uses: anchore/sbom-action@f8bdd1d8ac5e901a77a92f111440fdb1b593736b # v0.20.6
+        with:
+          path: release-download
+          syft-version: 1.48.0
+          format: cyclonedx-json
+          output-file: security-evidence/agent-workspace-${{ inputs.version }}.cyclonedx.json
+          upload-artifact: false
+          upload-release-assets: false
+      - name: Fail on high or critical artifact vulnerabilities
+        uses: anchore/scan-action@0d444ed77d83ee2ba7f5ced0d90d640a1281d762 # v7.3.0
+        with:
+          path: release-download
+          grype-version: 0.116.0
+          fail-build: true
+          severity-cutoff: high
+          output-format: sarif
+          output-file: security-evidence/grype.sarif
+      - name: Upload release security evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: release-security-${{ inputs.version }}
+          path: security-evidence
+          if-no-files-found: warn
+          retention-days: 90
+
+  draft-release:
+    name: Create explicit draft release
+    if: inputs.create_draft_release == true
+    needs: [package, clean-install, security]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - name: Download candidate bundle
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: release-candidate-${{ inputs.version }}
+          path: release-download
+      - name: Download security evidence
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: release-security-${{ inputs.version }}
+          path: security-evidence
+      - name: Verify and create draft only
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ inputs.version }}
+          PRERELEASE: ${{ needs.package.outputs.prerelease }}
+        run: |
+          cd release-download
+          sha256sum --strict --check SHA256SUMS
+          prerelease_flag=()
+          if [[ "$PRERELEASE" == true ]]; then prerelease_flag+=(--prerelease); fi
+          gh release create "v${VERSION}" \
+            agent-workspace-*-x86_64.AppImage \
+            agent-workspace-*-x86_64.deb \
+            agent-workspace-*-x86_64.rpm \
+            SHA256SUMS \
+            ../security-evidence/*.json \
+            --repo "$GITHUB_REPOSITORY" --draft --verify-tag "${prerelease_flag[@]}" --notes-file release-notes.md --title "Agent Workspace ${VERSION}"

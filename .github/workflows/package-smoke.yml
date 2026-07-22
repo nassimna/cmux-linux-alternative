@@ -1,0 +1,210 @@
+name: Linux package smoke
+
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: '19 3 * * 3'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: package-smoke-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  package:
+    name: Build exact Linux artifacts
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - name: Install pnpm
+        uses: pnpm/action-setup@008330803749db0355799c700092d9a85fd074e9 # v6.0.9
+        with:
+          version: 10.34.5
+      - name: Install Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22.20.0
+          cache: pnpm
+      - name: Install Rust toolchain
+        run: rustup toolchain install 1.96.0 --profile minimal
+      - name: Install dependencies and package
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm package:linux
+      - name: Verify package manifest independently
+        run: scripts/release/verify-downloaded-artifacts.sh release "$(node -p "require('./package.json').version")"
+      - name: Upload immutable package set
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: linux-release-artifacts
+          path: |
+            release/agent-workspace-*-x86_64.AppImage
+            release/agent-workspace-*-x86_64.deb
+            release/agent-workspace-*-x86_64.rpm
+            release/SHA256SUMS
+          if-no-files-found: error
+          retention-days: 14
+
+  ubuntu:
+    name: Clean Ubuntu ${{ matrix.type }} ${{ matrix.display }} ${{ matrix.rendering }} install and launch
+    needs: package
+    runs-on: ubuntu-latest
+    container: ubuntu:24.04@sha256:4fbb8e6a8395de5a7550b33509421a2bafbc0aab6c06ba2cef9ebffbc7092d90
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - type: deb
+            display: x11
+            rendering: default
+            launch_args: ''
+          - type: appimage
+            display: x11
+            rendering: default
+            launch_args: ''
+          - type: appimage
+            display: x11
+            rendering: software
+            launch_args: --disable-gpu
+          - type: appimage
+            display: wayland
+            rendering: weston-pixman
+            launch_args: ''
+    steps:
+      - name: Bootstrap clean image
+        run: apt-get update && apt-get install -y --no-install-recommends ca-certificates coreutils git xvfb procps
+      - name: Install headless Wayland compositor
+        if: matrix.display == 'wayland'
+        run: apt-get install -y --no-install-recommends weston
+      - name: Check out release probes
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - name: Download exact build artifact
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: linux-release-artifacts
+          path: release-download
+      - name: Verify checksums
+        run: |
+          version=$(sed -n 's/.*"version": "\([^"]*\)".*/\1/p' package.json | head -1)
+          scripts/release/verify-downloaded-artifacts.sh release-download "$version"
+      - name: Inspect, install, and launch deb
+        if: matrix.type == 'deb'
+        run: |
+          artifact="release-download/agent-workspace-$(sed -n 's/.*"version": "\([^"]*\)".*/\1/p' package.json | head -1)-x86_64.deb"
+          scripts/release/inspect-artifact.sh deb "$artifact"
+          apt-get install -y "./$artifact"
+          scripts/release/launch-probe.sh "$(command -v agent-workspace)"
+      - name: Inspect and launch extracted AppImage
+        if: matrix.type == 'appimage'
+        env:
+          DISPLAY_SERVER: ${{ matrix.display }}
+          LAUNCH_ARGS: ${{ matrix.launch_args }}
+        run: |
+          apt-get install -y --no-install-recommends libasound2t64 libgbm1 libgtk-3-0 libnss3 libxss1
+          artifact="$(realpath release-download/agent-workspace-*-x86_64.AppImage)"
+          scripts/release/inspect-artifact.sh appimage "$artifact"
+          scratch=$(mktemp -d)
+          cd "$scratch"
+          chmod +x "$artifact"
+          "$artifact" --appimage-extract >/dev/null
+          weston_pid=''
+          wayland_runtime=''
+          cleanup_wayland() {
+            if [[ -n $weston_pid ]]; then
+              kill -TERM "$weston_pid" 2>/dev/null || true
+              for _ in {1..20}; do
+                kill -0 "$weston_pid" 2>/dev/null || break
+                sleep 0.1
+              done
+              kill -KILL "$weston_pid" 2>/dev/null || true
+              wait "$weston_pid" 2>/dev/null || true
+            fi
+            if [[ -n $wayland_runtime ]]; then rm -rf "$wayland_runtime"; fi
+          }
+          trap cleanup_wayland EXIT
+          if [[ $DISPLAY_SERVER == wayland ]]; then
+            wayland_runtime=$(mktemp -d)
+            chmod 700 "$wayland_runtime"
+            export XDG_RUNTIME_DIR="$wayland_runtime"
+            export XDG_SESSION_TYPE=wayland
+            export WAYLAND_DISPLAY=agent-workspace-wayland
+            unset DISPLAY
+            weston --backend=headless --renderer=pixman --shell=kiosk --socket="$WAYLAND_DISPLAY" --idle-time=0 --no-config --log="$wayland_runtime/weston.log" &
+            weston_pid=$!
+            wayland_ready=0
+            for _ in {1..100}; do
+              if [[ -S $wayland_runtime/$WAYLAND_DISPLAY ]]; then wayland_ready=1; break; fi
+              if ! kill -0 "$weston_pid" 2>/dev/null; then break; fi
+              sleep 0.1
+            done
+            if [[ $wayland_ready != 1 ]]; then
+              cat "$wayland_runtime/weston.log" >&2 || true
+              echo 'headless Wayland compositor did not become ready' >&2
+              exit 1
+            fi
+          fi
+          if [[ -n $LAUNCH_ARGS ]]; then
+            "$GITHUB_WORKSPACE/scripts/release/launch-probe.sh" "$scratch/squashfs-root/AppRun" "$LAUNCH_ARGS"
+          else
+            "$GITHUB_WORKSPACE/scripts/release/launch-probe.sh" "$scratch/squashfs-root/AppRun"
+          fi
+
+  fedora:
+    name: Clean Fedora rpm install and launch
+    needs: package
+    runs-on: ubuntu-latest
+    container: fedora:42@sha256:99e203b80b1c3d8f7e161ec10a68fd02b081ef83a3963553e513c82846b97814
+    timeout-minutes: 20
+    steps:
+      - name: Bootstrap clean image
+        run: dnf install -y ca-certificates coreutils findutils git procps-ng rpm xorg-x11-server-Xvfb
+      - name: Check out release probes
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - name: Download exact build artifact
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: linux-release-artifacts
+          path: release-download
+      - name: Verify, inspect, install, and launch rpm
+        run: |
+          version=$(sed -n 's/.*"version": "\([^"]*\)".*/\1/p' package.json | head -1)
+          scripts/release/verify-downloaded-artifacts.sh release-download "$version"
+          artifact="release-download/agent-workspace-${version}-x86_64.rpm"
+          scripts/release/inspect-artifact.sh rpm "$artifact"
+          dnf install -y "./$artifact"
+          scripts/release/launch-probe.sh "$(command -v agent-workspace)"
+
+  arch:
+    name: Clean Arch Linux extracted AppImage X11 install and launch
+    needs: package
+    runs-on: ubuntu-latest
+    container: archlinux:base-20260712.0.555161@sha256:fe6972d4dc1f660c0c10f4c41b2de8986bab89e7e2955378f8beadb8ebcd7433
+    timeout-minutes: 20
+    steps:
+      - name: Bootstrap clean image
+        run: pacman -Syu --noconfirm --needed ca-certificates coreutils file findutils git procps-ng xorg-server-xvfb xorg-xauth alsa-lib gtk3 nss libxss mesa
+      - name: Check out release probes
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - name: Download exact build artifact
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: linux-release-artifacts
+          path: release-download
+      - name: Verify, inspect, extract, and launch AppImage
+        run: |
+          version=$(sed -n 's/.*"version": "\([^"]*\)".*/\1/p' package.json | head -1)
+          scripts/release/verify-downloaded-artifacts.sh release-download "$version"
+          artifact="$(realpath release-download/agent-workspace-${version}-x86_64.AppImage)"
+          scripts/release/inspect-artifact.sh appimage "$artifact"
+          scratch=$(mktemp -d)
+          cd "$scratch"
+          chmod +x "$artifact"
+          "$artifact" --appimage-extract >/dev/null
+          "$GITHUB_WORKSPACE/scripts/release/launch-probe.sh" "$scratch/squashfs-root/AppRun"

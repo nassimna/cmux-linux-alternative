@@ -1,0 +1,111 @@
+{
+  "cases": [
+    {
+      "name": "none with omitted optional targets",
+      "valid": true,
+      "value": {
+        "workspaceId": "10000000-0000-4000-8000-000000000001",
+        "revision": 0,
+        "state": "none",
+        "reason": "none",
+        "unreadCount": 0
+      }
+    },
+    {
+      "name": "targeted notification",
+      "valid": true,
+      "value": {
+        "workspaceId": "10000000-0000-4000-8000-000000000001",
+        "revision": 4,
+        "state": "urgent",
+        "reason": "notificationError",
+        "unreadCount": 1,
+        "notificationId": "20000000-0000-4000-8000-000000000002",
+        "paneId": "30000000-0000-4000-8000-000000000003",
+        "tabId": "40000000-0000-4000-8000-000000000004"
+      }
+    },
+    {
+      "name": "explicit null optional identity",
+      "valid": false,
+      "value": {
+        "workspaceId": "10000000-0000-4000-8000-000000000001",
+        "revision": 4,
+        "state": "urgent",
+        "reason": "notificationError",
+        "unreadCount": 1,
+        "notificationId": null
+      }
+    },
+    {
+      "name": "mismatched state and reason",
+      "valid": false,
+      "value": {
+        "workspaceId": "10000000-0000-4000-8000-000000000001",
+        "revision": 4,
+        "state": "waiting",
+        "reason": "agentFailed",
+        "unreadCount": 0
+      }
+    },
+    {
+      "name": "tab without pane",
+      "valid": false,
+      "value": {
+        "workspaceId": "10000000-0000-4000-8000-000000000001",
+        "revision": 4,
+        "state": "informational",
+        "reason": "notificationInfo",
+        "unreadCount": 1,
+        "notificationId": "20000000-0000-4000-8000-000000000002",
+        "tabId": "40000000-0000-4000-8000-000000000004"
+      }
+    },
+    {
+      "name": "agent reason with notification target",
+      "valid": false,
+      "value": {
+        "workspaceId": "10000000-0000-4000-8000-000000000001",
+        "revision": 4,
+        "state": "completed",
+        "reason": "agentCompleted",
+        "unreadCount": 0,
+        "paneId": "30000000-0000-4000-8000-000000000003"
+      }
+    },
+    {
+      "name": "none state with unread notification count",
+      "valid": false,
+      "value": {
+        "workspaceId": "10000000-0000-4000-8000-000000000001",
+        "revision": 4,
+        "state": "none",
+        "reason": "none",
+        "unreadCount": 1
+      }
+    },
+    {
+      "name": "notification reason without unread notification",
+      "valid": false,
+      "value": {
+        "workspaceId": "10000000-0000-4000-8000-000000000001",
+        "revision": 4,
+        "state": "informational",
+        "reason": "notificationInfo",
+        "unreadCount": 0,
+        "notificationId": "20000000-0000-4000-8000-000000000002"
+      }
+    },
+    {
+      "name": "running agent cannot hide unread notification",
+      "valid": false,
+      "value": {
+        "workspaceId": "10000000-0000-4000-8000-000000000001",
+        "revision": 4,
+        "state": "informational",
+        "reason": "agentRunning",
+        "unreadCount": 1
+      }
+    }
+  ]
+}

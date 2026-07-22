@@ -1,0 +1,173 @@
+:root,
+[data-theme='dark'] {
+  color-scheme: dark;
+
+  /* Basalt: neutral graphite surfaces, restrained blue accent. */
+  --aw-color-surface-canvas: #1e2023;
+  --aw-color-surface-sidebar: #1a1c1f;
+  --aw-color-surface-raised: #232529;
+  --aw-color-surface-overlay: #26282c;
+  --aw-color-surface-interactive: #24262a;
+  --aw-color-surface-interactive-hover: #2c2f34;
+  --aw-color-surface-interactive-active: #33363b;
+
+  --aw-color-text-primary: #e6e7e9;
+  --aw-color-text-secondary: #a2a6ad;
+  --aw-color-text-muted: #94989f;
+  --aw-color-text-on-accent: #ffffff;
+
+  --aw-color-border-default: #2b2d31;
+  --aw-color-border-strong: #35383d;
+  --aw-color-accent: #4c8dff;
+  --aw-color-accent-hover: #7fb0ff;
+  --aw-color-accent-subtle: #232b39;
+  --aw-color-focus: #7fb0ff;
+  --aw-color-selection: #274165;
+  --aw-color-attention: #e5a53a;
+  --aw-color-success: #56b374;
+  --aw-color-warning: #d8a03d;
+  --aw-color-destructive: #e06c5f;
+  --aw-color-destructive-hover: #ea8578;
+  --aw-color-info: #7fb0ff;
+  --aw-color-terminal-canvas: #17181b;
+  --aw-color-browser-content: #fff;
+
+  --aw-font-ui: system-ui, 'Segoe UI', 'Cantarell', 'Ubuntu', sans-serif;
+  --aw-font-mono: 'JetBrains Mono Variable', 'JetBrains Mono', ui-monospace, monospace;
+  --aw-font-size-2xs: 9px;
+  --aw-font-size-2xs-plus: 9.5px;
+  --aw-font-size-xs: 10px;
+  --aw-font-size-xs-plus: 10.5px;
+  --aw-font-size-metadata: 0.6875rem;
+  --aw-font-size-label: 11px;
+  --aw-font-size-label-emphasis: 11.5px;
+  --aw-font-size-small: 0.75rem;
+  --aw-font-size-control: 12px;
+  --aw-font-size-ui: 0.8125rem;
+  --aw-font-size-input: 13px;
+  --aw-font-size-body: 0.875rem;
+  --aw-font-size-heading: 18px;
+  --aw-font-size-display: 20px;
+  --aw-line-height-solid: 1;
+  --aw-line-height-tight: 1.2;
+  --aw-line-height-ui: 1.35;
+  --aw-line-height-relaxed: 1.4;
+  --aw-line-height-notification: 1.45;
+  --aw-line-height-prose: 1.5;
+  --aw-line-height-loose: 1.6;
+  --aw-font-weight-normal: 400;
+  --aw-font-weight-ui: 450;
+  --aw-font-weight-medium: 520;
+  --aw-font-weight-emphasis: 560;
+  --aw-font-weight-strong: 580;
+  --aw-font-weight-heading: 600;
+  --aw-font-weight-semibold: 620;
+  --aw-font-weight-bold: 650;
+  --aw-font-weight-heavy: 700;
+
+  --aw-space-unit: 0.25rem;
+  --aw-border-width: 1px;
+  --aw-border-width-strong: 2px;
+  --aw-border-width-attention: 3px;
+  --aw-focus-ring-width: 2px;
+  --aw-focus-ring-offset: 2px;
+  /* Basalt: sharp large surfaces, 3-4px only on small controls. */
+  --aw-radius-xs: 0.1875rem;
+  --aw-radius-sm: 0.1875rem;
+  --aw-radius-md: 0.25rem;
+  --aw-radius-card: 0;
+  --aw-radius-lg: 0;
+  --aw-radius-full: 9999px;
+
+  --aw-size-hit-target: 1.5rem;
+  --aw-size-control-sm: 1.75rem;
+  --aw-size-control-md: 2rem;
+  --aw-size-titlebar: 2rem;
+  --aw-size-toolbar: 1.875rem;
+  --aw-size-tabstrip: 1.875rem;
+  --aw-size-sidebar: 14.5rem;
+
+  --aw-shadow-popup: 0 14px 38px rgb(0 0 0 / 46%);
+  --aw-shadow-dialog: 0 22px 70px rgb(0 0 0 / 58%);
+  --aw-shadow-focus: 0 0 0 2px var(--aw-color-surface-canvas), 0 0 0 4px var(--aw-color-focus);
+  --aw-shadow-focus-subtle: 0 0 0 1px color-mix(in oklch, var(--aw-color-focus) 30%, transparent);
+  --aw-shadow-focus-control: 0 0 0 2px color-mix(in oklch, var(--aw-color-focus) 18%, transparent);
+  --aw-shadow-focus-inset: inset 0 0 0 2px var(--aw-color-focus);
+  --aw-shadow-selected-row: inset 0 1px
+    color-mix(in oklch, var(--aw-color-browser-content) 3%, transparent);
+  --aw-shadow-selected-tab: inset 0 -2px var(--aw-color-accent);
+  --aw-shadow-status-dot: 0 0 0 4px color-mix(in oklch, var(--aw-color-success) 8%, transparent);
+
+  --aw-duration-instant: 80ms;
+  --aw-duration-interaction: 100ms;
+  --aw-duration-fast: 140ms;
+  --aw-duration-standard: 200ms;
+  --aw-duration-spinner: 900ms;
+  --aw-duration-reduced: 0.01ms;
+  --aw-easing-default: ease;
+  --aw-easing-linear: linear;
+  --aw-easing-standard: cubic-bezier(0.2, 0, 0, 1);
+  --aw-easing-exit: cubic-bezier(0.4, 0, 1, 1);
+
+  --aw-z-base: 0;
+  --aw-z-content: 1;
+  --aw-z-resizer: 2;
+  --aw-z-sticky: 10;
+  --aw-z-floating: 20;
+  --aw-z-dropdown: 40;
+  --aw-z-dialog: 50;
+  --aw-z-tooltip: 60;
+  --aw-z-toast: 70;
+}
+
+[data-theme='light'] {
+  color-scheme: light;
+
+  --aw-color-surface-canvas: #f4f6f9;
+  --aw-color-surface-sidebar: #eef1f5;
+  --aw-color-surface-raised: #fafbfc;
+  --aw-color-surface-overlay: #ffffff;
+  --aw-color-surface-interactive: #e9edf3;
+  --aw-color-surface-interactive-hover: #dfe5ed;
+  --aw-color-surface-interactive-active: #d4dce7;
+  --aw-color-text-primary: #18202b;
+  --aw-color-text-secondary: #4b5869;
+  --aw-color-text-muted: #59677c;
+  --aw-color-text-on-accent: #ffffff;
+  --aw-color-border-default: #d2d9e3;
+  --aw-color-border-strong: #aeb9c8;
+  --aw-color-accent: #5967d8;
+  --aw-color-accent-hover: #4b58c8;
+  --aw-color-accent-subtle: #e5e8fb;
+  --aw-color-focus: #5260cf;
+  --aw-color-selection: #d8dcfb;
+  --aw-color-attention: #a26316;
+  --aw-color-success: #238761;
+  --aw-color-warning: #a26316;
+  --aw-color-destructive: #c33a50;
+  --aw-color-destructive-hover: #ab2d42;
+  --aw-color-info: #236da1;
+  --aw-color-terminal-canvas: #0b0e12;
+  --aw-color-browser-content: #fff;
+  --aw-shadow-selected-row: inset 0 1px
+    color-mix(in oklch, var(--aw-color-browser-content) 60%, transparent);
+  --aw-shadow-popup: 0 14px 38px rgb(35 45 60 / 18%);
+  --aw-shadow-dialog: 0 22px 70px rgb(35 45 60 / 24%);
+}
+
+:root[data-density='compact'] {
+  --aw-font-size-ui: 0.75rem;
+  --aw-size-control-sm: 1.5rem;
+  --aw-size-control-md: 1.75rem;
+  --aw-size-titlebar: 1.75rem;
+  --aw-size-toolbar: 1.75rem;
+  --aw-size-tabstrip: 1.75rem;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --aw-duration-instant: 0ms;
+    --aw-duration-fast: 0ms;
+    --aw-duration-standard: 0ms;
+  }
+}

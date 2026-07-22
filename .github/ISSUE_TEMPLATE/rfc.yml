@@ -1,0 +1,83 @@
+name: Architecture or protocol RFC
+description: Propose a durable change to architecture, protocol, persistence, or security boundaries
+title: 'RFC: '
+labels:
+  - rfc
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this template for changes that alter durable boundaries or public contracts. Keep the proposal independent of the temporary project name. Search existing issues and architecture decisions before filing.
+  - type: input
+    id: summary
+    attributes:
+      label: Summary
+      description: State the proposed decision in one or two sentences.
+      placeholder: The project should...
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: Context and problem
+      description: Describe the user or engineering problem, current behavior, and why it needs a durable decision.
+      placeholder: Include concrete scenarios and constraints.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed design
+      description: Explain process ownership, data flow, APIs or wire changes, and lifecycle behavior as applicable.
+      placeholder: Include example envelopes or diagrams when they clarify the contract.
+    validations:
+      required: true
+  - type: textarea
+    id: compatibility
+    attributes:
+      label: Compatibility and migration
+      description: Cover protocol versions, persisted data, rollout order, downgrade behavior, and cross-platform effects.
+      placeholder: State "None" only when the proposal changes no existing contract or data.
+    validations:
+      required: true
+  - type: textarea
+    id: security
+    attributes:
+      label: Security and privacy impact
+      description: Identify new trust boundaries, untrusted inputs, capabilities, secrets, resource bounds, and abuse cases.
+      placeholder: Describe mitigations and remaining risks.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: List credible alternatives, including keeping the current design, and explain the tradeoffs.
+    validations:
+      required: true
+  - type: textarea
+    id: validation
+    attributes:
+      label: Validation and acceptance criteria
+      description: Provide measurable tests or evidence that would establish correctness, reliability, and performance.
+      placeholder: Include failure-path and platform-specific checks where relevant.
+    validations:
+      required: true
+  - type: textarea
+    id: unresolved
+    attributes:
+      label: Unresolved questions
+      description: Record decisions that reviewers still need to make; write "None" if the proposal is fully specified.
+    validations:
+      required: true
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: Submission checklist
+      options:
+        - label: I searched for related issues and architecture decision records.
+          required: true
+        - label: I identified documentation, generated bindings, and tests that the change would require.
+          required: true
+        - label: I did not rely on the temporary project slug as a permanent public contract.
+          required: true

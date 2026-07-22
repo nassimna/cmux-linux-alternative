@@ -1,0 +1,20 @@
+[package]
+name = "agent-workspace-agent-session-runtime"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+agent-workspace-agent-adapter.workspace = true
+agent-workspace-storage.workspace = true
+thiserror.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+agent-workspace-core.workspace = true
+rusqlite.workspace = true
+tempfile.workspace = true
+
+[lints]
+workspace = true

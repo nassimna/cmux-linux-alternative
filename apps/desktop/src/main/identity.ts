@@ -1,0 +1,8 @@
+export const APPLICATION_ID = 'agent-workspace'
+export const PRODUCT_NAME = 'Agent Workspace'
+export const SERVICE_BINARY_NAME = 'agent-workspace-service'
+export const CLI_BINARY_NAME = 'agent-workspace-cli'
+export const CLI_SESSION_FILE_NAME = 'cli-session.json'
+export const CLI_SESSION_FILE_ENVIRONMENT_VARIABLE = 'AGENT_WORKSPACE_SESSION_FILE'
+export const SOCKET_ENVIRONMENT_VARIABLE = 'AGENT_WORKSPACE_SOCKET'
+export const SERVICE_PATH_ENVIRONMENT_VARIABLE = 'AGENT_WORKSPACE_SERVICE_PATH'

@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:agent-workspace:schema:performance-baseline:v1",
+  "title": "Agent Workspace approved performance baseline",
+  "description": "Schema only. Maintainers create an approved baseline from capture output; no benchmark values are fabricated here.",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "suite",
+    "mode",
+    "fullSoak",
+    "startedAt",
+    "completedAt",
+    "environment",
+    "metrics",
+    "scenarios"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "suite": { "const": "agent-workspace-performance" },
+    "mode": { "enum": ["smoke", "soak"] },
+    "fullSoak": { "type": "boolean" },
+    "startedAt": { "type": "string", "format": "date-time" },
+    "completedAt": { "type": "string", "format": "date-time" },
+    "environment": { "type": "object" },
+    "metrics": { "type": "array" },
+    "scenarios": { "type": "array", "items": { "type": "string" } }
+  }
+}

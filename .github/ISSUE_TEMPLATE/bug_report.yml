@@ -1,0 +1,38 @@
+name: Bug report
+description: Report a reproducible defect
+labels: [needs reproduction]
+body:
+  - type: markdown
+    attributes:
+      value: Do not report security vulnerabilities here. Follow SECURITY.md instead.
+  - type: textarea
+    id: summary
+    attributes:
+      label: What happened?
+      description: Explain the expected and actual behavior.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Reproduction steps
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version or commit
+    validations:
+      required: true
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      options: [Linux, macOS, Windows]
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment details and logs
+      description: Remove tokens, secrets, and private paths before posting.

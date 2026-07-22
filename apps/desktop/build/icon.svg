@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title description">
+  <title id="title">Agent Workspace application icon</title>
+  <desc id="description">Three connected workspace panes surrounding a central agent node.</desc>
+  <defs>
+    <linearGradient id="background" x1="72" y1="56" x2="440" y2="456" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#18223f"/>
+      <stop offset="1" stop-color="#090e1d"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="130" y1="132" x2="386" y2="380" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#56d6ff"/>
+      <stop offset="1" stop-color="#8b7bff"/>
+    </linearGradient>
+  </defs>
+  <rect x="24" y="24" width="464" height="464" rx="112" fill="url(#background)"/>
+  <path d="M137 151h238a25 25 0 0 1 25 25v68H112v-68a25 25 0 0 1 25-25Z" fill="#26345b" stroke="url(#accent)" stroke-width="18"/>
+  <path d="M112 244h137v117H137a25 25 0 0 1-25-25v-92Z" fill="#172642" stroke="url(#accent)" stroke-width="18"/>
+  <path d="M249 244h151v92a25 25 0 0 1-25 25H249V244Z" fill="#20284f" stroke="url(#accent)" stroke-width="18"/>
+  <circle cx="256" cy="256" r="55" fill="#0b1227" stroke="#f8bd57" stroke-width="18"/>
+  <path d="m256 225 12 19 22 6-14 17 1 23-21-9-21 9 1-23-14-17 22-6 12-19Z" fill="#f8bd57"/>
+</svg>

@@ -1,0 +1,1481 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Agent Workspace — UI design variants</title>
+    <style>
+      /* ============================================================
+     Artifact chrome (not part of the app design)
+     ============================================================ */
+      * {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+      html,
+      body {
+        height: 100%;
+      }
+      body {
+        background: #101113;
+        color: #d6d8dc;
+        font:
+          14px/1.45 system-ui,
+          'Segoe UI',
+          'Cantarell',
+          'Ubuntu',
+          sans-serif;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        padding: 24px 16px 48px;
+        gap: 12px;
+      }
+      .switcher {
+        display: flex;
+        gap: 6px;
+        align-items: center;
+        background: #1a1c1f;
+        border: 1px solid #2a2d31;
+        border-radius: 8px;
+        padding: 4px;
+      }
+      .switcher button {
+        font: inherit;
+        font-size: 13px;
+        color: #85888f;
+        background: none;
+        border: 0;
+        border-radius: 5px;
+        padding: 5px 14px;
+        cursor: pointer;
+      }
+      .switcher button:hover {
+        color: #d6d8dc;
+      }
+      .switcher button.active {
+        background: #2c2f34;
+        color: #fff;
+      }
+      .switcher button kbd {
+        font:
+          11px ui-monospace,
+          monospace;
+        color: #6b6e75;
+        margin-left: 6px;
+      }
+      .switcher .sep {
+        width: 1px;
+        height: 18px;
+        background: #2a2d31;
+        margin: 0 2px;
+      }
+      .variant-note {
+        max-width: 860px;
+        height: 42px;
+        text-align: center;
+        font-size: 13px;
+        line-height: 1.6;
+        color: #85888f;
+      }
+      .variant-note strong {
+        color: #d6d8dc;
+        font-weight: 600;
+      }
+      .hint {
+        font-size: 12px;
+        color: #5c5f66;
+      }
+
+      .stage {
+        display: flex;
+        gap: 14px;
+        align-items: flex-start;
+      }
+
+      /* ============================================================
+     Specs panel — reads live token + measured values
+     ============================================================ */
+      .specs {
+        width: 288px;
+        max-height: 760px;
+        overflow-y: auto;
+        background: #1a1c1f;
+        border: 1px solid #2a2d31;
+        border-radius: 8px;
+        padding: 14px 16px;
+        display: none;
+      }
+      .specs.open {
+        display: block;
+      }
+      .specs h3 {
+        font-size: 11px;
+        font-weight: 600;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: #6b6e75;
+        margin: 14px 0 6px;
+      }
+      .specs h3:first-child {
+        margin-top: 0;
+      }
+      .spec-row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 2px 0;
+        font:
+          11px/16px ui-monospace,
+          'JetBrains Mono',
+          monospace;
+      }
+      .spec-row .sw {
+        width: 14px;
+        height: 14px;
+        flex: none;
+        border-radius: 3px;
+        border: 1px solid rgba(255, 255, 255, 0.12);
+      }
+      .spec-row .k {
+        flex: 1;
+        color: #85888f;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .spec-row .v {
+        color: #d6d8dc;
+        white-space: nowrap;
+      }
+
+      /* ============================================================
+     Shared window structure — themed via variables on .window
+     All regions consume the --w-h-* / --w-sidebar-w metrics below
+     so every variant's dimensions are explicit and measurable.
+     ============================================================ */
+      .window {
+        /* structural metrics (Onyx overrides these) */
+        --w-h-titlebar: 36px;
+        --w-h-tabs: 34px;
+        --w-h-tab: 28px;
+        --w-h-panehead: 24px;
+        --w-h-status: 24px;
+        --w-sidebar-w: 248px;
+
+        width: 1240px; /* fixed — the mockup never reflows; narrow viewports scroll */
+        flex: none;
+        height: 760px;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+        position: relative;
+        border-radius: 10px;
+        border: 1px solid var(--w-window-border);
+        background: var(--w-canvas);
+        color: var(--w-text);
+        box-shadow: 0 24px 60px -20px rgba(0, 0, 0, 0.55);
+        font-size: 13px;
+        line-height: 20px;
+        user-select: none;
+      }
+
+      /* --- Title bar: [mark · name · menus] [title] [controls] --- */
+      .titlebar {
+        height: var(--w-h-titlebar);
+        flex: none;
+        display: flex;
+        align-items: center;
+        padding: 0 8px 0 12px;
+        background: var(--w-titlebar);
+        border-bottom: 1px solid var(--w-border);
+        gap: 8px;
+      }
+      .app-mark {
+        width: 16px;
+        height: 16px;
+        border-radius: 4px;
+        background: var(--w-accent);
+        position: relative;
+        flex: none;
+      }
+      .app-mark::after {
+        content: '';
+        position: absolute;
+        inset: 4px;
+        border-left: 2px solid var(--w-accent-contrast);
+        border-bottom: 2px solid var(--w-accent-contrast);
+      }
+      .menus {
+        display: flex;
+        gap: 2px;
+      }
+      .menus button {
+        border: 0;
+        background: none;
+        font: 12px/16px inherit;
+        font-family: inherit;
+        color: var(--w-text-dim);
+        padding: 2px 8px;
+        border-radius: 4px;
+        cursor: pointer;
+      }
+      .menus button:hover {
+        background: var(--w-hover);
+        color: var(--w-text);
+      }
+      .titlebar .win-title {
+        flex: 1;
+        text-align: center;
+        font-size: 12px;
+        color: var(--w-text-dim);
+        overflow: hidden;
+        white-space: nowrap;
+        text-overflow: ellipsis;
+      }
+      .win-controls {
+        display: flex;
+        gap: 2px;
+      }
+      .win-controls button {
+        width: 34px;
+        height: 26px;
+        border: 0;
+        background: none;
+        color: var(--w-text-dim);
+        border-radius: 5px;
+        font-size: 12px;
+        cursor: pointer;
+        display: grid;
+        place-items: center;
+      }
+      .win-controls button:hover {
+        background: var(--w-hover);
+        color: var(--w-text);
+      }
+      .win-controls button.close:hover {
+        background: #c0392b;
+        color: #fff;
+      }
+
+      /* --- Body layout --- */
+      .body {
+        flex: 1;
+        display: flex;
+        min-height: 0;
+      }
+
+      /* --- Sidebar --- */
+      .sidebar {
+        width: var(--w-sidebar-w);
+        flex: none;
+        display: flex;
+        flex-direction: column;
+        background: var(--w-sidebar);
+        border-right: 1px solid var(--w-border);
+        min-height: 0;
+      }
+      .sidebar-head {
+        height: 36px;
+        flex: none;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 0 8px 0 16px;
+      }
+      .sidebar-head h2 {
+        font-size: 11px;
+        line-height: 16px;
+        font-weight: 600;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--w-text-faint);
+      }
+      .icon-btn {
+        width: 24px;
+        height: 24px;
+        border: 0;
+        border-radius: 5px;
+        background: none;
+        color: var(--w-text-dim);
+        font-size: 15px;
+        line-height: 1;
+        cursor: pointer;
+        display: grid;
+        place-items: center;
+      }
+      .icon-btn:hover {
+        background: var(--w-hover);
+        color: var(--w-text);
+      }
+
+      .ws-list {
+        flex: 1;
+        overflow: hidden;
+        padding: 0 8px;
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+      }
+      .ws {
+        border-radius: var(--w-radius-sm);
+        padding: 8px;
+        cursor: pointer;
+        border: 1px solid transparent;
+      }
+      .ws:hover {
+        background: var(--w-hover);
+      }
+      .ws.active {
+        background: var(--w-selected);
+        border-color: var(--w-selected-border);
+      }
+      .ws-title {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-weight: 600;
+        font-size: 12.5px;
+        line-height: 18px;
+      }
+      .ws-title .dot {
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        flex: none;
+        background: var(--w-ok);
+      }
+      .ws-title .dot.idle {
+        background: var(--w-text-faint);
+      }
+      .ws-title .badge {
+        margin-left: auto;
+        min-width: 16px;
+        height: 16px;
+        padding: 0 5px;
+        border-radius: 8px;
+        background: var(--w-attention);
+        color: var(--w-attention-contrast);
+        font-size: 10px;
+        font-weight: 700;
+        display: grid;
+        place-items: center;
+      }
+      .ws-meta {
+        margin-top: 2px;
+        padding-left: 15px; /* aligns text with title (dot 7 + gap 8) */
+        display: flex;
+        flex-direction: column;
+        font-size: 11px;
+        line-height: 16px;
+        color: var(--w-text-dim);
+      }
+      .ws-meta .row {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        overflow: hidden;
+      }
+      .ws-meta .row span {
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .ws-meta svg {
+        flex: none;
+        width: 11px;
+        height: 11px;
+        stroke: var(--w-text-faint);
+      }
+      .chips {
+        display: flex;
+        gap: 4px;
+        margin-top: 4px;
+        padding-left: 15px;
+        flex-wrap: wrap;
+      }
+      .chip {
+        height: 18px;
+        display: inline-flex;
+        align-items: center;
+        font:
+          10.5px/16px ui-monospace,
+          'JetBrains Mono',
+          monospace;
+        color: var(--w-text-dim);
+        background: var(--w-chip);
+        border: 1px solid var(--w-chip-border);
+        border-radius: 4px;
+        padding: 0 5px;
+      }
+      .chip.port {
+        color: var(--w-accent-text);
+      }
+
+      .sidebar-foot {
+        flex: none;
+        height: 36px;
+        border-top: 1px solid var(--w-border);
+        padding: 0 12px 0 16px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 11px;
+        color: var(--w-text-dim);
+      }
+      .sidebar-foot .spacer {
+        flex: 1;
+      }
+
+      /* --- Main column --- */
+      .main {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        min-width: 0;
+        background: var(--w-canvas);
+      }
+
+      /* --- Tab strip --- */
+      .tabs {
+        height: var(--w-h-tabs);
+        flex: none;
+        display: flex;
+        align-items: flex-end;
+        gap: 2px;
+        padding: 0 8px;
+        background: var(--w-tabbar);
+        border-bottom: 1px solid var(--w-border);
+      }
+      .tab {
+        height: var(--w-h-tab);
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 0 12px;
+        font-size: 12px;
+        color: var(--w-text-dim);
+        border: 0;
+        background: none;
+        cursor: pointer;
+        border-radius: 6px 6px 0 0;
+        position: relative;
+      }
+      .tab:hover {
+        color: var(--w-text);
+        background: var(--w-hover);
+      }
+      .tab.active {
+        color: var(--w-text);
+        background: var(--w-tab-active);
+      }
+      .tab.active::after {
+        content: '';
+        position: absolute;
+        left: 8px;
+        right: 8px;
+        bottom: 0;
+        height: 2px;
+        border-radius: 2px 2px 0 0;
+        background: var(--w-accent);
+      }
+      .tab .x {
+        color: var(--w-text-faint);
+        font-size: 11px;
+      }
+      .tab .x:hover {
+        color: var(--w-text);
+      }
+      .tab-new {
+        margin-bottom: 4px;
+      }
+      .tabs .drag-fill {
+        flex: 1;
+      }
+
+      /* --- Pane area --- */
+      .panes {
+        flex: 1;
+        min-height: 0;
+        display: flex;
+        gap: var(--w-pane-gap);
+        padding: var(--w-pane-pad);
+        background: var(--w-pane-bg);
+      }
+      .pane-col {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        gap: var(--w-pane-gap);
+        min-width: 0;
+      }
+      .pane {
+        flex: 1;
+        min-height: 0;
+        display: flex;
+        flex-direction: column;
+        position: relative;
+        background: var(--w-term-bg);
+        border: 1px solid var(--w-pane-border);
+        border-radius: var(--w-radius);
+        overflow: hidden;
+      }
+      .pane.focused {
+        border-color: var(--w-pane-focus);
+      }
+      .pane-head {
+        height: var(--w-h-panehead);
+        flex: none;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 0 6px 0 12px;
+        font-size: 11px;
+        line-height: 16px;
+        color: var(--w-text-dim);
+        background: var(--w-pane-head);
+        border-bottom: 1px solid var(--w-pane-border);
+      }
+      .pane-head .p-title {
+        font-weight: 600;
+        color: var(--w-text);
+      }
+      .pane-head .p-path {
+        color: var(--w-text-faint);
+        overflow: hidden;
+        white-space: nowrap;
+        text-overflow: ellipsis;
+      }
+      .pane-head .p-actions {
+        margin-left: auto;
+        display: flex;
+        gap: 2px;
+      }
+      .pane-head .p-actions button {
+        border: 0;
+        background: none;
+        color: var(--w-text-faint);
+        width: 20px;
+        height: 20px;
+        border-radius: 4px;
+        cursor: pointer;
+        font-size: 11px;
+      }
+      .pane-head .p-actions button:hover {
+        background: var(--w-hover);
+        color: var(--w-text);
+      }
+
+      .term {
+        flex: 1;
+        min-height: 0;
+        overflow: hidden;
+        padding: 10px 12px;
+        font:
+          12px/18px ui-monospace,
+          'JetBrains Mono',
+          'Fira Code',
+          'Cascadia Mono',
+          monospace;
+        color: var(--w-term-fg);
+        white-space: pre;
+      }
+      .term .dim {
+        color: var(--w-term-dim);
+      }
+      .term .ok {
+        color: var(--w-ok);
+      }
+      .term .warn {
+        color: var(--w-warn);
+      }
+      .term .err {
+        color: var(--w-err);
+      }
+      .term .acc {
+        color: var(--w-accent-text);
+      }
+      .term .prompt {
+        color: var(--w-ok);
+        font-weight: 600;
+      }
+      .term .path {
+        color: var(--w-accent-text);
+        font-weight: 600;
+      }
+      .cursor {
+        display: inline-block;
+        width: 7px;
+        height: 14px;
+        background: var(--w-term-fg);
+        vertical-align: -2px;
+        animation: blink 1.1s steps(1) infinite;
+      }
+      @keyframes blink {
+        50% {
+          opacity: 0;
+        }
+      }
+
+      /* overlay scrollbar — shown on the pane with scrollback */
+      .scrollbar {
+        position: absolute;
+        top: calc(var(--w-h-panehead) + 5px);
+        right: 3px;
+        bottom: 8px;
+        width: 5px;
+        pointer-events: none;
+      }
+      .scrollbar .thumb {
+        position: absolute;
+        right: 0;
+        width: 5px;
+        height: 34%;
+        bottom: 4%;
+        border-radius: 3px;
+        background: var(--w-scroll);
+      }
+
+      /* --- Status bar --- */
+      .statusbar {
+        height: var(--w-h-status);
+        flex: none;
+        display: flex;
+        align-items: center;
+        gap: 14px;
+        padding: 0 12px;
+        font-size: 11px;
+        line-height: 16px;
+        color: var(--w-text-dim);
+        background: var(--w-statusbar);
+        border-top: 1px solid var(--w-border);
+      }
+      .statusbar .seg {
+        display: flex;
+        align-items: center;
+        gap: 5px;
+        white-space: nowrap;
+      }
+      .statusbar svg {
+        width: 11px;
+        height: 11px;
+        stroke: currentColor;
+      }
+      .statusbar .spacer {
+        flex: 1;
+      }
+      .statusbar .update {
+        color: var(--w-accent-text);
+      }
+
+      /* --- Command palette overlay --- */
+      .palette-scrim {
+        position: absolute;
+        inset: var(--w-h-titlebar) 0 0 0;
+        background: var(--w-scrim);
+        display: none;
+        justify-content: center;
+        align-items: flex-start;
+        padding-top: 64px;
+      }
+      .window.show-palette .palette-scrim {
+        display: flex;
+      }
+      .palette {
+        width: 560px;
+        background: var(--w-panel);
+        border: 1px solid var(--w-panel-border);
+        border-radius: var(--w-radius);
+        box-shadow: 0 16px 48px -12px rgba(0, 0, 0, 0.6);
+        overflow: hidden;
+      }
+      .palette input {
+        width: 100%;
+        height: 44px;
+        border: 0;
+        outline: 0;
+        background: none;
+        color: var(--w-text);
+        font: 13px/20px inherit;
+        font-family: inherit;
+        padding: 0 14px;
+        border-bottom: 1px solid var(--w-border);
+      }
+      .palette input::placeholder {
+        color: var(--w-text-faint);
+      }
+      .palette .results {
+        padding: 4px;
+      }
+      .palette .result {
+        height: 32px;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 0 10px;
+        border-radius: var(--w-radius-sm);
+        font-size: 12.5px;
+        color: var(--w-text);
+      }
+      .palette .result .cat {
+        color: var(--w-text-faint);
+        font-size: 11px;
+      }
+      .palette .result.sel {
+        background: var(--w-selected);
+      }
+      .palette .result .keys {
+        margin-left: auto;
+        display: flex;
+        gap: 3px;
+      }
+      .palette kbd,
+      .sidebar-foot kbd {
+        font:
+          10.5px/14px ui-monospace,
+          monospace;
+        color: var(--w-text-dim);
+        background: var(--w-chip);
+        border: 1px solid var(--w-chip-border);
+        border-bottom-width: 2px;
+        border-radius: 4px;
+        padding: 0 5px;
+      }
+
+      /* ============================================================
+     Variant 1 — Graphite: neutral dark, hairline dividers, calm
+     ============================================================ */
+      .v-graphite {
+        --w-canvas: #1e2023;
+        --w-titlebar: #232529;
+        --w-sidebar: #1a1c1f;
+        --w-tabbar: #1e2023;
+        --w-tab-active: #26282c;
+        --w-statusbar: #1a1c1f;
+        --w-panel: #232529;
+        --w-panel-border: #33363b;
+        --w-border: #2b2d31;
+        --w-window-border: #35383d;
+        --w-hover: rgba(255, 255, 255, 0.05);
+        --w-selected: rgba(255, 255, 255, 0.07);
+        --w-selected-border: rgba(255, 255, 255, 0.06);
+        --w-scrim: rgba(10, 10, 12, 0.45);
+        --w-text: #e6e7e9;
+        --w-text-dim: #a2a6ad;
+        --w-text-faint: #6c7077;
+        --w-accent: #4c8dff;
+        --w-accent-text: #7fb0ff;
+        --w-accent-contrast: #ffffff;
+        --w-attention: #e5a53a;
+        --w-attention-contrast: #1a1400;
+        --w-ok: #56b374;
+        --w-warn: #d8a03d;
+        --w-err: #e06c5f;
+        --w-chip: rgba(255, 255, 255, 0.04);
+        --w-chip-border: rgba(255, 255, 255, 0.08);
+        --w-scroll: rgba(255, 255, 255, 0.16);
+        --w-term-bg: #17181b;
+        --w-term-fg: #d4d6d9;
+        --w-term-dim: #71757c;
+        --w-pane-bg: #2b2d31;
+        --w-pane-border: #2b2d31;
+        --w-pane-focus: rgba(76, 141, 255, 0.55);
+        --w-pane-head: #1b1d20;
+        --w-pane-gap: 1px;
+        --w-pane-pad: 0px;
+        --w-radius: 0px;
+        --w-radius-sm: 5px;
+      }
+
+      /* ============================================================
+     Variant 2 — Porcelain: quiet light theme, ink on warm white
+     ============================================================ */
+      .v-porcelain {
+        --w-canvas: #f7f7f5;
+        --w-titlebar: #efefec;
+        --w-sidebar: #f1f1ee;
+        --w-tabbar: #f7f7f5;
+        --w-tab-active: #ffffff;
+        --w-statusbar: #f1f1ee;
+        --w-panel: #ffffff;
+        --w-panel-border: #d8d8d3;
+        --w-border: #e2e2dd;
+        --w-window-border: #cfcfc9;
+        --w-hover: rgba(0, 0, 0, 0.045);
+        --w-selected: #ffffff;
+        --w-selected-border: #e0e0da;
+        --w-scrim: rgba(60, 60, 55, 0.25);
+        --w-text: #24262a;
+        --w-text-dim: #5f6368;
+        --w-text-faint: #9a9ea3;
+        --w-accent: #3671d6;
+        --w-accent-text: #2f66c4;
+        --w-accent-contrast: #ffffff;
+        --w-attention: #d98f1f;
+        --w-attention-contrast: #ffffff;
+        --w-ok: #2f8f57;
+        --w-warn: #b07c17;
+        --w-err: #c4473a;
+        --w-chip: #ffffff;
+        --w-chip-border: #ddddd7;
+        --w-scroll: rgba(0, 0, 0, 0.18);
+        --w-term-bg: #ffffff;
+        --w-term-fg: #33363b;
+        --w-term-dim: #9599a0;
+        --w-pane-bg: #eaeae6;
+        --w-pane-border: #dcdcd6;
+        --w-pane-focus: rgba(54, 113, 214, 0.65);
+        --w-pane-head: #f4f4f1;
+        --w-pane-gap: 8px;
+        --w-pane-pad: 8px;
+        --w-radius: 8px;
+        --w-radius-sm: 6px;
+      }
+      .v-porcelain.window {
+        box-shadow: 0 24px 60px -24px rgba(40, 40, 35, 0.45);
+      }
+      .v-porcelain .ws.active {
+        box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+      }
+      .v-porcelain .pane.focused {
+        box-shadow: 0 0 0 1px var(--w-pane-focus);
+        border-color: transparent;
+      }
+
+      /* ============================================================
+     Variant 3 — Onyx: terminal-first, near-black, dense, sharp
+     ============================================================ */
+      .v-onyx {
+        --w-h-titlebar: 32px;
+        --w-h-tabs: 30px;
+        --w-h-tab: 26px;
+        --w-h-panehead: 22px;
+        --w-h-status: 22px;
+        --w-sidebar-w: 232px;
+
+        --w-canvas: #0d0e10;
+        --w-titlebar: #0d0e10;
+        --w-sidebar: #0a0b0c;
+        --w-tabbar: #0d0e10;
+        --w-tab-active: #16181b;
+        --w-statusbar: #0a0b0c;
+        --w-panel: #121417;
+        --w-panel-border: #2e3238;
+        --w-border: #1f2226;
+        --w-window-border: #2a2d32;
+        --w-hover: rgba(255, 255, 255, 0.055);
+        --w-selected: rgba(52, 211, 153, 0.09);
+        --w-selected-border: rgba(52, 211, 153, 0.18);
+        --w-scrim: rgba(0, 0, 0, 0.55);
+        --w-text: #dfe2e6;
+        --w-text-dim: #8f949b;
+        --w-text-faint: #565b62;
+        --w-accent: #34d399;
+        --w-accent-text: #4fdfae;
+        --w-accent-contrast: #04180f;
+        --w-attention: #f4bf4f;
+        --w-attention-contrast: #201700;
+        --w-ok: #34d399;
+        --w-warn: #e8b93e;
+        --w-err: #f07862;
+        --w-chip: rgba(255, 255, 255, 0.045);
+        --w-chip-border: rgba(255, 255, 255, 0.1);
+        --w-scroll: rgba(255, 255, 255, 0.14);
+        --w-term-bg: #0a0b0c;
+        --w-term-fg: #ccd1d6;
+        --w-term-dim: #5d6269;
+        --w-pane-bg: #1f2226;
+        --w-pane-border: #1f2226;
+        --w-pane-focus: rgba(52, 211, 153, 0.4);
+        --w-pane-head: #101113;
+        --w-pane-gap: 1px;
+        --w-pane-pad: 0px;
+        --w-radius: 0px;
+        --w-radius-sm: 3px;
+      }
+      .v-onyx.window {
+        border-radius: 4px;
+        font-size: 12.5px;
+      }
+      .v-onyx .tab {
+        border-radius: 0;
+      }
+      .v-onyx .tab.active::after {
+        left: 0;
+        right: 0;
+        border-radius: 0;
+      }
+      .v-onyx .ws {
+        padding: 6px 8px;
+      }
+      .v-onyx .ws.active {
+        border-left: 2px solid var(--w-accent);
+        border-radius: 0 var(--w-radius-sm) var(--w-radius-sm) 0;
+      }
+
+      /* ============================================================
+     Variant 4 — Mist: soft dark, floating panes, gentle depth
+     ============================================================ */
+      .v-mist {
+        --w-canvas: #22252b;
+        --w-titlebar: #22252b;
+        --w-sidebar: #22252b;
+        --w-tabbar: #22252b;
+        --w-tab-active: #2e323a;
+        --w-statusbar: #1d2026;
+        --w-panel: #2b2f36;
+        --w-panel-border: #3d424b;
+        --w-border: #2f333b;
+        --w-window-border: #3a3f48;
+        --w-hover: rgba(255, 255, 255, 0.06);
+        --w-selected: #313640;
+        --w-selected-border: #3d434e;
+        --w-scrim: rgba(15, 17, 20, 0.5);
+        --w-text: #e8eaed;
+        --w-text-dim: #a8adb6;
+        --w-text-faint: #6f747e;
+        --w-accent: #8b7ef0;
+        --w-accent-text: #aaa0f5;
+        --w-accent-contrast: #ffffff;
+        --w-attention: #e8975c;
+        --w-attention-contrast: #241000;
+        --w-ok: #66c58a;
+        --w-warn: #dfab52;
+        --w-err: #e57a6d;
+        --w-chip: rgba(255, 255, 255, 0.05);
+        --w-chip-border: rgba(255, 255, 255, 0.09);
+        --w-scroll: rgba(255, 255, 255, 0.16);
+        --w-term-bg: #191b20;
+        --w-term-fg: #d7dade;
+        --w-term-dim: #767b84;
+        --w-pane-bg: #22252b;
+        --w-pane-border: #32363f;
+        --w-pane-focus: #8b7ef0;
+        --w-pane-head: #1f2127;
+        --w-pane-gap: 10px;
+        --w-pane-pad: 10px;
+        --w-radius: 10px;
+        --w-radius-sm: 7px;
+      }
+      .v-mist .titlebar,
+      .v-mist .tabs {
+        border-color: transparent;
+      }
+      .v-mist .sidebar {
+        border-right: 0;
+      }
+      .v-mist .tab {
+        height: 24px;
+        border-radius: 12px;
+        margin-bottom: 5px;
+      }
+      .v-mist .tab.active {
+        background: var(--w-tab-active);
+      }
+      .v-mist .tab.active::after {
+        display: none;
+      }
+      .v-mist .pane {
+        box-shadow: 0 6px 18px -10px rgba(0, 0, 0, 0.5);
+      }
+      .v-mist .pane.focused {
+        border-color: var(--w-pane-focus);
+        box-shadow: 0 6px 22px -10px rgba(139, 126, 240, 0.35);
+      }
+      .v-mist .ws.active {
+        box-shadow: inset 0 0 0 1px var(--w-selected-border);
+      }
+      .v-mist .statusbar {
+        border-top: 0;
+      }
+
+      /* ============================================================
+     Variant 5 — Basalt: Onyx structure × Graphite palette.
+     Dense metrics, radius 0, full-width tab underline, 2px accent
+     bar on the active workspace — every color token is Graphite's.
+     ============================================================ */
+      .v-basalt {
+        /* structure: identical to Onyx */
+        --w-h-titlebar: 32px;
+        --w-h-tabs: 30px;
+        --w-h-tab: 26px;
+        --w-h-panehead: 22px;
+        --w-h-status: 22px;
+        --w-sidebar-w: 232px;
+
+        /* palette: identical to Graphite (selection/focus re-derived
+       from the blue accent, as Onyx derives them from its green) */
+        --w-canvas: #1e2023;
+        --w-titlebar: #232529;
+        --w-sidebar: #1a1c1f;
+        --w-tabbar: #1e2023;
+        --w-tab-active: #26282c;
+        --w-statusbar: #1a1c1f;
+        --w-panel: #232529;
+        --w-panel-border: #33363b;
+        --w-border: #2b2d31;
+        --w-window-border: #35383d;
+        --w-hover: rgba(255, 255, 255, 0.05);
+        --w-selected: rgba(76, 141, 255, 0.1);
+        --w-selected-border: rgba(76, 141, 255, 0.18);
+        --w-scrim: rgba(10, 10, 12, 0.45);
+        --w-text: #e6e7e9;
+        --w-text-dim: #a2a6ad;
+        --w-text-faint: #6c7077;
+        --w-accent: #4c8dff;
+        --w-accent-text: #7fb0ff;
+        --w-accent-contrast: #ffffff;
+        --w-attention: #e5a53a;
+        --w-attention-contrast: #1a1400;
+        --w-ok: #56b374;
+        --w-warn: #d8a03d;
+        --w-err: #e06c5f;
+        --w-chip: rgba(255, 255, 255, 0.04);
+        --w-chip-border: rgba(255, 255, 255, 0.08);
+        --w-scroll: rgba(255, 255, 255, 0.16);
+        --w-term-bg: #17181b;
+        --w-term-fg: #d4d6d9;
+        --w-term-dim: #71757c;
+        --w-pane-bg: #2b2d31;
+        --w-pane-border: #2b2d31;
+        --w-pane-focus: rgba(76, 141, 255, 0.45);
+        --w-pane-head: #1b1d20;
+        --w-pane-gap: 1px;
+        --w-pane-pad: 0px;
+        --w-radius: 0px;
+        --w-radius-sm: 3px;
+      }
+      .v-basalt.window {
+        border-radius: 4px;
+        font-size: 12.5px;
+      }
+      .v-basalt .tab {
+        border-radius: 0;
+      }
+      .v-basalt .tab.active::after {
+        left: 0;
+        right: 0;
+        border-radius: 0;
+      }
+      .v-basalt .ws {
+        padding: 6px 8px;
+      }
+      .v-basalt .ws.active {
+        border-left: 2px solid var(--w-accent);
+        border-radius: 0 var(--w-radius-sm) var(--w-radius-sm) 0;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="switcher" role="tablist" aria-label="Design variants">
+      <button data-v="v-graphite">Graphite<kbd>1</kbd></button>
+      <button data-v="v-porcelain">Porcelain<kbd>2</kbd></button>
+      <button data-v="v-onyx">Onyx<kbd>3</kbd></button>
+      <button data-v="v-mist">Mist<kbd>4</kbd></button>
+      <button data-v="v-basalt" class="active">Basalt<kbd>5</kbd></button>
+      <div class="sep"></div>
+      <button id="specs-toggle">Specs<kbd>S</kbd></button>
+    </div>
+    <p class="variant-note" id="note"></p>
+
+    <div class="stage">
+      <div class="window v-graphite" id="win">
+        <!-- Title bar -->
+        <div class="titlebar">
+          <span class="app-mark"></span>
+          <nav class="menus">
+            <button>File</button><button>Edit</button><button>View</button><button>Terminal</button
+            ><button>Help</button>
+          </nav>
+          <div class="win-title">agent-workspace — main</div>
+          <div class="win-controls">
+            <button title="Minimize">─</button>
+            <button title="Maximize">▢</button>
+            <button class="close" title="Close">✕</button>
+          </div>
+        </div>
+
+        <div class="body">
+          <!-- Sidebar -->
+          <aside class="sidebar">
+            <div class="sidebar-head">
+              <h2>Workspaces</h2>
+              <button class="icon-btn" title="New workspace">+</button>
+            </div>
+            <div class="ws-list">
+              <div class="ws active">
+                <div class="ws-title"><span class="dot"></span>agent-workspace</div>
+                <div class="ws-meta">
+                  <div class="row">
+                    <svg viewBox="0 0 16 16" fill="none" stroke-width="1.5">
+                      <circle cx="5" cy="4" r="2" />
+                      <circle cx="5" cy="12" r="2" />
+                      <circle cx="11" cy="8" r="2" />
+                      <path d="M5 6v4M9.2 8.8 6.5 11" />
+                    </svg>
+                    <span>main</span>
+                  </div>
+                  <div class="row">
+                    <svg viewBox="0 0 16 16" fill="none" stroke-width="1.5">
+                      <path
+                        d="M2 5a1 1 0 0 1 1-1h3l1.5 1.5H13a1 1 0 0 1 1 1V12a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1z"
+                      />
+                    </svg>
+                    <span>~/dev/agent-workspace</span>
+                  </div>
+                </div>
+                <div class="chips">
+                  <span class="chip">node</span>
+                  <span class="chip port">:5173</span>
+                  <span class="chip port">:9229</span>
+                </div>
+              </div>
+
+              <div class="ws">
+                <div class="ws-title">
+                  <span class="dot"></span>protocol-refactor<span class="badge">2</span>
+                </div>
+                <div class="ws-meta">
+                  <div class="row">
+                    <svg viewBox="0 0 16 16" fill="none" stroke-width="1.5">
+                      <circle cx="5" cy="4" r="2" />
+                      <circle cx="5" cy="12" r="2" />
+                      <circle cx="11" cy="8" r="2" />
+                      <path d="M5 6v4M9.2 8.8 6.5 11" />
+                    </svg>
+                    <span>feat/protocol-v2</span>
+                  </div>
+                  <div class="row">
+                    <svg viewBox="0 0 16 16" fill="none" stroke-width="1.5">
+                      <path
+                        d="M2 5a1 1 0 0 1 1-1h3l1.5 1.5H13a1 1 0 0 1 1 1V12a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1z"
+                      />
+                    </svg>
+                    <span>~/dev/aw-protocol</span>
+                  </div>
+                </div>
+                <div class="chips"><span class="chip">cargo</span></div>
+              </div>
+
+              <div class="ws">
+                <div class="ws-title"><span class="dot"></span>docs-site</div>
+                <div class="ws-meta">
+                  <div class="row">
+                    <svg viewBox="0 0 16 16" fill="none" stroke-width="1.5">
+                      <circle cx="5" cy="4" r="2" />
+                      <circle cx="5" cy="12" r="2" />
+                      <circle cx="11" cy="8" r="2" />
+                      <path d="M5 6v4M9.2 8.8 6.5 11" />
+                    </svg>
+                    <span>docs/updates</span>
+                  </div>
+                  <div class="row">
+                    <svg viewBox="0 0 16 16" fill="none" stroke-width="1.5">
+                      <path
+                        d="M2 5a1 1 0 0 1 1-1h3l1.5 1.5H13a1 1 0 0 1 1 1V12a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1z"
+                      />
+                    </svg>
+                    <span>~/dev/aw-docs</span>
+                  </div>
+                </div>
+                <div class="chips">
+                  <span class="chip">astro</span><span class="chip port">:4321</span>
+                </div>
+              </div>
+
+              <div class="ws">
+                <div class="ws-title"><span class="dot idle"></span>dotfiles</div>
+                <div class="ws-meta">
+                  <div class="row">
+                    <svg viewBox="0 0 16 16" fill="none" stroke-width="1.5">
+                      <circle cx="5" cy="4" r="2" />
+                      <circle cx="5" cy="12" r="2" />
+                      <circle cx="11" cy="8" r="2" />
+                      <path d="M5 6v4M9.2 8.8 6.5 11" />
+                    </svg>
+                    <span>main</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="sidebar-foot">
+              <span>Command palette</span>
+              <span class="spacer"></span>
+              <kbd>Ctrl</kbd><kbd>K</kbd>
+            </div>
+          </aside>
+
+          <!-- Main -->
+          <div class="main">
+            <div class="tabs">
+              <button class="tab active">Terminal<span class="x">✕</span></button>
+              <button class="tab">Agent<span class="x">✕</span></button>
+              <button class="tab">Build<span class="x">✕</span></button>
+              <button class="icon-btn tab-new" title="New tab">+</button>
+              <div class="drag-fill"></div>
+            </div>
+
+            <div class="panes">
+              <div class="pane-col" style="flex: 1.25">
+                <div class="pane focused">
+                  <div class="pane-head">
+                    <span class="p-title">zsh</span>
+                    <span class="p-path">~/dev/agent-workspace</span>
+                    <span class="p-actions"
+                      ><button title="Split">◫</button><button title="Close">✕</button></span
+                    >
+                  </div>
+                  <div class="term">
+                    <span class="path">~/dev/agent-workspace</span> <span class="dim">on</span>
+                    <span class="acc">⎇ main</span> <span class="prompt">❯</span> pnpm validate
+                    <span class="dim">┌ validate</span>
+                    <span class="ok">✓</span> typecheck <span class="dim">12.4s</span>
+                    <span class="ok">✓</span> lint <span class="dim">8.1s</span>
+                    <span class="ok">✓</span> test:unit
+                    <span class="dim">41.9s · 1,284 passed</span>
+                    <span class="ok">✓</span> test:integration
+                    <span class="dim">1m 12s · 216 passed</span> <span class="warn">▲</span> audit
+                    <span class="dim">1 advisory (dev-only, allow-listed)</span>
+                    <span class="dim">└ done in 2m 31s</span>
+
+                    <span class="path">~/dev/agent-workspace</span> <span class="dim">on</span>
+                    <span class="acc">⎇ main</span> <span class="prompt">❯</span>
+                    <span class="cursor"></span>
+                  </div>
+                  <div class="scrollbar"><div class="thumb"></div></div>
+                </div>
+              </div>
+
+              <div class="pane-col">
+                <div class="pane">
+                  <div class="pane-head">
+                    <span class="p-title">agent</span>
+                    <span class="p-path">claude — session 4f2a</span>
+                    <span class="p-actions"
+                      ><button title="Split">◫</button><button title="Close">✕</button></span
+                    >
+                  </div>
+                  <div class="term">
+                    <span class="acc">●</span> Refactoring terminal-runtime reconnect logic
+
+                    <span class="dim">Reading</span> crates/terminal-runtime/src/session.rs
+                    <span class="dim">Editing</span> session.rs <span class="ok">+41</span>
+                    <span class="err">-17</span> <span class="dim">Running</span> cargo test -p
+                    terminal-runtime
+
+                    <span class="ok">✓ 58 tests passed</span> <span class="dim">in 6.2s</span>
+
+                    <span class="dim">Awaiting review — see diff summary above.</span>
+                  </div>
+                </div>
+
+                <div class="pane">
+                  <div class="pane-head">
+                    <span class="p-title">dev server</span>
+                    <span class="p-path">pnpm dev — :5173</span>
+                    <span class="p-actions"
+                      ><button title="Split">◫</button><button title="Close">✕</button></span
+                    >
+                  </div>
+                  <div class="term">
+                    <span class="acc">VITE v6.3.1</span> <span class="dim">ready in 412 ms</span>
+
+                    <span class="dim">➜</span> Local:
+                    <span class="acc">http://localhost:5173/</span>
+                    <span class="dim">➜</span> Network:
+                    <span class="dim">use --host to expose</span>
+
+                    <span class="dim">12:41:03</span>
+                    <span class="ok">hmr update</span> /src/renderer/src/ui/Sidebar.tsx
+                    <span class="dim">12:41:19</span>
+                    <span class="ok">hmr update</span> /src/renderer/src/styles/foundation.css
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="statusbar">
+              <span class="seg">
+                <svg viewBox="0 0 16 16" fill="none" stroke-width="1.5">
+                  <circle cx="5" cy="4" r="2" />
+                  <circle cx="5" cy="12" r="2" />
+                  <circle cx="11" cy="8" r="2" />
+                  <path d="M5 6v4M9.2 8.8 6.5 11" />
+                </svg>
+                main
+              </span>
+              <span class="seg">3 panes · 4 terminals</span>
+              <span class="seg">:5173 :9229</span>
+              <span class="spacer"></span>
+              <span class="seg update">Update available — beta 0.6.2</span>
+              <span class="seg">
+                <svg viewBox="0 0 16 16" fill="none" stroke-width="1.5">
+                  <path
+                    d="M8 2a4 4 0 0 0-4 4v3l-1.2 2.2h10.4L12 9V6a4 4 0 0 0-4-4zM6.5 12.5a1.5 1.5 0 0 0 3 0"
+                  />
+                </svg>
+                2
+              </span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Command palette (shown in Onyx variant) -->
+        <div class="palette-scrim">
+          <div class="palette">
+            <input value="split" placeholder="Type a command…" readonly />
+            <div class="results">
+              <div class="result sel">
+                <span class="cat">Pane</span>Split pane right<span class="keys"
+                  ><kbd>Ctrl</kbd><kbd>Shift</kbd><kbd>D</kbd></span
+                >
+              </div>
+              <div class="result">
+                <span class="cat">Pane</span>Split pane down<span class="keys"
+                  ><kbd>Ctrl</kbd><kbd>Shift</kbd><kbd>E</kbd></span
+                >
+              </div>
+              <div class="result">
+                <span class="cat">Pane</span>Close split<span class="keys"
+                  ><kbd>Ctrl</kbd><kbd>Shift</kbd><kbd>W</kbd></span
+                >
+              </div>
+              <div class="result"><span class="cat">Layout</span>Reset split sizes</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Live spec sheet for the active variant -->
+      <aside class="specs" id="specs" aria-label="Variant specs"></aside>
+    </div>
+
+    <p class="hint">
+      Keys: 1–4 switch variants · S toggles the spec sheet (click the page first so it has focus).
+    </p>
+
+    <script>
+      const notes = {
+        'v-graphite':
+          '<strong>Graphite</strong> — neutral dark default. Canvas <code>#1e2023</code>, sidebar <code>#1a1c1f</code>, terminal <code>#17181b</code>; hairline dividers <code>#2b2d31</code>, pane gap 1px, radius 0; accent <code>#4c8dff</code> used only for focus, active tab, and ports.',
+        'v-porcelain':
+          '<strong>Porcelain</strong> — quiet light. Canvas <code>#f7f7f5</code>, pane well <code>#eaeae6</code>, white terminal cards with 1px <code>#dcdcd6</code> borders, radius 8px, gap 8px; ink <code>#24262a</code>; accent <code>#3671d6</code>.',
+        'v-onyx':
+          '<strong>Onyx</strong> — terminal-first, dense. Terminal <code>#0a0b0c</code>, chrome <code>#0d0e10</code>, dividers <code>#1f2226</code>; radius 0, gap 1px; compact chrome (titlebar 32, tabs 30, status 22px); single accent <code>#34d399</code>; palette shown open (Ctrl+K).',
+        'v-mist':
+          '<strong>Mist</strong> — soft depth. One surface <code>#22252b</code>; terminal cards <code>#191b20</code>, radius 10px, gap 10px, shadow <code>0 6px 18px −10px</code>; 24px pill tabs; accent <code>#8b7ef0</code> marks only the focused pane.',
+        'v-basalt':
+          "<strong>Basalt</strong> — Onyx structure × Graphite palette. Dense chrome (titlebar 32, tabs 30, status 22px), radius 0, full-width tab underline, 2px accent bar on the active workspace; colors are Graphite's exactly: canvas <code>#1e2023</code>, terminal <code>#17181b</code>, dividers <code>#2b2d31</code>, accent <code>#4c8dff</code>."
+      }
+
+      const win = document.getElementById('win')
+      const note = document.getElementById('note')
+      const specs = document.getElementById('specs')
+      const specsToggle = document.getElementById('specs-toggle')
+      const buttons = [...document.querySelectorAll('.switcher button[data-v]')]
+      let current = 'v-graphite'
+
+      const SPEC_SECTIONS = [
+        [
+          'Surfaces',
+          [
+            ['canvas', '--w-canvas'],
+            ['titlebar', '--w-titlebar'],
+            ['sidebar', '--w-sidebar'],
+            ['tab active', '--w-tab-active'],
+            ['terminal', '--w-term-bg'],
+            ['pane header', '--w-pane-head'],
+            ['panel/palette', '--w-panel']
+          ]
+        ],
+        [
+          'Borders',
+          [
+            ['divider', '--w-border'],
+            ['pane', '--w-pane-border'],
+            ['pane focus', '--w-pane-focus'],
+            ['window', '--w-window-border']
+          ]
+        ],
+        [
+          'Text',
+          [
+            ['primary', '--w-text'],
+            ['secondary', '--w-text-dim'],
+            ['faint', '--w-text-faint'],
+            ['terminal fg', '--w-term-fg'],
+            ['terminal dim', '--w-term-dim']
+          ]
+        ],
+        [
+          'Accent & status',
+          [
+            ['accent', '--w-accent'],
+            ['accent text', '--w-accent-text'],
+            ['ok', '--w-ok'],
+            ['warn', '--w-warn'],
+            ['error', '--w-err'],
+            ['attention', '--w-attention']
+          ]
+        ]
+      ]
+
+      function specRow(name, value, swatch) {
+        const sw = swatch ? `<span class="sw" style="background:${value}"></span>` : ''
+        return `<div class="spec-row">${sw}<span class="k">${name}</span><span class="v">${value}</span></div>`
+      }
+
+      function buildSpecs() {
+        const cs = getComputedStyle(win)
+        const tok = (t) => cs.getPropertyValue(t).trim()
+        let html = ''
+        for (const [title, rows] of SPEC_SECTIONS) {
+          html += `<h3>${title}</h3>`
+          for (const [name, t] of rows) html += specRow(name, tok(t), true)
+        }
+        const q = (s) => win.querySelector(s)
+        const termCS = getComputedStyle(q('.term'))
+        html += '<h3>Typography</h3>'
+        html += specRow('ui font', `${cs.fontSize} / ${cs.lineHeight}`, false)
+        html += specRow('terminal font', `${termCS.fontSize} / ${termCS.lineHeight}`, false)
+        html += specRow('meta/status', '11px / 16px', false)
+        html += '<h3>Metrics (measured)</h3>'
+        html += specRow('titlebar', q('.titlebar').offsetHeight + 'px', false)
+        html += specRow(
+          'tab strip / tab',
+          `${q('.tabs').offsetHeight}px / ${q('.tab').offsetHeight}px`,
+          false
+        )
+        html += specRow('pane header', q('.pane-head').offsetHeight + 'px', false)
+        html += specRow('status bar', q('.statusbar').offsetHeight + 'px', false)
+        html += specRow('sidebar width', q('.sidebar').offsetWidth + 'px', false)
+        html += specRow('pane gap / pad', `${tok('--w-pane-gap')} / ${tok('--w-pane-pad')}`, false)
+        html += specRow('radius lg / sm', `${tok('--w-radius')} / ${tok('--w-radius-sm')}`, false)
+        specs.innerHTML = html
+      }
+
+      function setVariant(v) {
+        current = v
+        win.className = 'window ' + v + (v === 'v-onyx' ? ' show-palette' : '')
+        note.innerHTML = notes[v]
+        buttons.forEach((b) => b.classList.toggle('active', b.dataset.v === v))
+        buildSpecs()
+      }
+      function toggleSpecs() {
+        specs.classList.toggle('open')
+        specsToggle.classList.toggle('active', specs.classList.contains('open'))
+        if (specs.classList.contains('open')) buildSpecs()
+      }
+
+      buttons.forEach((b) => b.addEventListener('click', () => setVariant(b.dataset.v)))
+      specsToggle.addEventListener('click', toggleSpecs)
+      document.addEventListener('keydown', (e) => {
+        const i = Number(e.key) - 1
+        if (buttons[i]) setVariant(buttons[i].dataset.v)
+        if (e.key === 's' || e.key === 'S') toggleSpecs()
+      })
+      setVariant('v-basalt')
+    </script>
+  </body>
+</html>

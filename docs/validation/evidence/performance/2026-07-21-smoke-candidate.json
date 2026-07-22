@@ -1,0 +1,568 @@
+{
+  "schemaVersion": 1,
+  "suite": "agent-workspace-performance",
+  "mode": "smoke",
+  "fullSoak": false,
+  "startedAt": "2026-07-21T22:08:56.550Z",
+  "completedAt": "2026-07-21T22:21:03.916Z",
+  "environment": {
+    "platform": "linux",
+    "arch": "x64",
+    "kernel": "6.18.37-1-lts",
+    "hostname": "nassim",
+    "cpuCount": 12,
+    "node": "v22.22.3",
+    "ci": false,
+    "releaseBuild": true
+  },
+  "metrics": [
+    {
+      "id": "pty.dispatch",
+      "unit": "ms",
+      "samples": [
+        0.16281100000003335, 0.138733000000002, 0.1396310000000085, 0.12995499999999538,
+        0.15922699999998713, 0.2788359999999557, 0.22095600000000104, 0.1756750000000693,
+        0.11816800000008243, 0.11538600000005772, 0.15306199999997716, 2.696130999999923,
+        0.3119040000000268, 0.273461999999995, 0.20674799999994775, 0.12824499999999261,
+        0.11545999999998457, 0.10842600000000857, 0.1019979999999805, 0.11108000000001539,
+        0.0978619999999637, 0.10500299999989693, 0.10132999999996173, 0.12990700000000288,
+        0.09639100000003964, 0.10395199999993565, 0.10536400000000867, 0.13443699999993441,
+        0.11426699999992707, 0.10575700000003962, 0.28176699999994526, 0.22442200000000412,
+        0.14026699999999437, 0.14124600000002374, 0.21182600000008733, 0.14989200000002256,
+        0.10931699999991906, 0.12822700000003806, 0.11142700000004879, 0.09661700000003748
+      ],
+      "summary": {
+        "min": 0.09639100000003964,
+        "p50": 0.12990700000000288,
+        "p95": 0.28176699999994526,
+        "max": 2.696130999999923
+      },
+      "threshold": {
+        "operator": "<=",
+        "statistic": "p95",
+        "value": 10
+      },
+      "gate": "required",
+      "passed": true,
+      "notes": ["release service on linux-x64", "kernel 6.18.37-1-lts; host nassim"]
+    },
+    {
+      "id": "pty.perceived_echo",
+      "unit": "ms",
+      "samples": [
+        0.19620099999997365, 0.1663780000000088, 0.16813300000001163, 0.15452300000004016,
+        0.19629399999996622, 0.3365079999999807, 0.276416999999924, 0.20328700000004574,
+        0.14401300000008632, 0.13829499999997097, 0.20253300000001673, 2.6687309999999798,
+        0.38108600000009574, 0.3167399999999816, 0.2618679999999358, 0.15650600000003578,
+        0.13938099999995757, 0.13966900000002624, 0.12399299999992763, 0.13302099999998518,
+        0.11819100000002436, 0.1260179999999309, 0.12417999999991025, 0.15003600000000006,
+        0.11685099999999693, 0.12560399999995298, 0.12547999999992498, 0.15871499999991556,
+        0.13762799999994968, 0.12754900000004454, 0.2616839999999456, 0.26676099999997405,
+        0.17034499999999753, 0.17270899999994072, 0.2631810000000314, 0.18240900000000693,
+        0.13261099999999715, 0.12207300000000032, 0.1315510000000586, 0.116963999999939
+      ],
+      "summary": {
+        "min": 0.11685099999999693,
+        "p50": 0.15452300000004016,
+        "p95": 0.3365079999999807,
+        "max": 2.6687309999999798
+      },
+      "threshold": {
+        "operator": "<=",
+        "statistic": "p95",
+        "value": 50
+      },
+      "gate": "required",
+      "passed": true,
+      "notes": ["release service on linux-x64", "kernel 6.18.37-1-lts; host nassim"]
+    },
+    {
+      "id": "pty.resize_dispatch",
+      "unit": "ms",
+      "samples": [
+        0.1354430000000093, 0.1464050000000725, 0.13717099999996663, 0.21078600000009828,
+        0.2649210000000721, 0.3336290000000872, 0.16870200000005298, 0.1387170000000424,
+        0.12204000000008364, 0.11851899999999205, 0.15288799999996172, 0.3482360000000426,
+        0.41079000000002, 0.21754699999996774, 0.2027699999999868, 0.11280899999997018,
+        0.11768700000004628, 0.12166500000000724, 0.10762499999998454, 0.11066399999992882,
+        0.1076300000000856, 0.10585500000001957, 0.10139200000003257, 0.11221999999997934,
+        0.09936600000003182, 0.1364930000000868, 0.12578199999995832, 0.11680799999999181,
+        0.1259059999999863, 0.12011400000005779, 0.1837070000000267, 0.1455550000000585,
+        0.17374400000005608, 0.18463099999996757, 0.20351700000003348, 0.11926499999992757,
+        0.12256999999999607, 0.10931300000004285, 0.10716100000001916, 0.11525899999992362
+      ],
+      "summary": {
+        "min": 0.09936600000003182,
+        "p50": 0.12578199999995832,
+        "p95": 0.3336290000000872,
+        "max": 0.41079000000002
+      },
+      "threshold": {
+        "operator": "<=",
+        "statistic": "p95",
+        "value": 10
+      },
+      "gate": "required",
+      "passed": true,
+      "notes": ["release service on linux-x64", "kernel 6.18.37-1-lts; host nassim"]
+    },
+    {
+      "id": "launch.cold_interactive",
+      "unit": "ms",
+      "samples": [1337.121224, 1345.6775360000001, 1338.4962849999997],
+      "summary": {
+        "min": 1337.121224,
+        "p50": 1338.4962849999997,
+        "p95": 1345.6775360000001,
+        "max": 1345.6775360000001
+      },
+      "threshold": {
+        "operator": "<=",
+        "statistic": "p95",
+        "value": 2500
+      },
+      "gate": "informational",
+      "passed": true,
+      "notes": [
+        "Packaged executable to visible terminal; three samples are too few for a release gate."
+      ]
+    },
+    {
+      "id": "launch.warm_restored_visible",
+      "unit": "ms",
+      "samples": [1371.290989000001, 1300.0654689999938, 1255.0913250000012],
+      "summary": {
+        "min": 1255.0913250000012,
+        "p50": 1300.0654689999938,
+        "p95": 1371.290989000001,
+        "max": 1371.290989000001
+      },
+      "threshold": {
+        "operator": "<=",
+        "statistic": "p95",
+        "value": 1500
+      },
+      "gate": "informational",
+      "passed": true,
+      "notes": [
+        "Same persisted profile; packaged process fully stopped between samples.",
+        "Informational because compositor and shared-runner noise dominate short launch samples."
+      ]
+    },
+    {
+      "id": "idle.process_tree_cpu_average",
+      "unit": "%",
+      "samples": [0.8893280632411066],
+      "summary": {
+        "min": 0.8893280632411066,
+        "p50": 0.8893280632411066,
+        "p95": 0.8893280632411066,
+        "max": 0.8893280632411066
+      },
+      "threshold": {
+        "operator": "<",
+        "statistic": "p95",
+        "value": 1
+      },
+      "gate": "required",
+      "passed": true,
+      "notes": [
+        "Five-minute quiet settle followed by a five-minute measured idle window.",
+        "Application jiffies are divided by aggregate /proc/stat jiffies and multiplied by the online CPU count; no CLK_TCK assumption.",
+        "started=2026-07-21T22:15:20.144Z completed=2026-07-21T22:20:20.284Z online CPUs=12",
+        "application jiffies=264 system jiffies=356224",
+        "process counts=8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8 new process counts=0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0",
+        "invalidated complete windows=0"
+      ]
+    },
+    {
+      "id": "idle.process_tree_cpu_intervals",
+      "unit": "%",
+      "samples": [
+        0.9441384736428009, 0, 0.964630225080386, 0.9779951100244498, 1.9656019656019659,
+        0.974817221770918, 0.9708737864077671, 0.9852216748768473, 0, 1.9591836734693877, 0, 0,
+        0.9860312243221034, 0.9787928221859707, 0.956175298804781, 0, 1.9656019656019659, 0,
+        1.9002375296912115, 0.9592326139088728, 0, 0.9584664536741214, 0.974025974025974, 0,
+        0.9584664536741214, 0.9732360097323601, 0, 0.9716599190283399, 1.954397394136808,
+        0.9716599190283399, 0, 0.972447325769854, 0.9787928221859707, 1.9108280254777072, 0, 0,
+        1.949634443541836, 1.9169329073482428, 0, 0, 2.8526148969889067, 0, 0, 0,
+        0.9419152276295134, 0.9404388714733543, 0.9546539379474941, 2.841357537490134, 0,
+        0.9554140127388536, 0, 0.9426551453260016, 0.9508716323296356, 0, 0.9338521400778211,
+        1.9591836734693877, 3.800475059382423, 0, 0.9508716323296356, 1.873536299765808, 0,
+        1.9062748212867353, 0.9397024275646044, 0, 0, 1.9200000000000002, 0.9426551453260016, 0,
+        0.9607686148919135, 0.9486166007905139, 1.8764659890539486, 0.9411764705882352,
+        0.9252120277563608, 0, 0, 0.9448818897637795, 0, 0.936768149882904, 1.8853102906520032,
+        0.9779951100244498, 0.9433962264150945, 0.9389671361502347, 1.839080459770115, 0, 0,
+        1.9062748212867353, 0.9397024275646044, 0.9353078721745909, 0, 1.9002375296912115, 0,
+        0.949367088607595, 0.9508716323296356, 0.9531374106433677, 0.9223674096848579, 0,
+        0.9389671361502347, 0.9569377990430622, 0, 1.8853102906520032, 0, 0, 0.9324009324009324,
+        0.9448818897637795, 0.920951650038373, 0, 1.889763779527559, 1.9401778496362165,
+        0.9700889248181083, 0, 0, 1.8575851393188854, 0, 3.8369304556354913, 0.9508716323296356,
+        0.9478672985781991, 0.966183574879227, 0.9441384736428009, 0.9404388714733543, 0, 0,
+        0.9419152276295134, 0.9382329945269743, 0.9419152276295134, 0.9419152276295134, 0,
+        1.89873417721519, 1.9017432646592711, 0, 0, 0.9426551453260016, 1.889763779527559, 0, 0,
+        2.88, 0, 0, 1.9154030327214684, 0.9554140127388536, 0.9463722397476341, 0, 1.89873417721519,
+        0, 1.9032513877874704, 0, 0.9607686148919135, 2.8346456692913384, 0, 0, 1.8972332015810278,
+        0.9569377990430622, 0.9448818897637795, 0, 1.8750000000000002, 0, 1.8677042801556423,
+        0.9448818897637795, 0.9700889248181083, 0, 0.9463722397476341, 0, 1.9169329073482428,
+        1.8927444794952681, 0, 0, 2.799377916018663, 0, 0.9463722397476341, 0, 4.769475357710651,
+        1.8912529550827424, 0, 1.8957345971563981, 0, 1.9093078758949882, 0, 0, 1.9047619047619049,
+        0.9546539379474941, 1.8927444794952681, 0.9892827699917559, 0, 0.974817221770918,
+        0.947119179163378, 0, 0.949367088607595, 0, 0, 1.9138755980861244, 0.975609756097561, 0,
+        0.9531374106433677, 0, 0.9577015163607342, 0.947119179163378, 1.8794048551292089, 0,
+        1.89873417721519, 0, 0.9630818619582664, 0, 0.9441384736428009, 0.9353078721745909,
+        0.947119179163378, 0.9404388714733543, 0.9174311926605505, 1.9002375296912115,
+        2.854877081681205, 0, 0, 0, 2.841357537490134, 0, 0, 0.9577015163607342, 0.9531374106433677,
+        0.9554140127388536, 0.9584664536741214, 0.9546539379474941, 0, 0.9463722397476341,
+        0.9592326139088728, 0.9700889248181083, 0, 0.9569377990430622, 0, 4.716981132075472, 0, 0,
+        2.819107282693814, 0.9463722397476341, 1.8764659890539486, 0, 0, 0.975609756097561,
+        0.9592326139088728, 0, 0.977198697068404, 0, 0.9508716323296356, 1.9108280254777072, 0, 0,
+        0.9577015163607342, 0.9584664536741214, 0.9764035801464606, 0, 1.9200000000000002,
+        0.9486166007905139, 0.9523809523809524, 0, 1.89873417721519, 0.9195402298850575, 0, 0,
+        1.921537229783827, 0.947119179163378, 0, 0, 2.8235294117647056, 0, 0, 0.9546539379474941,
+        1.9017432646592711, 0.9411764705882352, 0.9523809523809524, 1.9047619047619049, 0,
+        0.964630225080386, 1.9047619047619049, 0, 0, 0, 1.9656019656019659, 0.9448818897637795, 0,
+        0.9316770186335404, 0.9382329945269743, 0, 0.9463722397476341, 0.936768149882904,
+        0.9441384736428009, 6.430868167202572
+      ],
+      "summary": {
+        "min": 0,
+        "p50": 0.9448818897637795,
+        "p95": 1.9656019656019659,
+        "max": 6.430868167202572
+      },
+      "threshold": null,
+      "gate": "informational",
+      "passed": null,
+      "notes": [
+        "Chronological approximately one-second process-tree CPU samples for auditing the required whole-window average.",
+        "A disappearing process identity or PID reuse invalidates the measurement instead of silently undercounting."
+      ]
+    },
+    {
+      "id": "memory.one_terminal.application_pss",
+      "unit": "MiB",
+      "samples": [347.0380859375, 347.0380859375, 347.0380859375],
+      "summary": {
+        "min": 347.0380859375,
+        "p50": 347.0380859375,
+        "p95": 347.0380859375,
+        "max": 347.0380859375
+      },
+      "threshold": {
+        "operator": "<=",
+        "statistic": "p95",
+        "value": 350
+      },
+      "gate": "required",
+      "passed": true,
+      "notes": [
+        "Packaged Electron root and descendants identified only through strict /proc/<pid>/status PPid traversal.",
+        "three settled observations at 2026-07-21T22:20:20.326Z, 2026-07-21T22:20:21.133Z, 2026-07-21T22:20:21.928Z; process counts=8,8,8",
+        "Primary application-memory measure: aggregate PSS from smaps_rollup proportionally accounts shared Electron mappings."
+      ]
+    },
+    {
+      "id": "memory.one_terminal.aggregate_rss",
+      "unit": "MiB",
+      "samples": [723.33203125, 723.33203125, 723.33203125],
+      "summary": {
+        "min": 723.33203125,
+        "p50": 723.33203125,
+        "p95": 723.33203125,
+        "max": 723.33203125
+      },
+      "threshold": null,
+      "gate": "informational",
+      "passed": null,
+      "notes": [
+        "Packaged Electron root and descendants identified only through strict /proc/<pid>/status PPid traversal.",
+        "three settled observations at 2026-07-21T22:20:20.326Z, 2026-07-21T22:20:21.133Z, 2026-07-21T22:20:21.928Z; process counts=8,8,8",
+        "Diagnostic sum of VmRSS; shared mappings may be counted once per Electron process."
+      ]
+    },
+    {
+      "id": "memory.one_terminal.private_memory",
+      "unit": "MiB",
+      "samples": [229.5546875, 229.5546875, 229.5546875],
+      "summary": {
+        "min": 229.5546875,
+        "p50": 229.5546875,
+        "p95": 229.5546875,
+        "max": 229.5546875
+      },
+      "threshold": null,
+      "gate": "informational",
+      "passed": null,
+      "notes": [
+        "Packaged Electron root and descendants identified only through strict /proc/<pid>/status PPid traversal.",
+        "three settled observations at 2026-07-21T22:20:20.326Z, 2026-07-21T22:20:21.133Z, 2026-07-21T22:20:21.928Z; process counts=8,8,8",
+        "Diagnostic sum of Private_Clean + Private_Dirty from smaps_rollup."
+      ]
+    },
+    {
+      "id": "memory.ten_terminals.application_pss",
+      "unit": "MiB",
+      "samples": [371.9814453125, 371.1220703125, 370.8798828125],
+      "summary": {
+        "min": 370.8798828125,
+        "p50": 371.1220703125,
+        "p95": 371.9814453125,
+        "max": 371.9814453125
+      },
+      "threshold": {
+        "operator": "<=",
+        "statistic": "p95",
+        "value": 700
+      },
+      "gate": "required",
+      "passed": true,
+      "notes": [
+        "Packaged Electron root and descendants identified only through strict /proc/<pid>/status PPid traversal.",
+        "three settled observations at 2026-07-21T22:20:23.089Z, 2026-07-21T22:20:23.918Z, 2026-07-21T22:20:24.717Z; process counts=17,17,17",
+        "Primary application-memory measure: aggregate PSS from smaps_rollup proportionally accounts shared Electron mappings."
+      ]
+    },
+    {
+      "id": "memory.ten_terminals.aggregate_rss",
+      "unit": "MiB",
+      "samples": [804.00390625, 803.14453125, 802.87109375],
+      "summary": {
+        "min": 802.87109375,
+        "p50": 803.14453125,
+        "p95": 804.00390625,
+        "max": 804.00390625
+      },
+      "threshold": null,
+      "gate": "informational",
+      "passed": null,
+      "notes": [
+        "Packaged Electron root and descendants identified only through strict /proc/<pid>/status PPid traversal.",
+        "three settled observations at 2026-07-21T22:20:23.089Z, 2026-07-21T22:20:23.918Z, 2026-07-21T22:20:24.717Z; process counts=17,17,17",
+        "Diagnostic sum of VmRSS; shared mappings may be counted once per Electron process."
+      ]
+    },
+    {
+      "id": "memory.ten_terminals.private_memory",
+      "unit": "MiB",
+      "samples": [252.3203125, 251.4609375, 251.25],
+      "summary": {
+        "min": 251.25,
+        "p50": 251.4609375,
+        "p95": 252.3203125,
+        "max": 252.3203125
+      },
+      "threshold": null,
+      "gate": "informational",
+      "passed": null,
+      "notes": [
+        "Packaged Electron root and descendants identified only through strict /proc/<pid>/status PPid traversal.",
+        "three settled observations at 2026-07-21T22:20:23.089Z, 2026-07-21T22:20:23.918Z, 2026-07-21T22:20:24.717Z; process counts=17,17,17",
+        "Diagnostic sum of Private_Clean + Private_Dirty from smaps_rollup."
+      ]
+    },
+    {
+      "id": "memory.thirty_terminals.application_pss",
+      "unit": "MiB",
+      "samples": [399.8974609375, 399.7451171875, 397.8115234375],
+      "summary": {
+        "min": 397.8115234375,
+        "p50": 399.7451171875,
+        "p95": 399.8974609375,
+        "max": 399.8974609375
+      },
+      "threshold": null,
+      "gate": "informational",
+      "passed": null,
+      "notes": [
+        "Packaged Electron root and descendants identified only through strict /proc/<pid>/status PPid traversal.",
+        "three settled observations at 2026-07-21T22:20:25.977Z, 2026-07-21T22:20:26.812Z, 2026-07-21T22:20:27.631Z; process counts=37,37,37",
+        "Primary application-memory measure: aggregate PSS from smaps_rollup proportionally accounts shared Electron mappings."
+      ]
+    },
+    {
+      "id": "memory.thirty_terminals.aggregate_rss",
+      "unit": "MiB",
+      "samples": [955.078125, 954.92578125, 952.95703125],
+      "summary": {
+        "min": 952.95703125,
+        "p50": 954.92578125,
+        "p95": 955.078125,
+        "max": 955.078125
+      },
+      "threshold": null,
+      "gate": "informational",
+      "passed": null,
+      "notes": [
+        "Packaged Electron root and descendants identified only through strict /proc/<pid>/status PPid traversal.",
+        "three settled observations at 2026-07-21T22:20:25.977Z, 2026-07-21T22:20:26.812Z, 2026-07-21T22:20:27.631Z; process counts=37,37,37",
+        "Diagnostic sum of VmRSS; shared mappings may be counted once per Electron process."
+      ]
+    },
+    {
+      "id": "memory.thirty_terminals.private_memory",
+      "unit": "MiB",
+      "samples": [279, 278.84765625, 276.94921875],
+      "summary": {
+        "min": 276.94921875,
+        "p50": 278.84765625,
+        "p95": 279,
+        "max": 279
+      },
+      "threshold": null,
+      "gate": "informational",
+      "passed": null,
+      "notes": [
+        "Packaged Electron root and descendants identified only through strict /proc/<pid>/status PPid traversal.",
+        "three settled observations at 2026-07-21T22:20:25.977Z, 2026-07-21T22:20:26.812Z, 2026-07-21T22:20:27.631Z; process counts=37,37,37",
+        "Diagnostic sum of Private_Clean + Private_Dirty from smaps_rollup."
+      ]
+    },
+    {
+      "id": "terminal.high_output_completion",
+      "unit": "ms",
+      "samples": [35.396234999992885],
+      "summary": {
+        "min": 35.396234999992885,
+        "p50": 35.396234999992885,
+        "p95": 35.396234999992885,
+        "max": 35.396234999992885
+      },
+      "threshold": null,
+      "gate": "informational",
+      "passed": null,
+      "notes": [
+        "20,000 numbered lines followed by an observed service output marker.",
+        "An unmeasured shell-ready round trip runs first; liveness timeout=120000 ms.",
+        "authoritative resync recoveries=48"
+      ]
+    },
+    {
+      "id": "card_slots_v2.storm_1000_replace",
+      "unit": "ms",
+      "samples": [3545.8232660000212],
+      "summary": {
+        "min": 3545.8232660000212,
+        "p50": 3545.8232660000212,
+        "p95": 3545.8232660000212,
+        "max": 3545.8232660000212
+      },
+      "threshold": null,
+      "gate": "informational",
+      "passed": null,
+      "notes": [
+        "1,000 bounded log-tail replacements through the packaged preload and authenticated control service.",
+        "final slot revision=1000"
+      ]
+    },
+    {
+      "id": "card_slots_v2.storm_terminal_liveness",
+      "unit": "ms",
+      "samples": [6.395984000060707],
+      "summary": {
+        "min": 6.395984000060707,
+        "p50": 6.395984000060707,
+        "p95": 6.395984000060707,
+        "max": 6.395984000060707
+      },
+      "threshold": {
+        "operator": "<=",
+        "statistic": "p95",
+        "value": 5000
+      },
+      "gate": "required",
+      "passed": true,
+      "notes": [
+        "A terminal output marker is requested concurrently with the 1,000-slot replacement storm.",
+        "authoritative terminal resync recoveries=0"
+      ]
+    },
+    {
+      "id": "terminal.thirty_teardown",
+      "unit": "ms",
+      "samples": [433.7251480000559],
+      "summary": {
+        "min": 433.7251480000559,
+        "p50": 433.7251480000559,
+        "p95": 433.7251480000559,
+        "max": 433.7251480000559
+      },
+      "threshold": null,
+      "gate": "informational",
+      "passed": null,
+      "notes": [
+        "post-teardown PSS 567.65 MiB",
+        "post-teardown aggregate RSS 946.05 MiB",
+        "post-teardown private memory 448.11 MiB"
+      ]
+    },
+    {
+      "id": "split.resize_fps",
+      "unit": "fps",
+      "samples": [160.38492381652233],
+      "summary": {
+        "min": 160.38492381652233,
+        "p50": 160.38492381652233,
+        "p95": 160.38492381652233,
+        "max": 160.38492381652233
+      },
+      "threshold": {
+        "operator": ">=",
+        "statistic": "p95",
+        "value": 50
+      },
+      "gate": "informational",
+      "passed": true,
+      "notes": ["60 authenticated pane resize mutations with requestAnimationFrame pacing."]
+    },
+    {
+      "id": "browser.view_cycle",
+      "unit": "ms",
+      "samples": [
+        195.70164600003045, 126.06703100004233, 120.69095099996775, 133.20722999994177,
+        139.8937150000129
+      ],
+      "summary": {
+        "min": 120.69095099996775,
+        "p50": 133.20722999994177,
+        "p95": 195.70164600003045,
+        "max": 195.70164600003045
+      },
+      "threshold": null,
+      "gate": "informational",
+      "passed": null,
+      "notes": ["Five native browser view create/visible/teardown cycles."]
+    },
+    {
+      "id": "notifications.storm_100",
+      "unit": "ms",
+      "samples": [462.44479800004046],
+      "summary": {
+        "min": 462.44479800004046,
+        "p50": 462.44479800004046,
+        "p95": 462.44479800004046,
+        "max": 462.44479800004046
+      },
+      "threshold": null,
+      "gate": "informational",
+      "passed": null,
+      "notes": ["100 notifications submitted through the packaged release CLI."]
+    }
+  ],
+  "scenarios": [
+    "rapid typing through a release service PTY",
+    "repeated PTY resize dispatch",
+    "cold packaged release launch",
+    "warm restored packaged release launch",
+    "five-minute settled packaged idle CPU qualification",
+    "one-terminal settled application-memory qualification",
+    "ten-terminal settled application-memory qualification",
+    "high terminal output",
+    "bounded v2 rich-card slot storm with concurrent PTY liveness",
+    "30-terminal create and teardown",
+    "repeated split resize",
+    "browser view loop",
+    "notification storm",
+    "8-hour output soak: not run in smoke mode"
+  ]
+}

@@ -1,0 +1,16 @@
+node_modules/
+target/
+out/
+dist/
+/release/
+coverage/
+test-results/
+playwright-report/
+*.log
+.DS_Store
+.env
+.env.*
+!.env.example
+.idea/
+.vscode/
+apps/desktop/.vite/

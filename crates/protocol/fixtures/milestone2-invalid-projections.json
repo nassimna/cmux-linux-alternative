@@ -1,0 +1,319 @@
+{
+  "cases": [
+    {
+      "name": "empty workspaces",
+      "boundary": "application",
+      "operations": [{ "op": "set", "path": "/workspaces", "value": [] }]
+    },
+    {
+      "name": "empty panes",
+      "boundary": "workspace",
+      "operations": [{ "op": "set", "path": "/workspaces/0/panes", "value": [] }]
+    },
+    {
+      "name": "empty pane tabs",
+      "boundary": "workspace",
+      "operations": [{ "op": "set", "path": "/workspaces/0/panes/0/tabIds", "value": [] }]
+    },
+    {
+      "name": "empty tabs",
+      "boundary": "workspace",
+      "operations": [{ "op": "set", "path": "/workspaces/0/tabs", "value": [] }]
+    },
+    {
+      "name": "missing selected workspace",
+      "boundary": "application",
+      "operations": [
+        {
+          "op": "set",
+          "path": "/selectedWorkspaceId",
+          "value": "10000000-0000-4000-8000-000000000099"
+        }
+      ]
+    },
+    {
+      "name": "missing selected pane",
+      "boundary": "workspace",
+      "operations": [
+        {
+          "op": "set",
+          "path": "/workspaces/0/selectedPaneId",
+          "value": "30000000-0000-4000-8000-000000000099"
+        }
+      ]
+    },
+    {
+      "name": "missing selected tab",
+      "boundary": "workspace",
+      "operations": [
+        {
+          "op": "set",
+          "path": "/workspaces/0/panes/0/selectedTabId",
+          "value": "40000000-0000-4000-8000-000000000099"
+        }
+      ]
+    },
+    {
+      "name": "duplicate pane id",
+      "boundary": "workspace",
+      "operations": [
+        {
+          "op": "set",
+          "path": "/workspaces/0/panes/1/id",
+          "value": "30000000-0000-4000-8000-000000000001"
+        }
+      ]
+    },
+    {
+      "name": "duplicate pane tab id",
+      "boundary": "workspace",
+      "operations": [
+        {
+          "op": "set",
+          "path": "/workspaces/0/panes/0/tabIds/1",
+          "value": "40000000-0000-4000-8000-000000000001"
+        },
+        {
+          "op": "set",
+          "path": "/workspaces/0/panes/0/selectedTabId",
+          "value": "40000000-0000-4000-8000-000000000001"
+        }
+      ]
+    },
+    {
+      "name": "duplicate tab id",
+      "boundary": "workspace",
+      "operations": [
+        {
+          "op": "set",
+          "path": "/workspaces/0/tabs/1/id",
+          "value": "40000000-0000-4000-8000-000000000001"
+        }
+      ]
+    },
+    {
+      "name": "pane and tab ownership mismatch",
+      "boundary": "workspace",
+      "operations": [
+        {
+          "op": "set",
+          "path": "/workspaces/0/tabs/0/paneId",
+          "value": "30000000-0000-4000-8000-000000000002"
+        }
+      ]
+    },
+    {
+      "name": "layout leaf references a missing pane",
+      "boundary": "workspace",
+      "operations": [
+        {
+          "op": "set",
+          "path": "/workspaces/0/layout/second/paneId",
+          "value": "30000000-0000-4000-8000-000000000099"
+        }
+      ]
+    },
+    {
+      "name": "duplicate layout leaf",
+      "boundary": "workspace",
+      "operations": [
+        {
+          "op": "set",
+          "path": "/workspaces/0/layout/second/paneId",
+          "value": "30000000-0000-4000-8000-000000000001"
+        }
+      ]
+    },
+    {
+      "name": "duplicate layout split identity",
+      "boundary": "workspace",
+      "operations": [
+        {
+          "op": "set",
+          "path": "/workspaces/0/layout/first",
+          "value": {
+            "kind": "split",
+            "splitId": "20000000-0000-4000-8000-000000000001",
+            "axis": "vertical",
+            "ratio": 0.5,
+            "first": {
+              "kind": "leaf",
+              "paneId": "30000000-0000-4000-8000-000000000001"
+            },
+            "second": {
+              "kind": "leaf",
+              "paneId": "30000000-0000-4000-8000-000000000002"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "duplicate global workspace ids",
+      "boundary": "application",
+      "operations": [{ "op": "copy", "from": "/workspaces/0", "path": "/workspaces/-" }]
+    },
+    {
+      "name": "cross-kind application identity collision",
+      "boundary": "application",
+      "operations": [
+        {
+          "op": "set",
+          "path": "/workspaces/0/layout/splitId",
+          "value": "30000000-0000-4000-8000-000000000001"
+        }
+      ]
+    },
+    {
+      "name": "duplicate global pane ids",
+      "boundary": "application",
+      "operations": [
+        { "op": "copy", "from": "/workspaces/0", "path": "/workspaces/-" },
+        {
+          "op": "set",
+          "path": "/workspaces/1/id",
+          "value": "10000000-0000-4000-8000-000000000002"
+        }
+      ]
+    },
+    {
+      "name": "duplicate global split ids",
+      "boundary": "application",
+      "operations": [
+        { "op": "copy", "from": "/workspaces/0", "path": "/workspaces/-" },
+        {
+          "op": "set",
+          "path": "/workspaces/1/id",
+          "value": "10000000-0000-4000-8000-000000000002"
+        },
+        {
+          "op": "set",
+          "path": "/workspaces/1/panes/0/id",
+          "value": "30000000-0000-4000-8000-000000000011"
+        },
+        {
+          "op": "set",
+          "path": "/workspaces/1/panes/1/id",
+          "value": "30000000-0000-4000-8000-000000000012"
+        },
+        {
+          "op": "set",
+          "path": "/workspaces/1/layout/first/paneId",
+          "value": "30000000-0000-4000-8000-000000000011"
+        },
+        {
+          "op": "set",
+          "path": "/workspaces/1/layout/second/paneId",
+          "value": "30000000-0000-4000-8000-000000000012"
+        },
+        {
+          "op": "set",
+          "path": "/workspaces/1/selectedPaneId",
+          "value": "30000000-0000-4000-8000-000000000012"
+        },
+        {
+          "op": "set",
+          "path": "/workspaces/1/tabs/0/paneId",
+          "value": "30000000-0000-4000-8000-000000000011"
+        },
+        {
+          "op": "set",
+          "path": "/workspaces/1/tabs/1/paneId",
+          "value": "30000000-0000-4000-8000-000000000011"
+        },
+        {
+          "op": "set",
+          "path": "/workspaces/1/tabs/2/paneId",
+          "value": "30000000-0000-4000-8000-000000000012"
+        }
+      ]
+    },
+    {
+      "name": "duplicate global tab ids",
+      "boundary": "application",
+      "operations": [
+        { "op": "copy", "from": "/workspaces/0", "path": "/workspaces/-" },
+        {
+          "op": "set",
+          "path": "/workspaces/1/id",
+          "value": "10000000-0000-4000-8000-000000000002"
+        },
+        {
+          "op": "set",
+          "path": "/workspaces/1/layout/splitId",
+          "value": "20000000-0000-4000-8000-000000000002"
+        },
+        {
+          "op": "set",
+          "path": "/workspaces/1/panes/0/id",
+          "value": "30000000-0000-4000-8000-000000000011"
+        },
+        {
+          "op": "set",
+          "path": "/workspaces/1/panes/1/id",
+          "value": "30000000-0000-4000-8000-000000000012"
+        },
+        {
+          "op": "set",
+          "path": "/workspaces/1/layout/first/paneId",
+          "value": "30000000-0000-4000-8000-000000000011"
+        },
+        {
+          "op": "set",
+          "path": "/workspaces/1/layout/second/paneId",
+          "value": "30000000-0000-4000-8000-000000000012"
+        },
+        {
+          "op": "set",
+          "path": "/workspaces/1/selectedPaneId",
+          "value": "30000000-0000-4000-8000-000000000012"
+        },
+        {
+          "op": "set",
+          "path": "/workspaces/1/tabs/0/paneId",
+          "value": "30000000-0000-4000-8000-000000000011"
+        },
+        {
+          "op": "set",
+          "path": "/workspaces/1/tabs/1/paneId",
+          "value": "30000000-0000-4000-8000-000000000011"
+        },
+        {
+          "op": "set",
+          "path": "/workspaces/1/tabs/2/paneId",
+          "value": "30000000-0000-4000-8000-000000000012"
+        }
+      ]
+    },
+    {
+      "name": "duplicate runtime sessions",
+      "boundary": "application",
+      "operations": [
+        {
+          "op": "set",
+          "path": "/workspaces/0/tabs/1/content",
+          "value": {
+            "kind": "terminal",
+            "launch": {
+              "cwd": "/tmp/fixture-workspace",
+              "rows": 30,
+              "cols": 100
+            },
+            "runtimeSessionId": "50000000-0000-4000-8000-000000000001"
+          }
+        }
+      ]
+    },
+    {
+      "name": "duplicate shortcut command ids",
+      "boundary": "application",
+      "operations": [
+        {
+          "op": "set",
+          "path": "/shortcutOverrides/1/commandId",
+          "value": "workspace.new"
+        }
+      ]
+    }
+  ]
+}

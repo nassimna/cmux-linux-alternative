@@ -1,0 +1,38 @@
+@import 'tailwindcss';
+@import '@agent-workspace/design-tokens/foundation.css';
+
+@layer base {
+  *,
+  ::before,
+  ::after {
+    border-color: var(--aw-color-border-default);
+  }
+
+  :root {
+    font-family: var(--aw-font-ui);
+    font-size: var(--aw-font-size-ui);
+    line-height: var(--aw-line-height-ui);
+    color: var(--aw-color-text-primary);
+    background: var(--aw-color-surface-canvas);
+    font-synthesis: none;
+    text-rendering: optimizeLegibility;
+  }
+
+  ::selection {
+    color: var(--aw-color-text-primary);
+    background: var(--aw-color-selection);
+  }
+
+  :focus-visible {
+    outline: var(--aw-focus-ring-width) solid var(--aw-color-focus);
+    outline-offset: var(--aw-focus-ring-offset);
+  }
+
+  button,
+  input,
+  textarea,
+  select {
+    color: inherit;
+    font: inherit;
+  }
+}

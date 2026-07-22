@@ -1,0 +1,47 @@
+{
+  "uint32": {
+    "minimum": 0,
+    "maximum": 4294967295,
+    "aboveMaximum": 4294967296
+  },
+  "safeInteger": {
+    "maximum": 9007199254740991,
+    "aboveMaximum": 9007199254740992
+  },
+  "unicode": {
+    "astralScalar": "😀",
+    "nameMaximumScalars": 128,
+    "titleMaximumScalars": 256,
+    "descriptionMaximumScalars": 4096,
+    "colorMaximumScalars": 64,
+    "reasonMaximumScalars": 256,
+    "ecmaScriptTrimWhitespace": [
+      "\t",
+      "\n",
+      "\u000b",
+      "\f",
+      "\r",
+      " ",
+      "\u00a0",
+      "\u1680",
+      "\u2000",
+      "\u2001",
+      "\u2002",
+      "\u2003",
+      "\u2004",
+      "\u2005",
+      "\u2006",
+      "\u2007",
+      "\u2008",
+      "\u2009",
+      "\u200a",
+      "\u2028",
+      "\u2029",
+      "\u202f",
+      "\u205f",
+      "\u3000",
+      "\ufeff"
+    ],
+    "nonTrimWhitespace": ["\u0085", "\u180e"]
+  }
+}

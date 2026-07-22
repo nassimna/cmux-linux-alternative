@@ -1,0 +1,78 @@
+{
+  "revision": 42,
+  "shortcuts": [
+    {
+      "commandId": "workspace.new",
+      "defaultShortcut": "Primary+O",
+      "overrideState": { "kind": "default" },
+      "effectiveShortcut": "Primary+O"
+    },
+    {
+      "commandId": "terminal.new",
+      "defaultShortcut": "Primary+T",
+      "overrideState": { "kind": "set", "shortcut": "Primary+Shift+T" },
+      "effectiveShortcut": "Primary+Shift+T"
+    },
+    {
+      "commandId": "tab.close",
+      "defaultShortcut": "Primary+W",
+      "overrideState": { "kind": "cleared" },
+      "effectiveShortcut": null
+    },
+    {
+      "commandId": "pane.splitRight",
+      "defaultShortcut": "Primary+D",
+      "overrideState": { "kind": "default" },
+      "effectiveShortcut": "Primary+D"
+    },
+    {
+      "commandId": "pane.splitDown",
+      "defaultShortcut": "Primary+Shift+D",
+      "overrideState": { "kind": "default" },
+      "effectiveShortcut": "Primary+Shift+D"
+    },
+    {
+      "commandId": "sidebar.toggle",
+      "defaultShortcut": "Primary+B",
+      "overrideState": { "kind": "default" },
+      "effectiveShortcut": "Primary+B"
+    },
+    {
+      "commandId": "commandPalette.toggle",
+      "defaultShortcut": "Primary+Shift+P",
+      "overrideState": { "kind": "default" },
+      "effectiveShortcut": "Primary+Shift+P"
+    },
+    {
+      "commandId": "terminal.search",
+      "defaultShortcut": "Primary+F",
+      "overrideState": { "kind": "default" },
+      "effectiveShortcut": "Primary+F"
+    },
+    {
+      "commandId": "browser.openSplit",
+      "defaultShortcut": "Primary+Shift+L",
+      "overrideState": { "kind": "default" },
+      "effectiveShortcut": "Primary+Shift+L"
+    },
+    {
+      "commandId": "notifications.toggle",
+      "defaultShortcut": "Primary+I",
+      "overrideState": { "kind": "default" },
+      "effectiveShortcut": "Primary+I"
+    },
+    {
+      "commandId": "notifications.latestUnread",
+      "defaultShortcut": "Primary+Shift+U",
+      "overrideState": { "kind": "default" },
+      "effectiveShortcut": "Primary+Shift+U"
+    },
+    {
+      "commandId": "settings.open",
+      "defaultShortcut": "Primary+Comma",
+      "overrideState": { "kind": "default" },
+      "effectiveShortcut": "Primary+Comma"
+    }
+  ],
+  "notifications": { "systemEnabled": true, "includeBody": false }
+}

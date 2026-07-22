@@ -1,0 +1,73 @@
+appId: dev.agentworkspace.desktop
+productName: Agent Workspace
+asar: true
+afterPack: ./scripts/after-pack.mjs
+directories:
+  output: ../../release
+files:
+  - out/**/*
+  - package.json
+extraResources:
+  - from: ../../target/release
+    to: bin
+    filter:
+      - agent-workspace-service
+      - agent-workspace-service.exe
+      - agent-workspace-cli
+      - agent-workspace-cli.exe
+  - from: node_modules/@fontsource-variable/jetbrains-mono/LICENSE
+    to: licenses/JetBrainsMono-OFL-1.1.txt
+linux:
+  icon: build/icons
+  electronUpdaterCompatibility: '>= 2.16'
+  category: Development
+  executableName: agent-workspace
+  artifactName: agent-workspace-${version}-x86_64.${ext}
+  maintainer: Agent Workspace contributors
+  vendor: Agent Workspace contributors
+  synopsis: Cross-platform workspace for agent-driven development
+  syncDesktopName: true
+  desktop:
+    entry:
+      StartupWMClass: agent-workspace
+  target:
+    - AppImage
+    - deb
+    - rpm
+rpm:
+  packageName: agent-workspace
+  depends:
+    - bubblewrap
+    - systemd
+deb:
+  packageName: agent-workspace
+  depends:
+    - bubblewrap
+    - systemd
+mac:
+  icon: build/icon.svg
+  electronUpdaterCompatibility: '>= 2.16'
+  category: public.app-category.developer-tools
+  artifactName: agent-workspace-${version}-macos-${arch}.${ext}
+  hardenedRuntime: true
+  notarize: true
+  target:
+    - dmg
+    - zip
+win:
+  icon: build/icon.svg
+  electronUpdaterCompatibility: '>= 2.16'
+  executableName: agent-workspace
+  artifactName: agent-workspace-${version}-windows-${arch}-setup.${ext}
+  verifyUpdateCodeSignature: true
+  target:
+    - nsis
+nsis:
+  oneClick: false
+  perMachine: false
+  allowElevation: true
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  deleteAppDataOnUninstall: false
+  uninstallDisplayName: Agent Workspace

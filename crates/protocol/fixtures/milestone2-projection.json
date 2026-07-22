@@ -1,0 +1,113 @@
+{
+  "revision": 42,
+  "workspaces": [
+    {
+      "id": "10000000-0000-4000-8000-000000000001",
+      "name": "Fixture workspace",
+      "description": "Shared Rust and TypeScript projection fixture",
+      "color": null,
+      "workingDirectory": "/tmp/fixture-workspace",
+      "layout": {
+        "kind": "split",
+        "splitId": "20000000-0000-4000-8000-000000000001",
+        "axis": "horizontal",
+        "ratio": 0.6,
+        "first": {
+          "kind": "leaf",
+          "paneId": "30000000-0000-4000-8000-000000000001"
+        },
+        "second": {
+          "kind": "leaf",
+          "paneId": "30000000-0000-4000-8000-000000000002"
+        }
+      },
+      "selectedPaneId": "30000000-0000-4000-8000-000000000002",
+      "panes": [
+        {
+          "id": "30000000-0000-4000-8000-000000000001",
+          "tabIds": [
+            "40000000-0000-4000-8000-000000000001",
+            "40000000-0000-4000-8000-000000000002"
+          ],
+          "selectedTabId": "40000000-0000-4000-8000-000000000002",
+          "title": null,
+          "attention": { "unreadCount": 0, "highestLevel": null, "latestUnread": null }
+        },
+        {
+          "id": "30000000-0000-4000-8000-000000000002",
+          "tabIds": ["40000000-0000-4000-8000-000000000003"],
+          "selectedTabId": "40000000-0000-4000-8000-000000000003",
+          "title": "Docs",
+          "attention": { "unreadCount": 0, "highestLevel": null, "latestUnread": null }
+        }
+      ],
+      "tabs": [
+        {
+          "id": "40000000-0000-4000-8000-000000000001",
+          "paneId": "30000000-0000-4000-8000-000000000001",
+          "title": "Shell",
+          "customTitle": null,
+          "content": {
+            "kind": "terminal",
+            "launch": {
+              "cwd": "/tmp/fixture-workspace",
+              "rows": 24,
+              "cols": 80
+            },
+            "runtimeSessionId": "50000000-0000-4000-8000-000000000001"
+          },
+          "attention": { "unreadCount": 0, "highestLevel": null, "latestUnread": null },
+          "createdAt": 1000
+        },
+        {
+          "id": "40000000-0000-4000-8000-000000000002",
+          "paneId": "30000000-0000-4000-8000-000000000001",
+          "title": "Tests",
+          "customTitle": "M2 tests",
+          "content": {
+            "kind": "terminal",
+            "launch": {
+              "cwd": "/tmp/fixture-workspace",
+              "rows": 30,
+              "cols": 100
+            }
+          },
+          "attention": { "unreadCount": 0, "highestLevel": null, "latestUnread": null },
+          "createdAt": 1001
+        },
+        {
+          "id": "40000000-0000-4000-8000-000000000003",
+          "paneId": "30000000-0000-4000-8000-000000000002",
+          "title": "Reference",
+          "customTitle": null,
+          "content": {
+            "kind": "browser",
+            "state": {
+              "browserSessionId": "50000000-0000-4000-8000-000000000001",
+              "url": "https://example.test/reference",
+              "navigationTitle": "Reference",
+              "canBack": false,
+              "canForward": false,
+              "loading": false,
+              "devToolsOpen": false,
+              "profilePartition": "persist:agent-workspace-default",
+              "stateRevision": 0,
+              "correlationId": null
+            }
+          },
+          "attention": { "unreadCount": 0, "highestLevel": null, "latestUnread": null },
+          "createdAt": 1002
+        }
+      ],
+      "attention": { "unreadCount": 0, "highestLevel": null, "latestUnread": null },
+      "createdAt": 900,
+      "updatedAt": 1100
+    }
+  ],
+  "selectedWorkspaceId": "10000000-0000-4000-8000-000000000001",
+  "shortcutOverrides": [
+    { "commandId": "workspace.new", "shortcut": "Primary+O" },
+    { "commandId": "tab.close", "shortcut": null }
+  ],
+  "attention": { "unreadCount": 0, "highestLevel": null, "latestUnread": null }
+}

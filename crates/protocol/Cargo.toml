@@ -1,0 +1,17 @@
+[package]
+name = "agent-workspace-protocol"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+base64.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+ts-rs.workspace = true
+uuid.workspace = true
+url.workspace = true
+
+[lints]
+workspace = true
