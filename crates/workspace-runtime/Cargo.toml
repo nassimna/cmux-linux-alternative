@@ -11,7 +11,7 @@ agent-workspace-storage.workspace = true
 agent-workspace-terminal-runtime.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
-sha2 = "0.10.9"
+sha2 = "0.11.0"
 uuid.workspace = true
 
 [dev-dependencies]
