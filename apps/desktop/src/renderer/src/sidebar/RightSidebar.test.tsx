@@ -123,6 +123,53 @@ describe('RightSidebar', () => {
     )
   })
 
+  it('explains the selected tool and supports vertical arrow navigation', async () => {
+    render(<RightSidebar enabled paneId={placement.windowId} workspaceId={placement.windowId} />)
+    const textBoxTab = await screen.findByRole('tab', { name: 'Text Box' })
+
+    expect(screen.getByRole('heading', { name: 'Text Box' })).toBeVisible()
+    expect(screen.getByText('Keep lightweight notes connected to this workspace.')).toBeVisible()
+
+    textBoxTab.focus()
+    fireEvent.keyDown(textBoxTab, { key: 'ArrowDown' })
+
+    await waitFor(() => expect(screen.getByRole('tab', { name: 'Vault' })).toHaveFocus())
+  })
+
+  it('presents task state clearly and keeps force termination behind more actions', async () => {
+    Object.defineProperty(window, 'desktopBridge', {
+      configurable: true,
+      value: bridge({
+        listTasks: vi.fn().mockResolvedValue({
+          tasks: [
+            {
+              target: { sessionId: placement.windowId, generation: 1, revision: 2 },
+              kind: 'agent',
+              label: 'Implement sidebar UX',
+              lifecycle: 'running',
+              observation: 'lastVerified',
+              ownerLabel: 'local',
+              resourceSummary: null
+            }
+          ],
+          nextCursor: null
+        })
+      })
+    })
+    render(<RightSidebar enabled paneId={placement.windowId} workspaceId={placement.windowId} />)
+
+    fireEvent.click(await screen.findByRole('tab', { name: 'Task Manager' }))
+
+    expect(await screen.findByText('1 active task')).toBeVisible()
+    expect(screen.getByText('Implement sidebar UX')).toBeVisible()
+    expect(screen.getByText('running', { selector: '.task-state' })).toBeVisible()
+    expect(screen.getByRole('button', { name: 'Terminate' })).toBeVisible()
+    expect(screen.queryByRole('button', { name: 'Force terminate' })).not.toBeVisible()
+
+    fireEvent.click(screen.getByText('More actions'))
+    expect(screen.getByRole('button', { name: 'Force terminate' })).toBeVisible()
+  })
+
   it('shows a TextBox conflict without replacing the editor contents', async () => {
     const document = {
       textBoxDocumentId: placement.windowId,

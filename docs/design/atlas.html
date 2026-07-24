@@ -1,0 +1,2185 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Atlas — pixel-precise preview</title>
+    <style>
+      /* ════════════════════════════════════════════════════════════════════
+   1. VERBATIM TOKENS — packages/design-tokens/src/tokens.css (dark)
+   ════════════════════════════════════════════════════════════════════ */
+      .aw {
+        color-scheme: dark;
+        --aw-color-surface-canvas: #1e2023;
+        --aw-color-surface-sidebar: #1a1c1f;
+        --aw-color-surface-raised: #232529;
+        --aw-color-surface-overlay: #26282c;
+        --aw-color-surface-interactive: #24262a;
+        --aw-color-surface-interactive-hover: #2c2f34;
+        --aw-color-surface-interactive-active: #33363b;
+        --aw-color-text-primary: #e6e7e9;
+        --aw-color-text-secondary: #a2a6ad;
+        --aw-color-text-muted: #94989f;
+        --aw-color-border-default: #2b2d31;
+        --aw-color-border-strong: #35383d;
+        --aw-color-accent: #4c8dff;
+        --aw-color-accent-hover: #7fb0ff;
+        --aw-color-accent-subtle: #232b39;
+        --aw-color-selection: #274165;
+        --aw-color-attention: #e5a53a;
+        --aw-color-success: #56b374;
+        --aw-color-warning: #d8a03d;
+        --aw-color-destructive: #e06c5f;
+        --aw-color-terminal-canvas: #17181b;
+        --aw-font-ui: system-ui, 'Segoe UI', 'Cantarell', 'Ubuntu', sans-serif;
+        --aw-font-mono: 'JetBrains Mono Variable', 'JetBrains Mono', ui-monospace, monospace;
+        --aw-radius-xs: 0.1875rem; /* 3px */
+        --aw-radius-sm: 0.1875rem; /* 3px */
+        --aw-radius-md: 0.25rem; /* 4px */
+        --aw-radius-card: 0;
+        --aw-radius-full: 9999px;
+        --aw-border-width: 1px;
+        --aw-border-width-strong: 2px;
+        --aw-shadow-status-dot: 0 0 0 4px
+          color-mix(in oklch, var(--aw-color-success) 8%, transparent);
+        --aw-shadow-selected-tab: inset 0 -2px var(--aw-color-accent);
+      }
+
+      /* ════════════════════════════════════════════════════════════════════
+   2. VERBATIM CHROME — apps/desktop/src/renderer/src/styles.css
+      (line refs in comments; values unmodified)
+   ════════════════════════════════════════════════════════════════════ */
+      .aw.workspace-shell {
+        /* styles.css:955 */
+        --sidebar-width: 232px;
+        display: grid;
+        grid-template:
+          'title title' 32px
+          'sidebar content' minmax(0, 1fr) /
+          var(--sidebar-width) minmax(0, 1fr);
+        color: var(--aw-color-text-primary);
+        background: var(--aw-color-surface-canvas);
+        font-family: var(--aw-font-ui);
+        font-size: 13px;
+        line-height: 1.35;
+      }
+      .aw .titlebar {
+        /* styles.css:582 + :972 */
+        grid-area: title;
+        display: flex;
+        gap: 10px;
+        align-items: center;
+        min-width: 0;
+        height: 32px;
+        padding: 0 10px 0 15px;
+        color: var(--aw-color-text-secondary);
+        font-size: 12px; /* --aw-font-size-control */
+        font-weight: 560; /* --aw-font-weight-emphasis */
+        border-bottom: 1px solid var(--aw-color-border-default);
+        background: var(--aw-color-surface-raised);
+        user-select: none;
+      }
+      .aw .mark {
+        /* styles.css:598 — 9px, 2px accent, rotated */
+        width: 9px;
+        height: 9px;
+        flex: 0 0 auto;
+        border: 2px solid var(--aw-color-accent);
+        border-radius: var(--aw-radius-xs);
+        transform: rotate(45deg);
+      }
+      .aw .app-title {
+        flex: 0 0 auto;
+        color: var(--aw-color-text-primary);
+      } /* :980 */
+      .aw .workspace-title {
+        /* styles.css:985 */
+        min-width: 0;
+        overflow: hidden;
+        color: var(--aw-color-text-muted);
+        font-weight: 450; /* --aw-font-weight-ui */
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .aw .workspace-title::before {
+        margin-right: 10px;
+        color: var(--aw-color-text-muted);
+        content: '/';
+      }
+      .aw .titlebar-actions {
+        display: flex;
+        gap: 3px;
+        align-items: center;
+        margin-left: auto;
+      } /* :1000 */
+      .aw .titlebar-actions button,               /* styles.css:1008 — 26px icon buttons */
+.aw .sidebar-heading button,
+.aw .workspace-drag, .aw .workspace-remove {
+        display: inline-grid;
+        width: 26px;
+        height: 26px;
+        place-items: center;
+        padding: 0;
+        color: var(--aw-color-text-muted);
+        border: 1px solid transparent;
+        border-radius: var(--aw-radius-sm);
+        background: transparent;
+        cursor: pointer;
+        font: inherit;
+      }
+      .aw .titlebar-actions button:hover,
+      .aw .sidebar-heading button:hover,
+      .aw .workspace-drag:hover,
+      .aw .workspace-remove:hover {
+        color: var(--aw-color-text-primary);
+        border-color: var(--aw-color-border-default);
+        background: var(--aw-color-surface-interactive-hover);
+      }
+      .aw .service-version {
+        /* styles.css:607 + :1035 */
+        margin-left: 7px;
+        color: var(--aw-color-text-muted);
+        font-family: var(--aw-font-mono);
+        font-size: 10px;
+        font-weight: 400;
+      }
+      .aw .workspace-sidebar {
+        /* styles.css:615 + :1039 */
+        grid-area: sidebar;
+        display: flex;
+        flex-direction: column;
+        min-width: 0;
+        min-height: 0;
+        gap: 0;
+        padding: 0;
+        border-right: 1px solid var(--aw-color-border-default);
+        background: var(--aw-color-surface-sidebar);
+      }
+      .aw .sidebar-heading {
+        /* styles.css:625 + :1105 */
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        height: 50px;
+        padding: 7px 14px 0 16px;
+        color: var(--aw-color-text-muted);
+        font-size: 10px;
+        font-weight: 650;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+      .aw .sidebar-heading .heading-actions {
+        display: flex;
+        gap: 3px;
+      }
+      .aw .sidebar-open-folder {
+        /* styles.css:1046 — 38px, radius-card:0 */
+        display: flex;
+        align-items: center;
+        justify-content: flex-start;
+        min-height: 38px;
+        margin: 4px 10px 12px;
+        padding: 0 11px;
+        gap: 8px;
+        color: var(--aw-color-text-primary);
+        font: inherit;
+        font-size: 12px;
+        font-weight: 520;
+        border: 1px solid
+          color-mix(in oklch, var(--aw-color-accent) 34%, var(--aw-color-border-default));
+        border-radius: var(--aw-radius-card);
+        background: var(--aw-color-accent-subtle);
+        cursor: pointer;
+      }
+      .aw .sidebar-open-folder:hover {
+        background: color-mix(in oklch, var(--aw-color-accent) 23%, var(--aw-color-surface-raised));
+      }
+      .aw .sidebar-open-folder kbd {
+        margin-left: auto;
+        color: var(--aw-color-text-secondary);
+        font-family: var(--aw-font-mono);
+        font-size: 10px;
+        border: 0;
+        background: transparent;
+      }
+      .aw .workspace-list {
+        /* styles.css:1123 */
+        display: flex;
+        flex: 1;
+        min-height: 0;
+        flex-direction: column;
+        gap: 5px;
+        padding: 0 9px;
+        overflow: auto;
+      }
+      .aw .workspace-section {
+        display: flex;
+        flex-direction: column;
+        gap: 5px;
+      }
+      .aw .workspace-section-heading,
+      .aw .workspace-group-heading {
+        /* styles.css:1139 */
+        display: flex;
+        min-height: 28px;
+        align-items: center;
+        gap: 6px;
+        padding: 3px 8px;
+        color: var(--aw-color-text-muted);
+        font-size: 10px;
+        font-weight: 650;
+      }
+      .aw .workspace-group-heading {
+        padding: 3px;
+      }
+      .aw .workspace-group-heading > button {
+        /* styles.css:1151 */
+        min-width: 0;
+        padding: 3px 5px;
+        color: inherit;
+        font: inherit;
+        border: 1px solid transparent;
+        border-radius: var(--aw-radius-sm);
+        background: transparent;
+        cursor: pointer;
+      }
+      .aw .workspace-group-heading > button:first-child {
+        display: flex;
+        flex: 1;
+        align-items: center;
+        gap: 5px;
+        text-align: left;
+      }
+      .aw .workspace-group-heading > button:hover {
+        color: var(--aw-color-text-primary);
+        border-color: var(--aw-color-border-default);
+        background: var(--aw-color-surface-interactive-hover);
+      }
+      .aw .workspace-group-heading svg[data-collapsed='true'] {
+        transform: rotate(-90deg);
+      } /* :1175 */
+      .aw .workspace-card {
+        /* styles.css:653 + :1247 */
+        display: block;
+        width: 100%;
+        min-height: 0;
+        overflow: hidden;
+        text-align: left;
+        color: var(--aw-color-text-secondary);
+        border: 1px solid transparent;
+        border-left: 2px solid transparent;
+        border-radius: var(--aw-radius-sm);
+        background: transparent;
+        position: relative;
+      }
+      .aw .workspace-card:hover,
+      .aw .workspace-card.demo-hover {
+        background: var(--aw-color-surface-interactive);
+      }
+      .aw .workspace-card[data-selected='true'] {
+        /* styles.css:1278 */
+        color: var(--aw-color-text-primary);
+        border-left-color: var(--aw-color-accent);
+        border-radius: 0 var(--aw-radius-sm) var(--aw-radius-sm) 0;
+        background: var(--aw-color-accent-subtle);
+      }
+      .aw .workspace-row {
+        /* styles.css:1262 — right pad reduced, see Atlas Δ3 */
+        display: block;
+        width: 100%;
+        min-height: 0;
+        padding: 7px 9px 0 9px;
+        color: inherit;
+        text-align: left;
+        border: 0;
+        background: transparent;
+        font: inherit;
+      }
+      .aw .workspace-details {
+        padding: 0 9px 8px 9px;
+      } /* styles.css:1285, right pad see Δ3 */
+      .aw .workspace-name-line {
+        display: flex;
+        gap: 7px;
+        align-items: center;
+        min-width: 0;
+      } /* :1298 */
+      .aw .workspace-indicator {
+        /* styles.css:1289 — 7px dot + 4px halo */
+        width: 7px;
+        height: 7px;
+        flex: 0 0 auto;
+        border-radius: var(--aw-radius-full);
+        background: var(--aw-color-success);
+        box-shadow: var(--aw-shadow-status-dot);
+      }
+      .aw .workspace-copy {
+        display: grid;
+        align-content: start;
+        gap: 4px;
+        min-width: 0;
+        padding: 0;
+      } /* :673 + :1305 */
+      .aw .workspace-copy strong {
+        /* styles.css:688 + :1311 */
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        color: var(--aw-color-text-primary);
+        font-size: 12px;
+        font-weight: 620;
+      }
+      .aw .workspace-directory,
+      .aw .workspace-meta-row {
+        /* styles.css:1319 — 11px ui, muted */
+        display: flex;
+        gap: 6px;
+        align-items: center;
+        min-width: 0;
+        color: var(--aw-color-text-muted);
+        font-family: var(--aw-font-ui);
+        font-size: 11px;
+      }
+      .aw .workspace-meta-value {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .aw .workspace-directory svg,
+      .aw .workspace-meta-row svg {
+        flex: 0 0 auto;
+        opacity: 0.7;
+      }
+      .aw .workspace-chips {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 4px;
+        min-width: 0;
+        margin-top: 2px;
+      } /* :1369 */
+      .aw .workspace-chip {
+        /* styles.css:1377 — 18px, mono 10.5 */
+        display: inline-flex;
+        height: 18px;
+        align-items: center;
+        gap: 4px;
+        max-width: 100%;
+        padding: 0 5px;
+        overflow: hidden;
+        color: var(--aw-color-text-secondary);
+        font-family: var(--aw-font-mono);
+        font-size: 10.5px;
+        white-space: nowrap;
+        border: 1px solid var(--aw-color-border-default);
+        border-radius: var(--aw-radius-xs);
+        background: var(--aw-color-surface-interactive);
+      }
+      .aw .workspace-chip svg {
+        opacity: 0.7;
+      }
+      .aw .sidebar-footer {
+        /* styles.css:700 + :1113 — 27px */
+        display: flex;
+        height: 27px;
+        align-items: center;
+        justify-content: flex-end;
+        padding: 0 12px;
+        margin: 0;
+        color: var(--aw-color-text-muted);
+        font-size: 10px;
+        border-top: 1px solid var(--aw-color-border-default);
+      }
+      .aw .workspace-content {
+        /* styles.css:706 */
+        grid-area: content;
+        min-width: 0;
+        min-height: 0;
+        background: var(--aw-color-terminal-canvas);
+      }
+      .aw .pane-group {
+        display: flex;
+        width: 100%;
+        height: 100%;
+        min-width: 0;
+        min-height: 0;
+      } /* :1639 */
+      .aw .pane-separator {
+        /* styles.css:1647 — 5px gutter, 1px line */
+        position: relative;
+        display: grid;
+        flex: 0 0 5px;
+        place-items: center;
+        background: var(--aw-color-surface-canvas);
+      }
+      .aw .pane-separator span {
+        display: block;
+        width: 1px;
+        height: 100%;
+        background: var(--aw-color-border-strong);
+      }
+      .aw .pane-view {
+        /* styles.css:1673 — 41px tab row, 1px frame */
+        position: relative;
+        display: grid;
+        flex: 1;
+        min-width: 0;
+        min-height: 0;
+        grid-template-rows: 41px minmax(0, 1fr);
+        border: 1px solid transparent;
+        background: var(--aw-color-surface-canvas);
+      }
+      .aw .pane-view.selected {
+        border-color: color-mix(in oklch, var(--aw-color-accent) 28%, transparent);
+      } /* :1685 */
+      .aw .pane-tabbar {
+        /* styles.css:1689 */
+        display: flex;
+        min-width: 0;
+        align-items: stretch;
+        padding: 3px 6px 0;
+        border-bottom: 1px solid var(--aw-color-border-default);
+        background: var(--aw-color-surface-raised);
+      }
+      .aw .pane-tabs {
+        display: flex;
+        min-width: 0;
+        flex: 1;
+        gap: 3px;
+      }
+      .aw .pane-tab {
+        /* styles.css:1707 — 26px, radius 0 */
+        position: relative;
+        display: flex;
+        min-width: 0;
+        height: 26px;
+        align-items: center;
+        padding-right: 3px;
+        color: var(--aw-color-text-muted);
+        border: 0;
+        border-radius: 0;
+        background: transparent;
+      }
+      .aw .pane-tab:hover {
+        background: var(--aw-color-surface-interactive);
+      }
+      .aw .pane-tab.active {
+        /* styles.css:1724 — 2px accent underline */
+        color: var(--aw-color-text-primary);
+        background: var(--aw-color-surface-interactive);
+        box-shadow: var(--aw-shadow-selected-tab);
+      }
+      .aw .pane-tab-select {
+        display: flex;
+        min-width: 0;
+        max-width: 180px;
+        gap: 4px;
+        align-items: center;
+        align-self: stretch;
+        padding: 0 3px 0 6px;
+      }
+      .aw .pane-tab-select span {
+        /* styles.css:1797 — 10.5px labels */
+        min-width: 0;
+        overflow: hidden;
+        font-size: 10.5px;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .aw .pane-tab .tab-close {
+        /* styles.css:1745 — 18×20 */
+        display: inline-grid;
+        place-items: center;
+        width: 18px;
+        height: 20px;
+        padding: 0;
+        color: var(--aw-color-text-muted);
+        border: 0;
+        border-radius: var(--aw-radius-xs);
+        background: transparent;
+        font-size: 11px;
+        cursor: pointer;
+      }
+      .aw .pane-tab .tab-close:hover {
+        color: var(--aw-color-text-primary);
+        background: var(--aw-color-surface-interactive-hover);
+      }
+      .aw .pane-actions {
+        display: flex;
+        gap: 3px;
+        align-items: center;
+        margin-left: auto;
+      }
+      .aw .pane-actions button {
+        display: inline-grid;
+        width: 26px;
+        height: 24px;
+        place-items: center;
+        padding: 0;
+        color: var(--aw-color-text-muted);
+        border: 1px solid transparent;
+        border-radius: var(--aw-radius-sm);
+        background: transparent;
+        cursor: pointer;
+        font: inherit;
+      }
+      .aw .pane-actions button:hover {
+        color: var(--aw-color-text-primary);
+        border-color: var(--aw-color-border-default);
+        background: var(--aw-color-surface-interactive-hover);
+      }
+      .aw .terminal-pane {
+        /* styles.css:713 — rows 1fr / 22px */
+        display: grid;
+        grid-template-rows: minmax(0, 1fr) 22px;
+        width: 100%;
+        min-width: 0;
+        min-height: 0;
+        background: var(--aw-color-terminal-canvas);
+      }
+      .aw .terminal-host {
+        /* styles.css:879 — pad 7px 9px; terminal.fontSize 13 (crates/config) */
+        width: 100%;
+        height: 100%;
+        padding: 7px 9px;
+        overflow: hidden;
+        font-family: var(--aw-font-mono);
+        font-size: 13px;
+        line-height: 1.4;
+        color: #d4d6d9; /* terminal-theme.ts foreground */
+      }
+      .aw .terminal-statusbar {
+        /* styles.css:919 */
+        display: flex;
+        gap: 7px;
+        align-items: center;
+        min-width: 0;
+        padding: 0 9px;
+        color: var(--aw-color-text-muted);
+        font-size: 10px;
+        border-top: 1px solid var(--aw-color-border-default);
+        background: var(--aw-color-surface-sidebar);
+      }
+      .aw .status-dot {
+        width: 6px;
+        height: 6px;
+        flex: 0 0 auto;
+        border-radius: var(--aw-radius-full);
+        background: var(--aw-color-success);
+      }
+      .aw .link-target {
+        min-width: 0;
+        margin-left: auto;
+        overflow: hidden;
+        color: var(--aw-color-text-muted);
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .aw .browser-pane {
+        /* styles.css:2028 — rows 32 / 1fr / 22 */
+        display: grid;
+        min-width: 0;
+        min-height: 0;
+        height: 100%;
+        grid-template-rows: 32px minmax(0, 1fr) 22px;
+        background: var(--aw-color-surface-canvas);
+      }
+      .aw .browser-toolbar {
+        /* styles.css:2038 */
+        display: flex;
+        min-width: 0;
+        gap: 4px;
+        align-items: center;
+        padding: 2px 7px;
+        border-bottom: 1px solid var(--aw-color-border-default);
+        background: var(--aw-color-surface-raised);
+      }
+      .aw .browser-toolbar > button {
+        /* styles.css:2050 — 26px */
+        display: grid;
+        width: 26px;
+        height: 26px;
+        flex: 0 0 auto;
+        place-items: center;
+        padding: 0;
+        color: var(--aw-color-text-secondary);
+        border: 0;
+        border-radius: var(--aw-radius-sm);
+        background: transparent;
+        cursor: pointer;
+      }
+      .aw .browser-toolbar > button:hover:not(:disabled) {
+        color: var(--aw-color-text-primary);
+        background: var(--aw-color-surface-interactive-hover);
+      }
+      .aw .browser-toolbar > button:disabled {
+        color: var(--aw-color-text-muted);
+        cursor: default;
+      }
+      .aw .browser-address {
+        /* styles.css:2074 — 28px, radius 4 */
+        position: relative;
+        display: flex;
+        min-width: 0;
+        height: 28px;
+        flex: 1;
+        align-items: center;
+        border: 1px solid var(--aw-color-border-default);
+        border-radius: var(--aw-radius-md);
+        background: var(--aw-color-surface-canvas);
+      }
+      .aw .browser-security {
+        display: grid;
+        width: 27px;
+        flex: 0 0 auto;
+        place-items: center;
+        color: var(--aw-color-text-muted);
+      } /* :2101 */
+      .aw .browser-security.insecure {
+        color: var(--aw-color-warning);
+      }
+      .aw .browser-address input {
+        /* styles.css:2118 — mono 11px */
+        min-width: 0;
+        height: 100%;
+        flex: 1;
+        padding: 0 6px 0 0;
+        color: var(--aw-color-text-primary);
+        font-family: var(--aw-font-mono);
+        font-size: 11px;
+        border: 0;
+        outline: 0;
+        background: transparent;
+      }
+      .aw .browser-content-mock {
+        min-height: 0;
+        overflow: hidden;
+        background: #101114;
+        padding: 22px 26px;
+      }
+
+      /* ════════════════════════════════════════════════════════════════════
+   3. ATLAS ADDITIONS — proposed diff to styles.css (Δ1–Δ7)
+   ════════════════════════════════════════════════════════════════════ */
+      /* Δ1 — relative timestamp, right edge of the name line */
+      .aw .workspace-when {
+        margin-left: auto;
+        flex: 0 0 auto;
+        color: var(--aw-color-text-muted);
+        font-family: var(--aw-font-mono);
+        font-size: 10px;
+        font-weight: 400;
+      }
+      /* Δ2 — attention state: amber dot + one alert line (replaces always-on status) */
+      .aw .workspace-card[data-attention='action-required'] .workspace-indicator {
+        background: var(--aw-color-attention);
+        box-shadow: 0 0 0 4px color-mix(in oklch, var(--aw-color-attention) 10%, transparent);
+      }
+      .aw .workspace-card[data-attention='none'] .workspace-indicator.idle {
+        background: var(--aw-color-border-strong);
+        box-shadow: none;
+      }
+      .aw .workspace-alert {
+        display: flex;
+        gap: 5px;
+        align-items: center;
+        min-width: 0;
+        color: var(--aw-color-attention);
+        font-size: 11px;
+      }
+      /* Δ3 — hover actions overlay the reserved gutter instead of permanent 76px padding */
+      .aw .workspace-hover-actions {
+        position: absolute;
+        top: 4px;
+        right: 4px;
+        display: none;
+        gap: 2px;
+        padding-left: 14px;
+        background: linear-gradient(90deg, transparent, var(--aw-color-surface-interactive) 12px);
+      }
+      .aw .workspace-card:hover .workspace-hover-actions,
+      .aw .workspace-card.demo-hover .workspace-hover-actions {
+        display: flex;
+      }
+      .aw .workspace-card:hover .workspace-when,
+      .aw .workspace-card.demo-hover .workspace-when {
+        visibility: hidden;
+      }
+      /* Δ4 — meta line indents to align with the name (7px dot + 7px gap) */
+      .aw .workspace-copy .workspace-directory,
+      .aw .workspace-meta-row,
+      .aw .workspace-alert,
+      .aw .workspace-chips {
+        padding-left: 14px;
+      }
+      /* Δ5 — inline branch (replaces bordered git pill on clean repos) */
+      .aw .workspace-branch {
+        display: inline-flex;
+        gap: 4px;
+        align-items: center;
+        flex: 0 0 auto;
+      }
+      /* Δ6 — chips render only on the selected card; kind icon per tab (terminal / browser) */
+      /* Δ7 — collapsed group shows its workspace count at the right edge */
+      .aw .workspace-group-count {
+        margin-left: auto;
+        flex: 0 0 auto;
+        padding-right: 5px;
+        color: var(--aw-color-text-muted);
+        font-family: var(--aw-font-mono);
+        font-size: 10px;
+        font-weight: 400;
+      }
+
+      /* ════════════════════════════════════════════════════════════════════
+   3b. ROUNDED VARIANT — token override + 4 hardcoded-sharp spots.
+   Everything else inherits automatically because the chrome reads
+   radii through var(--aw-radius-*).
+   ════════════════════════════════════════════════════════════════════ */
+      .aw.rounded {
+        --aw-radius-xs: 5px; /* was 3px — chips, git pill, tab close */
+        --aw-radius-sm: 6px; /* was 3px — buttons, cards, group buttons */
+        --aw-radius-md: 8px; /* was 4px — address bar base */
+        --aw-radius-card: 8px; /* was 0   — open-folder button */
+      }
+      .aw.rounded .pane-tab {
+        border-radius: 6px 6px 0 0;
+      } /* was hardcoded 0 (styles.css:1716) */
+      .aw.rounded .pane-view {
+        border-radius: 8px;
+        overflow: hidden;
+      } /* frame corners follow */
+      .aw.rounded .workspace-chip {
+        padding: 0 7px;
+        border-radius: var(--aw-radius-full);
+      } /* pill chips */
+      .aw.rounded .browser-address {
+        border-radius: var(--aw-radius-full);
+      } /* pill address bar */
+      .aw.rounded .browser-address input {
+        padding-right: 10px;
+      }
+
+      /* ════════════════════════════════════════════════════════════════════
+   4. ARTIFACT SCAFFOLDING (not part of the app spec)
+   ════════════════════════════════════════════════════════════════════ */
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+      body {
+        background: #101114;
+        color: #e6e8ec;
+        font-family: system-ui, 'Segoe UI', sans-serif;
+        padding: 28px 24px 80px;
+      }
+      .page {
+        max-width: 1360px;
+        margin: 0 auto;
+      }
+      .page h1 {
+        font-size: 20px;
+        font-weight: 650;
+        letter-spacing: -0.02em;
+      }
+      .page > p {
+        color: #9ba1ab;
+        font-size: 13px;
+        margin-top: 6px;
+        max-width: 880px;
+        line-height: 1.55;
+      }
+      .page code,
+      .spec code {
+        font-family: 'JetBrains Mono', ui-monospace, monospace;
+        font-size: 0.92em;
+        color: #b8cdf5;
+      }
+      .controls {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+        margin: 18px 0 14px;
+        flex-wrap: wrap;
+      }
+      .controls .lbl {
+        font-size: 11px;
+        color: #6b7078;
+        text-transform: uppercase;
+        letter-spacing: 0.07em;
+        font-weight: 650;
+        margin-right: 2px;
+      }
+      .controls button {
+        background: #1e2023;
+        color: #9ba1ab;
+        border: 1px solid #2b2d31;
+        border-radius: 7px;
+        padding: 6px 13px;
+        font-size: 12.5px;
+        font-weight: 550;
+        cursor: pointer;
+        font-family: inherit;
+      }
+      .controls button:hover {
+        color: #e6e8ec;
+        border-color: #3a3d43;
+      }
+      .controls button.on {
+        background: rgba(76, 141, 255, 0.14);
+        border-color: rgba(76, 141, 255, 0.5);
+        color: #a9c8ff;
+      }
+      .controls .sep {
+        width: 1px;
+        height: 20px;
+        background: #2b2d31;
+        margin: 0 6px;
+      }
+      .frame-wrap {
+        border: 1px solid #2b2d31;
+        border-radius: 10px;
+        overflow: hidden;
+        box-shadow: 0 24px 64px rgba(0, 0, 0, 0.5);
+      }
+      .aw.workspace-shell {
+        height: 760px;
+      }
+      .aw svg {
+        display: block;
+      }
+      .glyph {
+        font-size: 13px;
+        line-height: 1;
+      }
+      .t-blue {
+        color: #4c8dff;
+      }
+      .t-bblue {
+        color: #7fb0ff;
+      }
+      .t-green {
+        color: #56b374;
+      }
+      .t-dim {
+        color: #71757c;
+      }
+      .block-cursor {
+        display: inline-block;
+        width: 7px;
+        height: 15px;
+        background: #d4d6d9;
+        vertical-align: -2px;
+      }
+      .mock-h {
+        color: #e6e8ec;
+        font-size: 15px;
+        font-weight: 650;
+        letter-spacing: -0.02em;
+      }
+      .mock-p {
+        color: #9ba1ab;
+        font-size: 10.5px;
+        margin-top: 6px;
+        line-height: 1.5;
+        max-width: 420px;
+      }
+      .mock-pill-row {
+        display: flex;
+        gap: 5px;
+        margin-top: 12px;
+      }
+      .mock-pill {
+        border: 1px solid #2b2d31;
+        border-radius: 5px;
+        padding: 3px 9px;
+        font-size: 9.5px;
+        color: #9ba1ab;
+        background: #1e2023;
+      }
+      .mock-pill.on {
+        background: rgba(76, 141, 255, 0.14);
+        border-color: rgba(76, 141, 255, 0.5);
+        color: #a9c8ff;
+      }
+
+      /* corner compare slider */
+      .compare-stage {
+        position: relative;
+      }
+      .compare-overlay {
+        position: absolute;
+        inset: 0;
+        z-index: 20;
+        clip-path: inset(0 0 0 var(--cut, 50%));
+        pointer-events: none;
+      }
+      .compare-overlay .aw.workspace-shell {
+        height: 100%;
+      }
+      .compare-divider {
+        position: absolute;
+        top: 0;
+        bottom: 0;
+        left: var(--cut, 50%);
+        z-index: 30;
+        width: 0;
+        display: none;
+      }
+      .compare-stage.comparing .compare-divider {
+        display: block;
+      }
+      .compare-divider::before {
+        content: '';
+        position: absolute;
+        top: 0;
+        bottom: 0;
+        left: -1px;
+        width: 2px;
+        background: #ff4da6;
+        box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.4);
+      }
+      .compare-handle {
+        position: absolute;
+        top: 50%;
+        left: 0;
+        transform: translate(-50%, -50%);
+        width: 26px;
+        height: 26px;
+        border-radius: 50%;
+        cursor: ew-resize;
+        background: #ff4da6;
+        color: #fff;
+        display: grid;
+        place-items: center;
+        font-size: 11px;
+        font-weight: 700;
+        box-shadow: 0 4px 14px rgba(0, 0, 0, 0.5);
+        user-select: none;
+        touch-action: none;
+      }
+      .compare-badge {
+        position: absolute;
+        bottom: 44px;
+        z-index: 31;
+        display: none;
+        font:
+          650 10px/1 'JetBrains Mono',
+          ui-monospace,
+          monospace;
+        letter-spacing: 0.07em;
+        text-transform: uppercase;
+        padding: 4px 8px;
+        border-radius: 4px;
+        color: #fff;
+        background: rgba(0, 0, 0, 0.55);
+        border: 1px solid #3a3d43;
+        pointer-events: none;
+      }
+      .compare-stage.comparing .compare-badge {
+        display: block;
+      }
+      .compare-badge.sharp {
+        left: 12px;
+      }
+      .compare-badge.round {
+        right: 12px;
+      }
+
+      /* redlines */
+      .rl [data-spec] {
+        outline: 1px dashed rgba(255, 77, 166, 0.6);
+        outline-offset: -1px;
+        position: relative;
+      }
+      .rl [data-spec]::after {
+        content: attr(data-spec);
+        position: absolute;
+        top: 0;
+        right: 0;
+        z-index: 40;
+        font:
+          500 9px/1.5 'JetBrains Mono',
+          ui-monospace,
+          monospace;
+        color: #fff;
+        background: #b3266e;
+        padding: 0 5px 1px;
+        border-radius: 0 0 0 3px;
+        white-space: nowrap;
+        pointer-events: none;
+      }
+      .rl [data-spec-side='bottom']::after {
+        top: auto;
+        bottom: 0;
+        border-radius: 3px 0 0 0;
+      }
+
+      /* spec tables */
+      .spec {
+        margin-top: 30px;
+      }
+      .spec h2 {
+        font-size: 15px;
+        font-weight: 650;
+        margin-bottom: 4px;
+      }
+      .spec > p {
+        color: #9ba1ab;
+        font-size: 12.5px;
+        margin-bottom: 12px;
+        line-height: 1.55;
+        max-width: 880px;
+      }
+      .spec table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 12px;
+      }
+      .spec th {
+        text-align: left;
+        color: #6b7078;
+        font-size: 10.5px;
+        text-transform: uppercase;
+        letter-spacing: 0.07em;
+        padding: 6px 10px;
+        border-bottom: 1px solid #2b2d31;
+      }
+      .spec td {
+        padding: 7px 10px;
+        border-bottom: 1px solid #232529;
+        color: #c7cbd2;
+        vertical-align: top;
+        line-height: 1.55;
+      }
+      .spec td:first-child {
+        white-space: nowrap;
+        color: #e6e8ec;
+        font-weight: 550;
+      }
+      .spec .src {
+        font-family: 'JetBrains Mono', ui-monospace, monospace;
+        font-size: 11px;
+        color: #8a929c;
+        white-space: nowrap;
+      }
+      .delta-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 12px;
+        margin-top: 12px;
+      }
+      .delta-card {
+        background: #1e2023;
+        border: 1px solid #2b2d31;
+        border-radius: 10px;
+        padding: 14px 16px;
+      }
+      .delta-card h4 {
+        font-size: 11px;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        margin-bottom: 8px;
+        font-weight: 650;
+      }
+      .delta-card.add h4 {
+        color: #8fe0b4;
+      }
+      .delta-card.rem h4 {
+        color: #ef8574;
+      }
+      .delta-card li {
+        font-size: 12.5px;
+        color: #9ba1ab;
+        line-height: 1.65;
+        margin-left: 16px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="page">
+      <h1>Atlas — pixel-precise preview</h1>
+      <p>
+        Variant B rebuilt 1:1 on the app’s real chrome, now covering the full surface: workspace
+        <b>groups</b> (collapse, counts), a <b>split pane</b> (terminal | browser) with the real
+        41px pane frame and 5px separator, and the <b>browser pane</b> chrome (32px toolbar / 28px
+        address bar / 22px status row). Every value is verbatim from <code>tokens.css</code>,
+        <code>styles.css</code> (line refs below), <code>terminal-theme.ts</code>, and
+        <code>crates/config</code>. Only the Δ-marked rules are new. Toggle <b>Redlines</b> to
+        verify measurements.
+      </p>
+
+      <div class="controls">
+        <span class="lbl">Corners</span>
+        <button class="on" id="m-sharp">Sharp · Basalt</button>
+        <button id="m-round">Rounded</button>
+        <button id="m-compare">Compare — drag the divider</button>
+        <div class="sep"></div>
+        <span class="lbl">Sidebar</span>
+        <button class="on" id="w232">232px</button>
+        <button id="w272">272px</button>
+        <div class="sep"></div>
+        <button id="rl-toggle">Redlines</button>
+        <button id="hov-toggle" class="on">Show hover state on “e-commerce”</button>
+      </div>
+
+      <div class="frame-wrap compare-stage" id="frame-wrap">
+        <div class="aw workspace-shell" id="shell">
+          <!-- titlebar — 32px -->
+          <header class="titlebar" data-spec="32px · surface-raised · 12px/560 · mark 9px rot45">
+            <span class="mark"></span>
+            <span class="app-title">Agent Workspace</span>
+            <span class="workspace-title">General Chat</span>
+            <div class="titlebar-actions" data-spec="26px btns · gap 3">
+              <button title="Collapse sidebar">
+                <svg
+                  width="14"
+                  height="14"
+                  viewBox="0 0 14 14"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.2"
+                >
+                  <rect x="1.5" y="2" width="11" height="10" rx="1" />
+                  <line x1="5" y1="2" x2="5" y2="12" />
+                </svg>
+              </button>
+              <button title="Command palette"><span class="glyph">⌘</span></button>
+              <button title="Notifications">
+                <svg
+                  width="13"
+                  height="13"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.8"
+                >
+                  <path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9" />
+                  <path d="M13.7 21a2 2 0 0 1-3.4 0" />
+                </svg>
+              </button>
+              <button title="Settings">
+                <svg
+                  width="13"
+                  height="13"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.8"
+                >
+                  <line x1="4" y1="7" x2="20" y2="7" />
+                  <circle cx="9" cy="7" r="2.2" fill="#232529" />
+                  <line x1="4" y1="17" x2="20" y2="17" />
+                  <circle cx="15" cy="17" r="2.2" fill="#232529" />
+                </svg>
+              </button>
+            </div>
+            <span class="service-version">protocol 1 · 0.1.0</span>
+          </header>
+
+          <!-- sidebar — 232px -->
+          <aside
+            class="workspace-sidebar"
+            data-spec="232px · surface-sidebar"
+            data-spec-side="bottom"
+          >
+            <div class="sidebar-heading" data-spec="50px · 10px/650 caps">
+              Workspaces
+              <div class="heading-actions">
+                <button title="New group">
+                  <svg
+                    width="13"
+                    height="13"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="1.8"
+                  >
+                    <path d="M12 2 2 7l10 5 10-5-10-5z" />
+                    <path d="m2 17 10 5 10-5" />
+                    <path d="m2 12 10 5 10-5" />
+                  </svg>
+                </button>
+                <button title="New workspace">
+                  <svg
+                    width="13"
+                    height="13"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                  >
+                    <line x1="12" y1="5" x2="12" y2="19" />
+                    <line x1="5" y1="12" x2="19" y2="12" />
+                  </svg>
+                </button>
+              </div>
+            </div>
+            <button class="sidebar-open-folder" data-spec="38px · radius 0 · accent-subtle">
+              <svg
+                width="14"
+                height="14"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.7"
+              >
+                <path
+                  d="M3 7V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.7.9l.8 1.2c.4.6 1 .9 1.7.9H19a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"
+                />
+              </svg>
+              <span>Open folder</span>
+              <kbd>Ctrl+O</kbd>
+            </button>
+
+            <div class="workspace-list" data-spec="pad 0 9 · gap 5">
+              <div class="workspace-section">
+                <div class="workspace-section-heading" data-spec="28px · 10px/650">Pinned</div>
+
+                <!-- attention card: amber dot, alert line -->
+                <div class="workspace-card" data-attention="action-required" data-selected="false">
+                  <button class="workspace-row">
+                    <div class="workspace-copy">
+                      <div class="workspace-name-line" data-spec="dot 7px+4px halo · gap 7">
+                        <span class="workspace-indicator"></span>
+                        <strong>cmux-linux-alternative</strong>
+                        <span class="workspace-when" data-spec="Δ1 mono 10px">2m</span>
+                      </div>
+                      <div class="workspace-directory" data-spec="11px muted · gap 6">
+                        <span class="workspace-meta-value"
+                          >~/drive/workspace/cmux-linux-alternative</span
+                        >
+                        <span class="workspace-branch"
+                          ><svg
+                            width="11"
+                            height="11"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            stroke-width="2"
+                          >
+                            <circle cx="6" cy="6" r="2.6" />
+                            <circle cx="6" cy="18" r="2.6" />
+                            <circle cx="18" cy="6" r="2.6" />
+                            <path d="M6 8.6v6.8" />
+                            <path d="M18 8.6a9 9 0 0 1-9 9" />
+                          </svg>
+                          main</span
+                        >
+                      </div>
+                      <div class="workspace-alert" data-spec="Δ2 11px attention">
+                        <svg
+                          width="11"
+                          height="11"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          stroke-width="2"
+                        >
+                          <path
+                            d="m21.7 18-8-14a2 2 0 0 0-3.4 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.7-3z"
+                          />
+                          <line x1="12" y1="9" x2="12" y2="13" />
+                          <line x1="12" y1="17" x2="12.01" y2="17" />
+                        </svg>
+                        Agent is waiting for input
+                      </div>
+                    </div>
+                  </button>
+                </div>
+
+                <!-- selected card: chips show tab kinds -->
+                <div class="workspace-card" data-attention="none" data-selected="true">
+                  <button class="workspace-row">
+                    <div class="workspace-copy">
+                      <div class="workspace-name-line">
+                        <span class="workspace-indicator"></span>
+                        <strong>General Chat</strong>
+                        <span class="workspace-when">now</span>
+                      </div>
+                      <div class="workspace-directory">
+                        <span class="workspace-meta-value">…/1TB-HDD/workspace/general-chat</span>
+                        <span class="workspace-branch"
+                          ><svg
+                            width="11"
+                            height="11"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            stroke-width="2"
+                          >
+                            <circle cx="6" cy="6" r="2.6" />
+                            <circle cx="6" cy="18" r="2.6" />
+                            <circle cx="18" cy="6" r="2.6" />
+                            <path d="M6 8.6v6.8" />
+                            <path d="M18 8.6a9 9 0 0 1-9 9" />
+                          </svg>
+                          main</span
+                        >
+                      </div>
+                    </div>
+                  </button>
+                  <div class="workspace-details">
+                    <div
+                      class="workspace-chips"
+                      data-spec="Δ6 chips 18px · tab kinds · selected only"
+                      data-spec-side="bottom"
+                    >
+                      <span class="workspace-chip"
+                        ><svg
+                          width="9"
+                          height="9"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          stroke-width="2.4"
+                        >
+                          <polyline points="4 17 10 11 4 5" />
+                          <line x1="12" y1="19" x2="20" y2="19" /></svg
+                        >zsh</span
+                      >
+                      <span class="workspace-chip"
+                        ><svg
+                          width="9"
+                          height="9"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          stroke-width="2"
+                        >
+                          <circle cx="12" cy="12" r="9" />
+                          <path d="M3 12h18M12 3a15 15 0 0 1 0 18M12 3a15 15 0 0 0 0 18" /></svg
+                        >127.0.0.1:8931</span
+                      >
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- group: expanded -->
+              <div class="workspace-section">
+                <div
+                  class="workspace-group-heading"
+                  data-spec="28px · chevron rot-90 when collapsed"
+                >
+                  <button>
+                    <svg
+                      width="10"
+                      height="10"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="2.4"
+                    >
+                      <polyline points="6 9 12 15 18 9" />
+                    </svg>
+                    Joodlab
+                  </button>
+                </div>
+
+                <!-- hover state demo: actions overlay, timestamp hidden -->
+                <div
+                  class="workspace-card demo-hover"
+                  data-attention="none"
+                  data-selected="false"
+                  id="hover-card"
+                >
+                  <button class="workspace-row">
+                    <div class="workspace-copy">
+                      <div class="workspace-name-line">
+                        <span class="workspace-indicator"></span>
+                        <strong>e-commerce</strong>
+                        <span class="workspace-when">1h</span>
+                      </div>
+                      <div class="workspace-directory">
+                        <span class="workspace-meta-value">~/drive/workspace/e-commerce</span>
+                        <span class="workspace-branch"
+                          ><svg
+                            width="11"
+                            height="11"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            stroke-width="2"
+                          >
+                            <circle cx="6" cy="6" r="2.6" />
+                            <circle cx="6" cy="18" r="2.6" />
+                            <circle cx="18" cy="6" r="2.6" />
+                            <path d="M6 8.6v6.8" />
+                            <path d="M18 8.6a9 9 0 0 1-9 9" />
+                          </svg>
+                          main</span
+                        >
+                      </div>
+                    </div>
+                  </button>
+                  <div class="workspace-hover-actions" data-spec="Δ3 overlay 26px btns">
+                    <button class="workspace-drag" title="Open in file manager">
+                      <svg
+                        width="13"
+                        height="13"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="1.7"
+                      >
+                        <path
+                          d="M3 7V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.7.9l.8 1.2c.4.6 1 .9 1.7.9H19a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"
+                        />
+                      </svg>
+                    </button>
+                    <button class="workspace-remove" title="Close workspace">
+                      <svg
+                        width="12"
+                        height="12"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="2"
+                      >
+                        <line x1="5" y1="5" x2="19" y2="19" />
+                        <line x1="19" y1="5" x2="5" y2="19" />
+                      </svg>
+                    </button>
+                  </div>
+                </div>
+
+                <div class="workspace-card" data-attention="none" data-selected="false">
+                  <button class="workspace-row">
+                    <div class="workspace-copy">
+                      <div class="workspace-name-line">
+                        <span class="workspace-indicator"></span>
+                        <strong>joodbooking-backoffice</strong>
+                        <span class="workspace-when">3h</span>
+                      </div>
+                      <div class="workspace-directory">
+                        <span class="workspace-meta-value"
+                          >~/drive/workspace/joodbooking-backoffice</span
+                        >
+                        <span class="workspace-branch"
+                          ><svg
+                            width="11"
+                            height="11"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            stroke-width="2"
+                          >
+                            <circle cx="6" cy="6" r="2.6" />
+                            <circle cx="6" cy="18" r="2.6" />
+                            <circle cx="18" cy="6" r="2.6" />
+                            <path d="M6 8.6v6.8" />
+                            <path d="M18 8.6a9 9 0 0 1-9 9" />
+                          </svg>
+                          dev</span
+                        >
+                      </div>
+                    </div>
+                  </button>
+                </div>
+
+                <div class="workspace-card" data-attention="none" data-selected="false">
+                  <button class="workspace-row">
+                    <div class="workspace-copy">
+                      <div class="workspace-name-line">
+                        <span class="workspace-indicator idle"></span>
+                        <strong>Joodbeds</strong>
+                        <span class="workspace-when">2d</span>
+                      </div>
+                      <div class="workspace-directory">
+                        <span class="workspace-meta-value">~/drive/workspace/joodbeds</span>
+                      </div>
+                    </div>
+                  </button>
+                </div>
+              </div>
+
+              <!-- group: collapsed, count -->
+              <div class="workspace-section">
+                <div class="workspace-group-heading">
+                  <button>
+                    <svg
+                      width="10"
+                      height="10"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="2.4"
+                      data-collapsed="true"
+                    >
+                      <polyline points="6 9 12 15 18 9" />
+                    </svg>
+                    Playground
+                  </button>
+                  <span class="workspace-group-count" data-spec="Δ7 count when collapsed">3</span>
+                </div>
+              </div>
+
+              <!-- ungrouped, by recency -->
+              <div class="workspace-section">
+                <div class="workspace-section-heading">Recent</div>
+                <div class="workspace-card" data-attention="none" data-selected="false">
+                  <button class="workspace-row">
+                    <div class="workspace-copy">
+                      <div
+                        class="workspace-name-line"
+                        data-spec="Δ2 idle dot · border-strong · no halo"
+                      >
+                        <span class="workspace-indicator idle"></span>
+                        <strong>t3code</strong>
+                        <span class="workspace-when">1d</span>
+                      </div>
+                      <div class="workspace-directory">
+                        <span class="workspace-meta-value">~/t3code</span>
+                      </div>
+                    </div>
+                  </button>
+                </div>
+                <div class="workspace-card" data-attention="none" data-selected="false">
+                  <button class="workspace-row">
+                    <div class="workspace-copy">
+                      <div class="workspace-name-line">
+                        <span class="workspace-indicator idle"></span>
+                        <strong>nassimna</strong>
+                        <span class="workspace-when">1w</span>
+                      </div>
+                      <div class="workspace-directory">
+                        <span class="workspace-meta-value">~</span>
+                      </div>
+                    </div>
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div class="sidebar-footer" data-spec="27px · 10px muted">8 workspaces · 2 groups</div>
+          </aside>
+
+          <!-- content: split pane group — terminal | browser -->
+          <div class="workspace-content">
+            <div class="pane-group">
+              <!-- left pane: terminal (selected) -->
+              <div
+                class="pane-view selected"
+                data-spec="pane-view · rows 41px/1fr · accent@28% frame"
+              >
+                <div class="pane-tabbar" data-spec="pad 3 6 0 · surface-raised">
+                  <div class="pane-tabs">
+                    <div class="pane-tab active" data-spec="26px · 10.5px · inset -2px accent">
+                      <span class="pane-tab-select">
+                        <svg
+                          width="12"
+                          height="12"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          stroke-width="2"
+                        >
+                          <polyline points="4 17 10 11 4 5" />
+                          <line x1="12" y1="19" x2="20" y2="19" />
+                        </svg>
+                        <span>Terminal</span>
+                      </span>
+                      <button class="tab-close" title="Close tab">✕</button>
+                    </div>
+                    <div class="pane-tab">
+                      <span class="pane-tab-select">
+                        <svg
+                          width="12"
+                          height="12"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          stroke-width="2"
+                        >
+                          <polyline points="4 17 10 11 4 5" />
+                          <line x1="12" y1="19" x2="20" y2="19" />
+                        </svg>
+                        <span>pnpm dev</span>
+                      </span>
+                      <button class="tab-close" title="Close tab">✕</button>
+                    </div>
+                  </div>
+                  <div class="pane-actions">
+                    <button title="Search">
+                      <svg
+                        width="12"
+                        height="12"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="2"
+                      >
+                        <circle cx="11" cy="11" r="7" />
+                        <line x1="21" y1="21" x2="16.5" y2="16.5" />
+                      </svg>
+                    </button>
+                    <button title="Add tab">
+                      <svg
+                        width="12"
+                        height="12"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="2"
+                      >
+                        <line x1="12" y1="5" x2="12" y2="19" />
+                        <line x1="5" y1="12" x2="19" y2="12" />
+                      </svg>
+                    </button>
+                    <button title="Split">
+                      <svg
+                        width="12"
+                        height="12"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="1.8"
+                      >
+                        <rect x="2" y="3" width="20" height="18" rx="2" />
+                        <line x1="12" y1="3" x2="12" y2="21" />
+                      </svg>
+                    </button>
+                    <button title="More">⋯</button>
+                  </div>
+                </div>
+                <div class="terminal-pane">
+                  <div class="terminal-host" data-spec="pad 7 9 · JetBrains Mono 13">
+                    <div>
+                      <span class="t-bblue">nassimna/…/general-chat</span>
+                      <span class="t-dim">∧</span> <span class="t-green">❯</span> git status
+                    </div>
+                    <div class="t-dim">On branch main — nothing to commit, working tree clean</div>
+                    <div style="margin-top: 6px">
+                      <span class="t-bblue">nassimna/…/general-chat</span>
+                      <span class="t-dim">∧</span> <span class="t-green">❯</span>
+                      <span class="block-cursor"></span>
+                    </div>
+                  </div>
+                  <div
+                    class="terminal-statusbar"
+                    data-spec="22px · surface-sidebar · 10px"
+                    data-spec-side="bottom"
+                  >
+                    <span class="status-dot"></span>
+                    <span>Connected</span>
+                    <span>PID 409107</span>
+                    <span class="link-target">zsh · main</span>
+                  </div>
+                </div>
+              </div>
+
+              <div class="pane-separator" data-spec="5px · 1px border-strong"><span></span></div>
+
+              <!-- right pane: browser -->
+              <div class="pane-view">
+                <div class="pane-tabbar">
+                  <div class="pane-tabs">
+                    <div class="pane-tab active">
+                      <span class="pane-tab-select">
+                        <svg
+                          width="12"
+                          height="12"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          stroke-width="1.8"
+                        >
+                          <circle cx="12" cy="12" r="9" />
+                          <path d="M3 12h18M12 3a15 15 0 0 1 0 18M12 3a15 15 0 0 0 0 18" />
+                        </svg>
+                        <span>Atlas — pixel-precise preview</span>
+                      </span>
+                      <button class="tab-close" title="Close tab">✕</button>
+                    </div>
+                  </div>
+                  <div class="pane-actions">
+                    <button title="Add tab">
+                      <svg
+                        width="12"
+                        height="12"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="2"
+                      >
+                        <line x1="12" y1="5" x2="12" y2="19" />
+                        <line x1="5" y1="12" x2="19" y2="12" />
+                      </svg>
+                    </button>
+                    <button title="Split">
+                      <svg
+                        width="12"
+                        height="12"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="1.8"
+                      >
+                        <rect x="2" y="3" width="20" height="18" rx="2" />
+                        <line x1="12" y1="3" x2="12" y2="21" />
+                      </svg>
+                    </button>
+                    <button title="More">⋯</button>
+                  </div>
+                </div>
+                <div class="browser-pane" data-spec="rows 32/1fr/22">
+                  <div class="browser-toolbar" data-spec="32px · 26px btns">
+                    <button disabled title="Back">
+                      <svg
+                        width="13"
+                        height="13"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="2"
+                      >
+                        <polyline points="15 18 9 12 15 6" />
+                      </svg>
+                    </button>
+                    <button disabled title="Forward">
+                      <svg
+                        width="13"
+                        height="13"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="2"
+                      >
+                        <polyline points="9 18 15 12 9 6" />
+                      </svg>
+                    </button>
+                    <button title="Reload">
+                      <svg
+                        width="13"
+                        height="13"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="2"
+                      >
+                        <path d="M21 12a9 9 0 1 1-2.6-6.4" />
+                        <polyline points="21 3 21 9 15 9" />
+                      </svg>
+                    </button>
+                    <div class="browser-address" data-spec="28px · radius 4 · mono 11px">
+                      <span class="browser-security insecure" title="Not secure"
+                        ><svg
+                          width="11"
+                          height="11"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          stroke-width="2"
+                        >
+                          <rect x="3" y="11" width="18" height="11" rx="2" />
+                          <path d="M7 11V7a5 5 0 0 1 9.9-1" /></svg
+                      ></span>
+                      <input readonly value="http://127.0.0.1:8931/atlas.html" />
+                    </div>
+                    <button class="browser-toolbar-secondary" title="DevTools">
+                      <svg
+                        width="13"
+                        height="13"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="2"
+                      >
+                        <polyline points="16 18 22 12 16 6" />
+                        <polyline points="8 6 2 12 8 18" />
+                      </svg>
+                    </button>
+                  </div>
+                  <div class="browser-content-mock">
+                    <div class="mock-h">Atlas — pixel-precise preview</div>
+                    <div class="mock-p">
+                      Variant B rebuilt 1:1 on the app’s real chrome. Every color, font size,
+                      weight, radius, and metric is taken verbatim from the design tokens and
+                      renderer styles.
+                    </div>
+                    <div class="mock-pill-row">
+                      <span class="mock-pill on">232px · default</span>
+                      <span class="mock-pill">272px · resized</span>
+                      <span class="mock-pill">Redlines</span>
+                    </div>
+                  </div>
+                  <div class="terminal-statusbar" data-spec="22px" data-spec-side="bottom">
+                    <span>Loaded</span>
+                    <span class="link-target">persist:agent-workspace-default</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="compare-badge sharp">Sharp · 0/3/4</div>
+        <div class="compare-badge round">Rounded · 5/6/8</div>
+        <div class="compare-divider" id="divider"><div class="compare-handle">⇔</div></div>
+      </div>
+
+      <div class="spec">
+        <h2>Chrome map — every region traced to source</h2>
+        <p>
+          Values are copied, not approximated. If a rule changes in the app, this preview is stale —
+          re-derive from the same lines.
+        </p>
+        <table>
+          <tr>
+            <th>Region</th>
+            <th>Source</th>
+            <th>Values</th>
+          </tr>
+          <tr>
+            <td>Shell grid</td>
+            <td class="src">styles.css:955</td>
+            <td>
+              rows <code>32px / 1fr</code>, cols <code>var(--sidebar-width, 232px) / 1fr</code>;
+              canvas <code>#1e2023</code>
+            </td>
+          </tr>
+          <tr>
+            <td>Titlebar</td>
+            <td class="src">styles.css:582, 972</td>
+            <td>
+              32px; pad <code>0 10px 0 15px</code>; gap 10px; bg
+              <code>surface-raised #232529</code>; 12px / 560; mark 9px, 2px accent border, radius
+              3px, rotate 45°; icon buttons 26×26, radius 3px; version mono 10px
+            </td>
+          </tr>
+          <tr>
+            <td>Sidebar</td>
+            <td class="src">styles.css:615, 1039</td>
+            <td>
+              232px (resizable via <code>--sidebar-width</code>); bg <code>#1a1c1f</code>;
+              border-right 1px <code>#2b2d31</code>
+            </td>
+          </tr>
+          <tr>
+            <td>Heading</td>
+            <td class="src">styles.css:625, 1105</td>
+            <td>
+              50px; pad <code>7px 14px 0 16px</code>; 10px / 650, caps, tracking 0.08em, muted
+              <code>#94989f</code>
+            </td>
+          </tr>
+          <tr>
+            <td>Open folder</td>
+            <td class="src">styles.css:1046</td>
+            <td>
+              min-height 38px; margin <code>4px 10px 12px</code>; pad <code>0 11px</code>; radius 0
+              (<code>--aw-radius-card</code>); bg <code>accent-subtle #232b39</code>; border
+              <code>color-mix(accent 34%, border-default)</code>
+            </td>
+          </tr>
+          <tr>
+            <td>List / sections</td>
+            <td class="src">styles.css:1123, 1139</td>
+            <td>
+              list pad <code>0 9px</code>, gap 5px; section heading min-height 28px, pad
+              <code>3px 8px</code>, 10px / 650
+            </td>
+          </tr>
+          <tr>
+            <td>Group heading</td>
+            <td class="src">styles.css:1139, 1151, 1175</td>
+            <td>
+              same 28px row; buttons pad <code>3px 5px</code>, radius 3px, hover border +
+              <code>interactive-hover</code>; chevron svg rotates −90° when
+              <code>data-collapsed</code>; capabilities <code>group.create/rename/collapse</code>,
+              <code>workspace.pin</code>
+            </td>
+          </tr>
+          <tr>
+            <td>Card</td>
+            <td class="src">styles.css:653, 1247</td>
+            <td>
+              border-left 2px (accent when selected); radius 3px (selected:
+              <code>0 3px 3px 0</code>); hover bg <code>#24262a</code>; selected bg
+              <code>accent-subtle #232b39</code>; row pad <code>7px … 0 9px</code>, details
+              pad-bottom 8px
+            </td>
+          </tr>
+          <tr>
+            <td>Status dot</td>
+            <td class="src">styles.css:1289</td>
+            <td>
+              7px, radius full, <code>success #56b374</code>, halo
+              <code>0 0 0 4px success@8%</code>; name 12px / 620; name-line gap 7px
+            </td>
+          </tr>
+          <tr>
+            <td>Meta rows</td>
+            <td class="src">styles.css:1319</td>
+            <td>11px UI font, muted; gap 6px; svg opacity 0.7; ellipsis</td>
+          </tr>
+          <tr>
+            <td>Chips</td>
+            <td class="src">styles.css:1377</td>
+            <td>
+              height 18px; pad <code>0 5px</code>; mono 10.5px; border 1px; radius 3px; bg
+              <code>#24262a</code>; gap 4px; margin-top 2px
+            </td>
+          </tr>
+          <tr>
+            <td>Footer</td>
+            <td class="src">styles.css:1113</td>
+            <td>27px; pad <code>0 12px</code>; border-top; 10px muted; right-aligned</td>
+          </tr>
+          <tr>
+            <td>Pane frame</td>
+            <td class="src">styles.css:1639, 1647, 1673</td>
+            <td>
+              pane-view grid rows <code>41px / 1fr</code>, 1px border (<code>accent@28%</code> when
+              selected); separator flex-basis 5px with 1px <code>border-strong</code> line, hover
+              <code>accent@18%</code>
+            </td>
+          </tr>
+          <tr>
+            <td>Tab bar</td>
+            <td class="src">styles.css:1689, 1707, 1797</td>
+            <td>
+              pad <code>3px 6px 0</code>; bg raised; tab 26px, radius 0, gap 3px, label 10.5px;
+              active: bg <code>#24262a</code>, <code>inset 0 -2px accent</code>; close 18×20
+            </td>
+          </tr>
+          <tr>
+            <td>Terminal</td>
+            <td class="src">styles.css:713, 879 · config crate</td>
+            <td>
+              grid rows <code>1fr / 22px</code>; bg <code>#17181b</code>; host pad
+              <code>7px 9px</code>; JetBrains Mono Variable 13px; palette from
+              <code>terminal-theme.ts</code>
+            </td>
+          </tr>
+          <tr>
+            <td>Browser pane</td>
+            <td class="src">styles.css:2028, 2038, 2074, 2118</td>
+            <td>
+              grid rows <code>32px / 1fr / 22px</code>; toolbar pad <code>2px 7px</code>, 26px
+              buttons; address 28px, radius 4px, security slot 27px (http → <code>warning</code>),
+              input mono 11px
+            </td>
+          </tr>
+          <tr>
+            <td>Status bars</td>
+            <td class="src">styles.css:919</td>
+            <td>22px; pad <code>0 9px</code>; gap 7px; 10px muted; bg sidebar; dot 6px success</td>
+          </tr>
+        </table>
+      </div>
+
+      <div class="spec">
+        <h2>Atlas Δ — the actual implementation diff</h2>
+        <p>
+          Everything above is already in the codebase. Shipping Atlas is these changes, all inside
+          the existing token system:
+        </p>
+        <div class="delta-grid">
+          <div class="delta-card add">
+            <h4>Add</h4>
+            <ul>
+              <li>
+                <b>Δ1</b> <code>.workspace-when</code> — relative timestamp, mono 10px muted, right
+                edge of name line (data from workspace last-activity)
+              </li>
+              <li>
+                <b>Δ2</b> attention/idle indicator states — amber
+                <code>--aw-color-attention</code> dot + one 11px alert line when
+                <code>data-attention='action-required'</code>; idle dots use
+                <code>border-strong</code> with no halo
+              </li>
+              <li>
+                <b>Δ3</b> <code>.workspace-hover-actions</code> — actions overlay on hover with a
+                12px gradient fade; drop the permanent 76px right padding on
+                <code>.workspace-row</code> / <code>.workspace-details</code> (→ 9px)
+              </li>
+              <li>
+                <b>Δ4</b> 14px left indent on meta/alert/chip rows so text aligns under the name
+                (7px dot + 7px gap)
+              </li>
+              <li>
+                <b>Δ5</b> <code>.workspace-branch</code> — inline branch in the directory row; keep
+                the bordered <code>.workspace-git-status</code> pill only for dirty/ahead/behind
+                states
+              </li>
+              <li>
+                <b>Δ6</b> chips carry a tab-kind icon — terminal chips show the shell/process name,
+                browser chips show the host (from the tab’s <code>content.kind</code>)
+              </li>
+              <li>
+                <b>Δ7</b> <code>.workspace-group-count</code> — collapsed group headings show their
+                workspace count, mono 10px muted
+              </li>
+              <li>
+                Ordering: Pinned section first, then user groups (existing <code>group.*</code> +
+                collapse), then ungrouped workspaces under “Recent” sorted by last activity
+              </li>
+            </ul>
+          </div>
+          <div class="delta-card rem">
+            <h4>Remove / conditionalize</h4>
+            <ul>
+              <li>
+                “Status unavailable” text — render runtime status only when actionable (<b>Δ2</b>);
+                <code>workspaceGitStatusLabel</code> fallback (WorkspaceShell.tsx:2585) returns
+                nothing instead
+              </li>
+              <li>
+                Tab chips on unselected cards (<b>Δ6</b>) — chips render only under
+                <code>data-selected='true'</code>
+              </li>
+              <li>
+                “Saved layouts / Save selection / Import” sidebar block
+                (<code>.saved-layouts-panel</code>, styles.css:1179) — layouts move to the ⌘K
+                palette and the heading’s overflow menu
+              </li>
+              <li>Branch icon row with “—” when no branch — omit the row entirely</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+
+      <div class="spec">
+        <h2>Sharp vs rounded — the exact cost of switching</h2>
+        <p>
+          Because the chrome reads every corner through <code>var(--aw-radius-*)</code>, the rounded
+          variant is a 4-line token change in <code>tokens.css</code> plus 2 hardcoded-sharp spots,
+          with 2 optional “modern” accents. Nothing else moves — layout, metrics, and colors are
+          identical.
+        </p>
+        <table>
+          <tr>
+            <th>Change</th>
+            <th>Where</th>
+            <th>Sharp (current)</th>
+            <th>Rounded</th>
+          </tr>
+          <tr>
+            <td>Token scale</td>
+            <td class="src">tokens.css:75–79</td>
+            <td><code>xs/sm 3px · md 4px · card 0</code></td>
+            <td><code>xs 5px · sm 6px · md 8px · card 8px</code></td>
+          </tr>
+          <tr>
+            <td>Pane tabs</td>
+            <td class="src">styles.css:1716</td>
+            <td>hardcoded <code>border-radius: 0</code></td>
+            <td><code>6px 6px 0 0</code> (top corners only; accent underline unchanged)</td>
+          </tr>
+          <tr>
+            <td>Pane frame</td>
+            <td class="src">styles.css:1673</td>
+            <td>square <code>.pane-view</code></td>
+            <td><code>8px + overflow hidden</code> so tab bar and status bar clip to the frame</td>
+          </tr>
+          <tr>
+            <td>Chips <i>(optional)</i></td>
+            <td class="src">styles.css:1377</td>
+            <td>3px rect, pad <code>0 5px</code></td>
+            <td>full pill (<code>--aw-radius-full</code>), pad <code>0 7px</code></td>
+          </tr>
+          <tr>
+            <td>Address bar <i>(optional)</i></td>
+            <td class="src">styles.css:2074</td>
+            <td>4px rect</td>
+            <td>full pill, browser-style</td>
+          </tr>
+          <tr>
+            <td>Unchanged</td>
+            <td class="src">—</td>
+            <td colspan="2">
+              titlebar mark (9px rotated square), selected-tab underline, status dots, 2px card
+              indicator, every height/padding/color
+            </td>
+          </tr>
+        </table>
+      </div>
+    </div>
+
+    <script>
+      const shell = document.getElementById('shell')
+      const wrap = document.getElementById('frame-wrap')
+      const divider = document.getElementById('divider')
+      const w232 = document.getElementById('w232'),
+        w272 = document.getElementById('w272')
+      const mSharp = document.getElementById('m-sharp'),
+        mRound = document.getElementById('m-round'),
+        mCompare = document.getElementById('m-compare')
+      let overlay = null
+
+      function setWidth(px, onBtn, offBtn) {
+        shell.style.setProperty('--sidebar-width', px)
+        if (overlay) overlay.firstChild.style.setProperty('--sidebar-width', px)
+        onBtn.classList.add('on')
+        offBtn.classList.remove('on')
+      }
+      w232.onclick = () => setWidth('232px', w232, w272)
+      w272.onclick = () => setWidth('272px', w272, w232)
+
+      function clearCompare() {
+        if (overlay) {
+          overlay.remove()
+          overlay = null
+        }
+        wrap.classList.remove('comparing')
+      }
+      function setMode(mode) {
+        ;[mSharp, mRound, mCompare].forEach((b) => b.classList.remove('on'))
+        clearCompare()
+        shell.classList.remove('rounded')
+        if (mode === 'round') {
+          shell.classList.add('rounded')
+          mRound.classList.add('on')
+        } else if (mode === 'compare') {
+          mCompare.classList.add('on')
+          overlay = document.createElement('div')
+          overlay.className = 'compare-overlay'
+          const clone = shell.cloneNode(true)
+          clone.removeAttribute('id')
+          clone.querySelectorAll('[id]').forEach((n) => n.removeAttribute('id'))
+          clone.classList.add('rounded')
+          overlay.appendChild(clone)
+          wrap.insertBefore(overlay, wrap.querySelector('.compare-badge'))
+          wrap.classList.add('comparing')
+          setCut(50)
+        } else {
+          mSharp.classList.add('on')
+        }
+      }
+      mSharp.onclick = () => setMode('sharp')
+      mRound.onclick = () => setMode('round')
+      mCompare.onclick = () => setMode('compare')
+
+      function setCut(pct) {
+        pct = Math.max(4, Math.min(96, pct))
+        wrap.style.setProperty('--cut', pct + '%')
+        if (overlay) overlay.style.setProperty('--cut', pct + '%')
+        divider.style.left = pct + '%'
+      }
+      divider.addEventListener('pointerdown', (e) => {
+        e.preventDefault()
+        const move = (ev) => {
+          const r = wrap.getBoundingClientRect()
+          setCut(((ev.clientX - r.left) / r.width) * 100)
+        }
+        const up = () => {
+          window.removeEventListener('pointermove', move)
+          window.removeEventListener('pointerup', up)
+        }
+        window.addEventListener('pointermove', move)
+        window.addEventListener('pointerup', up)
+      })
+
+      document.getElementById('rl-toggle').onclick = (e) => {
+        wrap.classList.toggle('rl')
+        e.target.classList.toggle('on')
+      }
+      document.getElementById('hov-toggle').onclick = (e) => {
+        document.getElementById('hover-card').classList.toggle('demo-hover')
+        e.target.classList.toggle('on')
+      }
+    </script>
+  </body>
+</html>

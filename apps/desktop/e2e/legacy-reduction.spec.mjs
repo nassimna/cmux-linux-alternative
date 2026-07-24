@@ -96,6 +96,7 @@ test('packaged UI reports exact legacy counts and clears reduction mode after re
     )
     await expect(notice).toContainText('Export important layouts first')
     await expect(page.getByRole('button', { name: 'Open folder as workspace' })).toBeDisabled()
+    await page.getByRole('button', { name: 'Saved layouts' }).click()
     await expect(page.getByRole('button', { name: 'Import' })).toBeDisabled()
 
     const before = await page.evaluate(async () => ({

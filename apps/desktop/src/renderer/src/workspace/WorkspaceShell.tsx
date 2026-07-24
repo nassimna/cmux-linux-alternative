@@ -19,11 +19,14 @@ import {
   verticalListSortingStrategy
 } from '@dnd-kit/sortable'
 import {
+  ArrowDown,
+  ArrowUp,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
   ChevronsLeft,
   Bell,
+  Code2,
   Command,
   FolderOpen,
   GitBranch,
@@ -32,9 +35,9 @@ import {
   Layers,
   Keyboard,
   MoreHorizontal,
+  Pencil,
   Palette,
   PanelLeft,
-  PanelRight,
   Plus,
   Pin,
   RefreshCw,
@@ -75,6 +78,8 @@ import type {
 import { displayTabTitle } from '../../../shared/browser-messages'
 import type {
   DesktopActionInvokeRequest,
+  DesktopWorkspacePathOpener,
+  DesktopWorkspacePathOpenerId,
   WorkspaceGitStatus,
   WorkspaceRuntimeMetadata
 } from '../../../shared/desktop-bridge'
@@ -123,6 +128,13 @@ import { NotificationToasts } from '../notifications/NotificationToasts'
 import { jumpToNotification, waitForVisibleTarget } from '../notifications/jump'
 import { runAfterNotificationCenterClose } from '../notifications/notification-center-close'
 import { Button } from '../ui/button'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger
+} from '../ui/dropdown-menu'
 import { IconButton } from '../ui/icon-button'
 import {
   ContextMenu,
@@ -150,8 +162,8 @@ import { navigateToAgentBinding } from './agent-session-navigation'
 import { RemoteSessionsSettings, type RemoteWorkspaceContext } from './RemoteSessionsSettings'
 import { WorkspaceCardSlots } from './WorkspaceCardSlots'
 import { WorkspaceCardSlotsV2 } from './WorkspaceCardSlotsV2'
+import { WorkspaceActivityBadge, workspaceActivity } from './WorkspaceActivityBadge'
 import { LegacyOverLimitNotice } from './LegacyOverLimitNotice'
-import { RightSidebar } from '../sidebar/RightSidebar'
 import {
   workspacePresentationSections,
   workspaceBatchCloseReplacement,
@@ -172,7 +184,6 @@ const DEFAULT_COLS = 120
 // predictable idle-CPU regression.
 const WORKSPACE_METADATA_REFRESH_MS = 60_000
 const SIDEBAR_WIDTH_STORAGE_KEY = 'agent-workspace.sidebar.width'
-const RIGHT_SIDEBAR_OPEN_STORAGE_KEY = 'agent-workspace.right-sidebar.open'
 const DEFAULT_SIDEBAR_WIDTH = 292
 const MIN_SIDEBAR_WIDTH = 190
 const MAX_SIDEBAR_WIDTH = 430
@@ -181,6 +192,7 @@ interface CachedWorkspaceRuntimeMetadata extends WorkspaceRuntimeMetadata {
   selectionKey: string
 }
 const MAX_WORKSPACE_NAME_CHARS = 128
+const MAX_WORKSPACE_GROUP_NAME_CHARS = 80
 const WORKSPACE_COLOR_PALETTE = [
   { label: messages.workspaceContextMenu.colors.blue, value: '#5B8DEF' },
   { label: messages.workspaceContextMenu.colors.violet, value: '#9B7EDE' },
@@ -218,7 +230,6 @@ export function WorkspaceShell({ workspace }: ShellProps): React.JSX.Element {
   const settingsReturnFocusRef = useRef<HTMLElement | null>(null)
   const windowMoveReturnFocusRef = useRef<HTMLElement | null>(null)
   const [sidebarWidth, setSidebarWidth] = useState(readSidebarWidth)
-  const [rightSidebarOpen, setRightSidebarOpen] = useState(readRightSidebarOpen)
   const sidebarWidthRef = useRef(sidebarWidth)
   const updateSidebarWidth = (width: number, persist = false): void => {
     const next = clampSidebarWidth(width)
@@ -248,9 +259,7 @@ export function WorkspaceShell({ workspace }: ShellProps): React.JSX.Element {
     projection.identity?.capabilities.includes('actions-v1') === true &&
     window.desktopBridge.listPublicActions !== undefined &&
     window.desktopBridge.invokePublicAction !== undefined
-  const rightSidebarEnabled =
-    projection.identity?.capabilities.includes('sidebar-surfaces-v1') === true &&
-    window.desktopBridge.getSidebarPlacement !== undefined
+  const browserTabsEnabled = projection.identity?.capabilities.includes('tab.openBrowser') === true
   useEffect(() => {
     if (!publicActionsEnabled) {
       queueMicrotask(() => setPublicActions([]))
@@ -561,7 +570,9 @@ export function WorkspaceShell({ workspace }: ShellProps): React.JSX.Element {
         return
       }
       if (commandId === 'commandPalette.toggle') {
-        if (commandPaletteExecution.current) return
+        // Opening must never be swallowed by an in-flight execution: the guard
+        // only protects against concurrent command execution, not against the
+        // user asking for the palette while a slow command finishes.
         projection.setPaletteOpen(!projection.paletteOpen)
         return
       }
@@ -927,27 +938,9 @@ export function WorkspaceShell({ workspace }: ShellProps): React.JSX.Element {
           >
             {projection.sidebarOpen ? <ChevronsLeft size={14} /> : <PanelLeft size={14} />}
           </IconButton>
-          {rightSidebarEnabled ? (
-            <IconButton
-              aria-label={messages.workspaceShell.titlebar.toggleToolsSidebar}
-              aria-pressed={rightSidebarOpen}
-              onClick={() => {
-                setRightSidebarOpen((current) => {
-                  const next = !current
-                  persistRightSidebarOpen(next)
-                  return next
-                })
-              }}
-              tooltip={messages.workspaceShell.titlebar.toggleToolsSidebar}
-            >
-              <PanelRight size={14} />
-            </IconButton>
-          ) : null}
           <IconButton
             aria-label={messages.workspaceShell.titlebar.openCommandPalette}
-            onClick={() => {
-              if (!commandPaletteExecution.current) projection.setPaletteOpen(true)
-            }}
+            onClick={() => projection.setPaletteOpen(true)}
             tooltip={commandTooltip(
               'commandPalette.toggle',
               messages.workspaceShell.titlebar.openCommandPalette
@@ -1090,6 +1083,7 @@ export function WorkspaceShell({ workspace }: ShellProps): React.JSX.Element {
       >
         {workspace ? (
           <PaneWorkspace
+            browserTabsEnabled={browserTabsEnabled}
             browserViewsVisible={
               !createOpen &&
               !notificationsOpen &&
@@ -1105,10 +1099,6 @@ export function WorkspaceShell({ workspace }: ShellProps): React.JSX.Element {
           <EmptyWorkspace onCreate={() => setCreateOpen(true)} />
         )}
       </section>
-      {rightSidebarEnabled && rightSidebarOpen && workspace && selectedPane ? (
-        <RightSidebar enabled workspaceId={workspace.id} paneId={selectedPane.id} />
-      ) : null}
-
       <CreateWorkspaceDialog
         fallbackDirectory={workspace?.workingDirectory ?? '/'}
         onCreated={runMutation}
@@ -1269,22 +1259,6 @@ function persistSidebarWidth(width: number): void {
   }
 }
 
-function readRightSidebarOpen(): boolean {
-  try {
-    return globalThis.localStorage?.getItem(RIGHT_SIDEBAR_OPEN_STORAGE_KEY) === 'true'
-  } catch {
-    return false
-  }
-}
-
-function persistRightSidebarOpen(open: boolean): void {
-  try {
-    globalThis.localStorage?.setItem(RIGHT_SIDEBAR_OPEN_STORAGE_KEY, String(open))
-  } catch {
-    // The toggle remains usable when renderer storage is unavailable.
-  }
-}
-
 function commandShortcutLabel(
   commandId: CommandId,
   overrides: ShortcutOverrides,
@@ -1373,6 +1347,7 @@ function WorkspaceSidebar({
   selectedWorkspaceId: string | null
   workspaces: readonly WorkspaceSnapshot[]
 }): React.JSX.Element {
+  const [createGroupOpen, setCreateGroupOpen] = useState(false)
   const organizationEnabled = organization !== null && !!window.desktopBridge.selectWorkspaces
   const canonicalIds = useMemo(() => workspaces.map(({ id }) => id), [workspaces])
   const sections = useMemo(
@@ -1398,6 +1373,16 @@ function WorkspaceSidebar({
     () => new Map(workspaces.map((workspace) => [workspace.id, workspace] as const)),
     [workspaces]
   )
+  const groupWorkspaceCounts = useMemo(() => {
+    const counts = new Map<string, number>()
+    if (!organization) return counts
+    const existing = new Set(canonicalIds)
+    for (const { workspaceId, groupId } of organization.assignments) {
+      if (!existing.has(workspaceId)) continue
+      counts.set(groupId, (counts.get(groupId) ?? 0) + 1)
+    }
+    return counts
+  }, [organization, canonicalIds])
   const selectedIds = organizationEnabled
     ? new Set(organization.selection)
     : new Set(selectedWorkspaceId ? [selectedWorkspaceId] : [])
@@ -1459,11 +1444,9 @@ function WorkspaceSidebar({
     }
   }
 
-  const createGroup = (): void => {
-    if (!organization || !window.desktopBridge.createGroup) return
-    const name = window.prompt('Create workspace group')?.trim()
-    if (!name) return
-    void onMutation(
+  const createGroup = async (name: string): Promise<boolean> => {
+    if (!organization || !window.desktopBridge.createGroup) return false
+    return onMutation(
       window.desktopBridge.createGroup({
         groupId: globalThis.crypto.randomUUID(),
         name,
@@ -1480,12 +1463,14 @@ function WorkspaceSidebar({
         {organizationEnabled ? (
           <button
             aria-label="Create workspace group"
+            className="sidebar-heading-action"
             data-workspace-action={workspaceCardActionRegistry.resolve('groupCreate').actionId}
             disabled={!organization}
-            onClick={createGroup}
+            onClick={() => setCreateGroupOpen(true)}
             type="button"
           >
-            <Layers aria-hidden="true" size={14} />
+            <Layers aria-hidden="true" size={13} />
+            <span>New group</span>
           </button>
         ) : null}
       </div>
@@ -1545,10 +1530,17 @@ function WorkspaceSidebar({
                     onMutation={onMutation}
                     onPublicAction={onPublicAction}
                     organizationRevision={organization.revision}
+                    workspaceCount={groupWorkspaceCounts.get(section.id) ?? 0}
                   />
                 ) : section.kind === 'pinned' ? (
                   <div className="workspace-section-heading" role="listitem">
                     <Pin aria-hidden="true" size={12} /> Pinned
+                  </div>
+                ) : section.kind === 'ungrouped' &&
+                  section.workspaceIds.length > 0 &&
+                  sections.some(({ kind }) => kind !== 'ungrouped') ? (
+                  <div className="workspace-section-heading" role="listitem">
+                    {messages.workspaceShell.sidebar.recentHeading}
                   </div>
                 ) : null}
                 {section.workspaceIds.map((workspaceId) => {
@@ -1596,9 +1588,104 @@ function WorkspaceSidebar({
         </SortableContext>
       </DndContext>
       <div className="sidebar-footer">
-        {messages.workspaceShell.sidebar.workspaceCount(workspaces.length)}
+        {organization && organization.groups.length > 0
+          ? `${messages.workspaceShell.sidebar.workspaceCount(workspaces.length)} ${messages.workspaceShell.sidebar.metadataSeparator} ${messages.workspaceShell.sidebar.groupCount(organization.groups.length)}`
+          : messages.workspaceShell.sidebar.workspaceCount(workspaces.length)}
       </div>
+      {createGroupOpen ? (
+        <WorkspaceGroupNameDialog
+          description="Group related workspaces together so projects are easier to scan and reorder."
+          onOpenChange={setCreateGroupOpen}
+          onSubmit={createGroup}
+          submitLabel="Create group"
+          submittingLabel="Creating…"
+          title="Create workspace group"
+        />
+      ) : null}
     </aside>
+  )
+}
+
+function WorkspaceGroupNameDialog({
+  description,
+  initialName = '',
+  onOpenChange,
+  onSubmit,
+  submitLabel,
+  submittingLabel,
+  title
+}: {
+  description: string
+  initialName?: string
+  onOpenChange: (open: boolean) => void
+  onSubmit: (name: string) => Promise<boolean>
+  submitLabel: string
+  submittingLabel: string
+  title: string
+}): React.JSX.Element {
+  const [name, setName] = useState(initialName)
+  const [submitting, setSubmitting] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const submit = async (event: React.FormEvent): Promise<void> => {
+    event.preventDefault()
+    const trimmed = name.trim()
+    if (!trimmed) {
+      setError('Enter a group name.')
+      return
+    }
+    setSubmitting(true)
+    setError(null)
+    const saved = await onSubmit(trimmed)
+    setSubmitting(false)
+    if (saved) onOpenChange(false)
+    else setError('The group could not be saved. Try again.')
+  }
+
+  return (
+    <Dialog
+      onOpenChange={(nextOpen) => {
+        if (!submitting) onOpenChange(nextOpen)
+      }}
+      open
+    >
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>{title}</DialogTitle>
+          <DialogDescription>{description}</DialogDescription>
+        </DialogHeader>
+        <form className="dialog-form" onSubmit={(event) => void submit(event)}>
+          <label>
+            <span>Group name</span>
+            <input
+              aria-describedby={error ? 'create-group-error' : undefined}
+              autoFocus
+              maxLength={MAX_WORKSPACE_GROUP_NAME_CHARS}
+              onChange={(event) => {
+                setName(event.target.value)
+                if (error) setError(null)
+              }}
+              onFocus={(event) => event.currentTarget.select()}
+              placeholder="For example, Client projects"
+              value={name}
+            />
+          </label>
+          {error ? (
+            <p className="dialog-field-error" id="create-group-error" role="alert">
+              {error}
+            </p>
+          ) : null}
+          <DialogFooter>
+            <Button disabled={submitting} onClick={() => onOpenChange(false)} type="button">
+              Cancel
+            </Button>
+            <Button disabled={submitting || !name.trim()} type="submit" variant="primary">
+              {submitting ? submittingLabel : submitLabel}
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
   )
 }
 
@@ -1615,6 +1702,7 @@ function SavedLayoutsPanel({
   savedLayouts: LayoutListResult
   selectedWorkspaceId: string | null
 }): React.JSX.Element {
+  const [expanded, setExpanded] = useState(false)
   const mutationBase = (): { expectedRevision: number; idempotencyKey: string } => ({
     expectedRevision: savedLayouts.revision,
     idempotencyKey: globalThis.crypto.randomUUID()
@@ -1652,27 +1740,44 @@ function SavedLayoutsPanel({
       aria-label="Saved layouts"
       className="saved-layouts-panel"
       id="saved-layouts-panel"
+      onFocus={(event) => {
+        if (event.target === event.currentTarget) setExpanded(true)
+      }}
       tabIndex={-1}
     >
       <div className="saved-layouts-heading">
-        <strong>Saved layouts</strong>
         <button
-          data-workspace-action={workspaceCardActionRegistry.resolve('layoutSave').actionId}
-          onClick={save}
+          aria-expanded={expanded}
+          className="saved-layouts-toggle"
+          onClick={() => setExpanded((value) => !value)}
           type="button"
         >
-          Save selection
+          <ChevronDown aria-hidden="true" data-collapsed={expanded ? 'false' : 'true'} size={12} />
+          <strong>Saved layouts</strong>
         </button>
-        <button
-          data-workspace-action={workspaceCardActionRegistry.resolve('layoutImport').actionId}
-          disabled={legacyOverLimit}
-          onClick={importLayout}
-          type="button"
-        >
-          Import
-        </button>
+        {expanded ? (
+          <>
+            <button
+              data-workspace-action={workspaceCardActionRegistry.resolve('layoutSave').actionId}
+              onClick={save}
+              type="button"
+            >
+              Save selection
+            </button>
+            <button
+              data-workspace-action={workspaceCardActionRegistry.resolve('layoutImport').actionId}
+              disabled={legacyOverLimit}
+              onClick={importLayout}
+              type="button"
+            >
+              Import
+            </button>
+          </>
+        ) : (
+          <span className="workspace-group-count">{savedLayouts.layouts.length}</span>
+        )}
       </div>
-      {savedLayouts.layouts.length > 0 ? (
+      {!expanded ? null : savedLayouts.layouts.length > 0 ? (
         <ul>
           {savedLayouts.layouts.map((layout) => (
             <li key={layout.id}>
@@ -1740,39 +1845,40 @@ function WorkspaceGroupHeader({
   groupIndex,
   onMutation,
   onPublicAction,
-  organizationRevision
+  organizationRevision,
+  workspaceCount
 }: MutationOwner & {
   group: WorkspaceOrganizationSnapshot['groups'][number]
   groupCount: number
   groupIndex: number
   organizationRevision: number
+  workspaceCount: number
   onPublicAction: (
     actionId: string,
     parameters: DesktopActionInvokeRequest['parameters']
   ) => Promise<boolean>
 }): React.JSX.Element {
+  const [renameOpen, setRenameOpen] = useState(false)
   const mutationBase = (): { expectedRevision: number; idempotencyKey: string } => ({
     expectedRevision: organizationRevision,
     idempotencyKey: globalThis.crypto.randomUUID()
   })
-  const rename = (): void => {
-    const name = window.prompt('Rename workspace group', group.name)?.trim()
-    if (!name || name === group.name) return
-    void onPublicAction('workspace.group.rename', {
-      groupId: group.id,
-      name,
-      expectedRevision: organizationRevision
-    })
-      .then((invoked) =>
-        invoked
-          ? undefined
-          : window.desktopBridge.renameGroup
-            ? onMutation(
-                window.desktopBridge.renameGroup({ groupId: group.id, name, ...mutationBase() })
-              )
-            : undefined
+  const rename = async (name: string): Promise<boolean> => {
+    if (name === group.name) return true
+    try {
+      const invoked = await onPublicAction('workspace.group.rename', {
+        groupId: group.id,
+        name,
+        expectedRevision: organizationRevision
+      })
+      if (invoked) return true
+      if (!window.desktopBridge.renameGroup) return false
+      return onMutation(
+        window.desktopBridge.renameGroup({ groupId: group.id, name, ...mutationBase() })
       )
-      .catch(() => undefined)
+    } catch {
+      return false
+    }
   }
   const remove = (): void => {
     if (
@@ -1830,40 +1936,64 @@ function WorkspaceGroupHeader({
         />
         <span>{group.name}</span>
       </button>
+      {group.collapsed ? (
+        <span
+          aria-label={messages.workspaceShell.sidebar.workspaceCount(workspaceCount)}
+          className="workspace-group-count"
+          title={messages.workspaceShell.sidebar.workspaceCount(workspaceCount)}
+        >
+          {workspaceCount}
+        </span>
+      ) : null}
       <button
         aria-label={`Rename ${group.name}`}
         data-workspace-action={workspaceCardActionRegistry.resolve('groupRename').actionId}
-        onClick={rename}
+        onClick={() => setRenameOpen(true)}
+        title={`Rename ${group.name}`}
         type="button"
       >
-        Rename
+        <Pencil aria-hidden="true" size={12} />
       </button>
       <button
         aria-label={`Move ${group.name} up`}
         data-workspace-action={workspaceCardActionRegistry.resolve('groupMove').actionId}
         disabled={groupIndex <= 0}
         onClick={() => move(groupIndex - 1)}
+        title={`Move ${group.name} up`}
         type="button"
       >
-        Up
+        <ArrowUp aria-hidden="true" size={12} />
       </button>
       <button
         aria-label={`Move ${group.name} down`}
         data-workspace-action={workspaceCardActionRegistry.resolve('groupMove').actionId}
         disabled={groupIndex >= groupCount - 1}
         onClick={() => move(groupIndex + 1)}
+        title={`Move ${group.name} down`}
         type="button"
       >
-        Down
+        <ArrowDown aria-hidden="true" size={12} />
       </button>
       <button
         aria-label={`Delete ${group.name}`}
         data-workspace-action={workspaceCardActionRegistry.resolve('groupDelete').actionId}
         onClick={remove}
+        title={`Delete ${group.name}`}
         type="button"
       >
-        Delete
+        <Trash2 aria-hidden="true" size={12} />
       </button>
+      {renameOpen ? (
+        <WorkspaceGroupNameDialog
+          description="Choose a short name that makes this workspace collection easy to recognize."
+          initialName={group.name}
+          onOpenChange={setRenameOpen}
+          onSubmit={rename}
+          submitLabel="Save changes"
+          submittingLabel="Saving…"
+          title="Rename workspace group"
+        />
+      ) : null}
     </div>
   )
 }
@@ -1912,6 +2042,7 @@ function SortableWorkspace({
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: workspace.id
   })
+  const activity = workspaceActivity(cardSlots, cardSlotsV2)
   const rename = (): void => {
     const name = window.prompt(messages.workspaceContextMenu.rename, workspace.name)?.trim()
     if (name && name !== workspace.name)
@@ -2025,6 +2156,30 @@ function SortableWorkspace({
     }
     onSelectWorkspace(workspace.id, { additive, range })
   }
+  const [pathOpeners, setPathOpeners] = useState<readonly DesktopWorkspacePathOpener[]>([
+    { id: 'fileManager', label: 'File Explorer', kind: 'fileManager' }
+  ])
+  const [pathOpenerStatus, setPathOpenerStatus] = useState<'idle' | 'loading' | 'ready' | 'failed'>(
+    'idle'
+  )
+  const loadPathOpeners = (open: boolean): void => {
+    if (!open || pathOpenerStatus !== 'idle' || !window.desktopBridge.listWorkspacePathOpeners)
+      return
+    setPathOpenerStatus('loading')
+    void window.desktopBridge
+      .listWorkspacePathOpeners()
+      .then((openers) => {
+        setPathOpeners(openers)
+        setPathOpenerStatus('ready')
+      })
+      .catch(() => setPathOpenerStatus('failed'))
+  }
+  const openWorkspacePath = (openerId: DesktopWorkspacePathOpenerId): void => {
+    if (!window.desktopBridge.openWorkspacePath) return
+    void window.desktopBridge
+      .openWorkspacePath({ workspaceId: workspace.id, openerId })
+      .catch(() => window.alert(messages.workspaceContextMenu.openFailed))
+  }
   return (
     <ContextMenu>
       <ContextMenuTrigger asChild>
@@ -2131,10 +2286,15 @@ function SortableWorkspace({
               <span className="workspace-name-line">
                 <span
                   className="workspace-indicator"
-                  style={{ background: safeWorkspaceColor(workspace.color) }}
+                  style={
+                    attention?.state === 'waiting' || attention?.state === 'urgent'
+                      ? undefined
+                      : { background: safeWorkspaceColor(workspace.color) }
+                  }
                   aria-hidden="true"
                 />
                 <strong>{workspace.name}</strong>
+                <WorkspaceActivityBadge activity={activity} workspaceName={workspace.name} />
                 {attention ? (
                   <AttentionBadge
                     announce={false}
@@ -2143,6 +2303,15 @@ function SortableWorkspace({
                     label={workspace.name}
                   />
                 ) : null}
+                <span
+                  aria-hidden="true"
+                  className="workspace-when"
+                  title={messages.workspaceShell.sidebar.lastActivity(
+                    new Date(workspace.updatedAt).toLocaleString()
+                  )}
+                >
+                  {workspaceRelativeTime(workspace.updatedAt)}
+                </span>
               </span>
             </button>
             <div className="workspace-copy workspace-details">
@@ -2157,6 +2326,12 @@ function SortableWorkspace({
                 <span className="workspace-meta-value">
                   {workspaceDirectoryDisplayPath(workspace.workingDirectory)}
                 </span>
+                {metadata?.gitBranch ? (
+                  <span className="workspace-branch" title={metadata.gitBranch}>
+                    <GitBranch aria-hidden="true" size={11} />
+                    <span>{metadata.gitBranch}</span>
+                  </span>
+                ) : null}
               </small>
               <small
                 aria-label={messages.workspaceRuntimeMetadata.accessibilityLabel(
@@ -2168,24 +2343,14 @@ function SortableWorkspace({
                 className="workspace-runtime-metadata"
                 tabIndex={0}
               >
-                <span
-                  className="workspace-meta-row"
-                  title={metadata?.gitBranch ?? messages.workspaceRuntimeMetadata.noGitBranch}
-                >
-                  <GitBranch aria-hidden="true" size={11} />
-                  <span className="workspace-runtime-metadata-label">
-                    {messages.workspaceRuntimeMetadata.branch}:{' '}
+                {workspaceGitStatusDirty(metadata?.gitStatus) ? (
+                  <span
+                    className="workspace-git-status"
+                    title={workspaceGitStatusLabel(metadata?.gitStatus)}
+                  >
+                    {workspaceGitStatusLabel(metadata?.gitStatus)}
                   </span>
-                  <span className="workspace-meta-value">
-                    {metadata?.gitBranch ?? messages.workspaceShell.sidebar.unavailableMetadata}
-                  </span>
-                </span>
-                <span
-                  className="workspace-git-status"
-                  title={workspaceGitStatusLabel(metadata?.gitStatus)}
-                >
-                  {workspaceGitStatusLabel(metadata?.gitStatus)}
-                </span>
+                ) : null}
                 <span className="workspace-chips">
                   <span className="workspace-chip" title={processTitle}>
                     <span className="workspace-runtime-metadata-label">
@@ -2209,6 +2374,12 @@ function SortableWorkspace({
                       :{port}
                     </span>
                   ))}
+                  {workspaceBrowserHosts(workspace).map((host) => (
+                    <span className="workspace-chip" key={host} title={host}>
+                      <Globe2 aria-hidden="true" size={10} />
+                      {host}
+                    </span>
+                  ))}
                 </span>
               </small>
               <WorkspaceCardSlots slots={cardSlots} />
@@ -2220,6 +2391,48 @@ function SortableWorkspace({
               ) : null}
             </div>
           </div>
+          <DropdownMenu onOpenChange={loadPathOpeners}>
+            <DropdownMenuTrigger asChild>
+              <button
+                aria-label={`${messages.workspaceContextMenu.openWith} ${workspace.name}`}
+                className="workspace-open-path"
+                data-workspace-action={workspaceCardActionRegistry.resolve('openPath').actionId}
+                disabled={!window.desktopBridge.openWorkspacePath}
+                title={messages.workspaceContextMenu.openWith}
+                type="button"
+              >
+                <FolderOpen aria-hidden="true" size={13} />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" side="right" sideOffset={6}>
+              <DropdownMenuItem onSelect={() => openWorkspacePath('fileManager')}>
+                <FolderOpen aria-hidden="true" size={14} />
+                {messages.workspaceContextMenu.openInFileExplorer}
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              {pathOpeners
+                .filter(({ kind }) => kind === 'ide')
+                .map((opener) => (
+                  <DropdownMenuItem key={opener.id} onSelect={() => openWorkspacePath(opener.id)}>
+                    <Code2 aria-hidden="true" size={14} />
+                    {messages.workspaceContextMenu.openInIde(opener.label)}
+                  </DropdownMenuItem>
+                ))}
+              {pathOpenerStatus === 'loading' ? (
+                <DropdownMenuItem disabled>
+                  {messages.workspaceContextMenu.detectingIdes}
+                </DropdownMenuItem>
+              ) : null}
+              {pathOpenerStatus === 'ready' && pathOpeners.length === 1 ? (
+                <DropdownMenuItem disabled>{messages.workspaceContextMenu.noIdes}</DropdownMenuItem>
+              ) : null}
+              {pathOpenerStatus === 'failed' ? (
+                <DropdownMenuItem disabled>
+                  {messages.workspaceContextMenu.openerDetectionFailed}
+                </DropdownMenuItem>
+              ) : null}
+            </DropdownMenuContent>
+          </DropdownMenu>
           <button
             className="workspace-drag"
             aria-label={messages.workspaceShell.sidebar.reorder(workspace.name)}
@@ -2446,6 +2659,41 @@ function workspaceGitStatusLabel(status: WorkspaceGitStatus | null | undefined):
   return parts.join(', ')
 }
 
+export function workspaceGitStatusDirty(status: WorkspaceGitStatus | null | undefined): boolean {
+  if (!status) return false
+  return !status.clean || status.ahead > 0 || status.behind > 0
+}
+
+export function workspaceRelativeTime(updatedAt: number, now = Date.now()): string {
+  const seconds = Math.max(0, Math.floor((now - updatedAt) / 1000))
+  if (seconds < 60) return 'now'
+  const minutes = Math.floor(seconds / 60)
+  if (minutes < 60) return `${String(minutes)}m`
+  const hours = Math.floor(minutes / 60)
+  if (hours < 24) return `${String(hours)}h`
+  const days = Math.floor(hours / 24)
+  if (days < 7) return `${String(days)}d`
+  const weeks = Math.floor(days / 7)
+  if (weeks < 5) return `${String(weeks)}w`
+  const months = Math.floor(days / 30)
+  if (months < 12) return `${String(months)}mo`
+  return `${String(Math.floor(days / 365))}y`
+}
+
+export function workspaceBrowserHosts(workspace: WorkspaceSnapshot): string[] {
+  const hosts = new Set<string>()
+  for (const tab of workspace.tabs) {
+    if (tab.content.kind !== 'browser') continue
+    try {
+      const url = new URL(tab.content.state.url)
+      if (url.host) hosts.add(url.host)
+    } catch {
+      // Placeholder or invalid URLs contribute no chip.
+    }
+  }
+  return [...hosts].slice(0, 3)
+}
+
 function workspaceRuntimeMetadataSelectionKey(workspace: WorkspaceSnapshot): string {
   const pane = workspace.panes.find(({ id }) => id === workspace.selectedPaneId)
   const tab = workspace.tabs.find(({ id }) => id === pane?.selectedTabId)
@@ -2527,11 +2775,13 @@ function safeWorkspaceColor(value: string | null | undefined): string | undefine
 }
 
 function PaneWorkspace({
+  browserTabsEnabled,
   browserViewsVisible,
   onMutation,
   onProcessTitleChange,
   workspace
 }: MutationOwner & {
+  browserTabsEnabled: boolean
   browserViewsVisible: boolean
   onProcessTitleChange: ProcessTitleHandler
   workspace: WorkspaceSnapshot
@@ -2602,6 +2852,7 @@ function PaneWorkspace({
       sensors={sensors}
     >
       <PaneTree
+        browserTabsEnabled={browserTabsEnabled}
         browserViewsVisible={browserViewsVisible && draggedTab === null}
         draggedTab={draggedTab}
         node={workspace.layout}
@@ -2643,6 +2894,7 @@ function isDropZone(value: unknown): value is PaneDropZone {
 }
 
 function PaneTree({
+  browserTabsEnabled,
   browserViewsVisible,
   draggedTab,
   node,
@@ -2651,6 +2903,7 @@ function PaneTree({
   onTabAction,
   workspace
 }: MutationOwner & {
+  browserTabsEnabled: boolean
   browserViewsVisible: boolean
   draggedTab: TabMutationSource | null
   node: PaneTreeNode
@@ -2662,6 +2915,7 @@ function PaneTree({
     const pane = workspace.panes.find((candidate) => candidate.id === node.paneId)
     return pane ? (
       <PaneView
+        browserTabsEnabled={browserTabsEnabled}
         browserViewsVisible={browserViewsVisible}
         draggedTab={draggedTab}
         onMutation={onMutation}
@@ -2697,6 +2951,7 @@ function PaneTree({
     >
       <Panel id={firstId} minSize="12%">
         <PaneTree
+          browserTabsEnabled={browserTabsEnabled}
           browserViewsVisible={browserViewsVisible}
           draggedTab={draggedTab}
           node={node.first}
@@ -2711,6 +2966,7 @@ function PaneTree({
       </Separator>
       <Panel id={secondId} minSize="12%">
         <PaneTree
+          browserTabsEnabled={browserTabsEnabled}
           browserViewsVisible={browserViewsVisible}
           draggedTab={draggedTab}
           node={node.second}
@@ -2725,6 +2981,7 @@ function PaneTree({
 }
 
 function PaneView({
+  browserTabsEnabled,
   browserViewsVisible,
   draggedTab,
   onMutation,
@@ -2733,6 +2990,7 @@ function PaneView({
   pane,
   workspace
 }: MutationOwner & {
+  browserTabsEnabled: boolean
   browserViewsVisible: boolean
   draggedTab: TabMutationSource | null
   onTabAction: TabActionHandler
@@ -2814,21 +3072,50 @@ function PaneView({
               <Search size={14} />
             </IconButton>
           ) : null}
-          <IconButton
-            aria-label={messages.workspaceShell.pane.newTerminalTab}
-            onClick={() =>
-              void onMutation(
-                window.desktopBridge.openTerminalTab({
-                  workspaceId: workspace.id,
-                  paneId: pane.id,
-                  launch: terminalLaunch(workspace.workingDirectory)
-                })
-              )
-            }
-            tooltip={`${messages.workspaceShell.pane.newTerminalTab} · Ctrl+T`}
-          >
-            <Plus size={14} />
-          </IconButton>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button
+                aria-label={messages.workspaceShell.pane.addTab}
+                className="pane-add-tab"
+                type="button"
+              >
+                <Plus aria-hidden="true" size={14} />
+                <span>{messages.workspaceShell.pane.addTab}</span>
+                <ChevronDown aria-hidden="true" size={12} />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem
+                onSelect={() =>
+                  void onMutation(
+                    window.desktopBridge.openTerminalTab({
+                      workspaceId: workspace.id,
+                      paneId: pane.id,
+                      launch: terminalLaunch(workspace.workingDirectory)
+                    })
+                  )
+                }
+              >
+                <TerminalSquare aria-hidden="true" size={14} />
+                {messages.workspaceShell.pane.terminalTab}
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                disabled={!browserTabsEnabled}
+                onSelect={() =>
+                  void onMutation(
+                    window.desktopBridge.openBrowserTab({
+                      workspaceId: workspace.id,
+                      paneId: pane.id,
+                      metadata: { url: messages.workspaceShell.defaultBrowserUrl }
+                    })
+                  )
+                }
+              >
+                <Globe2 aria-hidden="true" size={14} />
+                {messages.workspaceShell.pane.browserTab}
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
           <IconButton
             aria-label={messages.workspaceShell.pane.splitRight}
             onClick={() => void splitWithTerminal(workspace, pane.id, 'horizontal', onMutation)}
@@ -3523,6 +3810,10 @@ export function CommandPalette({
   recentCommandIds: readonly string[]
 }): React.JSX.Element {
   const releaseClose = useRef<(() => void) | undefined>(undefined)
+  // The palette is keyed by open state, so an execution's close-wait must not
+  // outlive this instance: resolve any pending close on unmount or execute()
+  // would await a callback that can no longer fire.
+  useEffect(() => () => releaseClose.current?.(), [])
   const [query, setQuery] = useState('')
   const publicCommands = useMemo(
     () => publicActionCommands(publicActions, onInvokePublicAction),

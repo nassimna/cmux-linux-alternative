@@ -4,7 +4,7 @@ import '@testing-library/jest-dom/vitest'
 
 import { useState } from 'react'
 
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import type {
@@ -28,9 +28,12 @@ const terminalFontStack = (fontFamily: string): string =>
 const terminalSpies = vi.hoisted(() => ({
   constructorOptions: undefined as Record<string, unknown> | undefined,
   customKeyEventHandler: undefined as ((event: KeyboardEvent) => boolean) | undefined,
+  fit: undefined as (() => void) | undefined,
+  hasSelection: false,
   instance: undefined as
     | {
         cols: number
+        buffer: { active: { baseY: number; type: string; viewportY: number } }
         options: {
           cursorBlink?: boolean
           fontFamily?: string
@@ -41,17 +44,20 @@ const terminalSpies = vi.hoisted(() => ({
         rows: number
       }
     | undefined,
+  linkActivate: undefined as ((event: MouseEvent, text: string) => void) | undefined,
   linkHover: undefined as ((event: MouseEvent, text: string) => void) | undefined,
   linkLeave: undefined as (() => void) | undefined,
   onData: undefined as ((data: string) => void) | undefined,
   onTitleChange: undefined as ((title: string) => void) | undefined,
   reset: vi.fn(),
-  resizeObserver: undefined as ResizeObserverCallback | undefined
+  resizeObserver: undefined as ResizeObserverCallback | undefined,
+  scrollToLine: vi.fn(),
+  selection: ''
 }))
 
 vi.mock('@xterm/xterm', () => ({
   Terminal: class {
-    public buffer = { active: { type: 'normal' } }
+    public buffer = { active: { baseY: 0, type: 'normal', viewportY: 0 } }
     public cols = 120
     public options: {
       cursorBlink?: boolean
@@ -76,10 +82,10 @@ vi.mock('@xterm/xterm', () => ({
     public dispose(): void {}
     public focus(): void {}
     public getSelection(): string {
-      return ''
+      return terminalSpies.selection
     }
     public hasSelection(): boolean {
-      return false
+      return terminalSpies.hasSelection
     }
     public loadAddon(): void {}
     public onData(listener: (data: string) => void): { dispose(): void } {
@@ -97,6 +103,10 @@ vi.mock('@xterm/xterm', () => ({
     public reset(): void {
       terminalSpies.reset()
     }
+    public scrollToLine(line: number): void {
+      terminalSpies.scrollToLine(line)
+      this.buffer.active.viewportY = line
+    }
     public resize(cols: number, rows: number): void {
       this.cols = cols
       this.rows = rows
@@ -109,7 +119,9 @@ vi.mock('@xterm/xterm', () => ({
 
 vi.mock('@xterm/addon-fit', () => ({
   FitAddon: class {
-    public fit(): void {}
+    public fit(): void {
+      terminalSpies.fit?.()
+    }
   }
 }))
 vi.mock('@xterm/addon-search', () => ({
@@ -130,9 +142,10 @@ vi.mock('@xterm/addon-clipboard', () => ({ ClipboardAddon: class {} }))
 vi.mock('@xterm/addon-web-links', () => ({
   WebLinksAddon: class {
     public constructor(
-      _handler: (event: MouseEvent, uri: string) => void,
+      handler: (event: MouseEvent, uri: string) => void,
       options: { hover: (event: MouseEvent, text: string) => void; leave: () => void }
     ) {
+      terminalSpies.linkActivate = handler
       terminalSpies.linkHover = options.hover
       terminalSpies.linkLeave = options.leave
     }
@@ -162,12 +175,17 @@ afterEach(() => {
   resetConfigurationStoreForTests()
   terminalSpies.constructorOptions = undefined
   terminalSpies.instance = undefined
+  terminalSpies.fit = undefined
+  terminalSpies.hasSelection = false
+  terminalSpies.linkActivate = undefined
   terminalSpies.linkHover = undefined
   terminalSpies.linkLeave = undefined
   terminalSpies.onData = undefined
   terminalSpies.onTitleChange = undefined
   terminalSpies.reset.mockReset()
   terminalSpies.resizeObserver = undefined
+  terminalSpies.scrollToLine.mockReset()
+  terminalSpies.selection = ''
   vi.unstubAllGlobals()
 })
 
@@ -205,6 +223,69 @@ describe('TerminalPane', () => {
         screen.queryByText(messages.terminalPane.openLink('https://example.test/docs'))
       ).not.toBeInTheDocument()
     )
+  })
+
+  it('opens plain and OSC 8 links through the safe desktop bridge', async () => {
+    vi.stubGlobal('ResizeObserver', ResizeObserverMock)
+    const openExternal = vi.fn().mockResolvedValue(undefined)
+    const bridge = terminalBridge({
+      openExternal,
+      restartTerminal: vi.fn().mockResolvedValue(mutationResult())
+    })
+    window.desktopBridge = bridge
+    renderTerminalPane()
+    await screen.findByText(messages.terminalPane.status.connected, {
+      selector: '.terminal-statusbar span'
+    })
+
+    const plainEvent = new MouseEvent('mouseup', { bubbles: true })
+    const preventPlainDefault = vi.spyOn(plainEvent, 'preventDefault')
+    terminalSpies.linkActivate?.(plainEvent, 'https://example.test/plain')
+
+    const oscHandler = terminalSpies.constructorOptions?.linkHandler as
+      | {
+          activate(event: MouseEvent, uri: string): void
+          allowNonHttpProtocols: boolean
+          hover(event: MouseEvent, uri: string): void
+          leave(): void
+        }
+      | undefined
+    expect(oscHandler?.allowNonHttpProtocols).toBe(false)
+    const oscEvent = new MouseEvent('mouseup', { bubbles: true })
+    const preventOscDefault = vi.spyOn(oscEvent, 'preventDefault')
+    oscHandler?.activate(oscEvent, 'https://example.test/osc')
+
+    await waitFor(() => expect(openExternal).toHaveBeenCalledTimes(2))
+    expect(openExternal).toHaveBeenNthCalledWith(1, 'https://example.test/plain')
+    expect(openExternal).toHaveBeenNthCalledWith(2, 'https://example.test/osc')
+    expect(preventPlainDefault).toHaveBeenCalledOnce()
+    expect(preventOscDefault).toHaveBeenCalledOnce()
+
+    oscHandler?.hover(new MouseEvent('mouseenter'), 'https://example.test/osc')
+    expect(
+      await screen.findByText(messages.terminalPane.openLink('https://example.test/osc'))
+    ).toBeVisible()
+    oscHandler?.leave()
+  })
+
+  it('reports terminal link launch failures without an unhandled rejection', async () => {
+    vi.stubGlobal('ResizeObserver', ResizeObserverMock)
+    window.desktopBridge = terminalBridge({
+      openExternal: vi.fn().mockRejectedValue(new Error('No default browser')),
+      restartTerminal: vi.fn().mockResolvedValue(mutationResult())
+    })
+    renderTerminalPane()
+    await screen.findByText(messages.terminalPane.status.connected, {
+      selector: '.terminal-statusbar span'
+    })
+
+    terminalSpies.linkActivate?.(new MouseEvent('mouseup'), 'https://example.test/unavailable')
+
+    expect(
+      await screen.findByText(messages.terminalPane.errors.openLinkFailed, {
+        selector: '.terminal-statusbar span'
+      })
+    ).toBeVisible()
   })
 
   it('checkpoints a clean recovery boundary immediately after a truncated attach', async () => {
@@ -306,6 +387,39 @@ describe('TerminalPane', () => {
     } finally {
       clearShortcutCapture()
     }
+  })
+
+  it('copies the selected terminal text with Ctrl+Shift+C without sending an interrupt', async () => {
+    vi.stubGlobal('ResizeObserver', ResizeObserverMock)
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    const previousClipboard = navigator.clipboard
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText }
+    })
+    window.desktopBridge = terminalBridge({
+      restartTerminal: vi.fn().mockResolvedValue(mutationResult())
+    })
+    terminalSpies.hasSelection = true
+    terminalSpies.selection = 'selected output'
+
+    renderTerminalPane()
+    await screen.findByText(messages.terminalPane.status.connected, {
+      selector: '.terminal-statusbar span'
+    })
+
+    const handler = terminalSpies.customKeyEventHandler
+    expect(handler).toBeDefined()
+    expect(
+      handler!(new KeyboardEvent('keydown', { ctrlKey: true, shiftKey: true, key: 'c' }))
+    ).toBe(false)
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith('selected output'))
+    expect(handler!(new KeyboardEvent('keydown', { ctrlKey: true, key: 'c' }))).toBe(true)
+
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: previousClipboard
+    })
   })
 
   it('reports the attached command basename and sanitized xterm title as process metadata', async () => {
@@ -580,6 +694,77 @@ describe('TerminalPane', () => {
     window.removeEventListener('unhandledrejection', unhandled)
   })
 
+  it('preserves the scroll distance from the bottom while fitting a resized terminal', async () => {
+    vi.stubGlobal('ResizeObserver', ResizeObserverMock)
+    const resizeTerminal = vi.fn<DesktopBridge['resizeTerminal']>().mockResolvedValue(undefined)
+    window.desktopBridge = terminalBridge({
+      resizeTerminal,
+      restartTerminal: vi.fn().mockResolvedValue(mutationResult())
+    })
+
+    renderTerminalPane()
+    await screen.findByText('Connected', { selector: '.terminal-statusbar span' })
+    const terminal = terminalSpies.instance
+    if (!terminal) throw new Error('Expected the xterm instance')
+    terminal.buffer.active.baseY = 120
+    terminal.buffer.active.viewportY = 80
+    terminal.cols = 121
+    terminalSpies.fit = () => {
+      terminal.buffer.active.baseY = 150
+      terminal.buffer.active.viewportY = 150
+    }
+
+    terminalSpies.resizeObserver?.([], {} as ResizeObserver)
+
+    await waitFor(() => expect(resizeTerminal).toHaveBeenCalledWith(terminalId, 30, 121))
+    expect(terminalSpies.scrollToLine).toHaveBeenCalledWith(110)
+    expect(terminal.buffer.active.viewportY).toBe(110)
+  })
+
+  it('does not reapply a stale scroll anchor after an asynchronous resize', async () => {
+    vi.stubGlobal('ResizeObserver', ResizeObserverMock)
+    let resolveResize: (() => void) | undefined
+    const resizeTerminal = vi.fn<DesktopBridge['resizeTerminal']>(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveResize = resolve
+        })
+    )
+    window.desktopBridge = terminalBridge({
+      resizeTerminal,
+      restartTerminal: vi.fn().mockResolvedValue(mutationResult())
+    })
+
+    renderTerminalPane()
+    await screen.findByText('Connected', { selector: '.terminal-statusbar span' })
+    const terminal = terminalSpies.instance
+    if (!terminal) throw new Error('Expected the xterm instance')
+    terminal.buffer.active.baseY = 120
+    terminal.buffer.active.viewportY = 80
+    terminal.cols = 121
+    terminalSpies.fit = () => {
+      terminal.buffer.active.baseY = 150
+      terminal.buffer.active.viewportY = 150
+    }
+
+    terminalSpies.resizeObserver?.([], {} as ResizeObserver)
+
+    await waitFor(() => expect(resizeTerminal).toHaveBeenCalledWith(terminalId, 30, 121))
+    expect(terminalSpies.scrollToLine).toHaveBeenCalledOnce()
+    expect(terminal.buffer.active.viewportY).toBe(110)
+
+    // A PTY commonly emits output while handling SIGWINCH. xterm keeps a user-scrolled
+    // viewport stationary; resolving the resize must not overwrite that with the old anchor.
+    terminal.buffer.active.baseY = 160
+    await act(async () => {
+      resolveResize?.()
+      await Promise.resolve()
+    })
+
+    expect(terminalSpies.scrollToLine).toHaveBeenCalledOnce()
+    expect(terminal.buffer.active.viewportY).toBe(110)
+  })
+
   it('finishes old checkpoint and detach before a remount attaches the same terminal', async () => {
     vi.stubGlobal('ResizeObserver', ResizeObserverMock)
     let releaseCheckpoint: (() => void) | undefined
@@ -635,6 +820,7 @@ interface TerminalBridgeOptions {
   checkpointTerminal?: DesktopBridge['checkpointTerminal']
   detachTerminal?: DesktopBridge['detachTerminal']
   exited?: boolean
+  openExternal?: DesktopBridge['openExternal']
   resizeTerminal?: DesktopBridge['resizeTerminal']
   restartTerminal: DesktopBridge['restartTerminal']
   sendTerminalInput?: DesktopBridge['sendTerminalInput']
@@ -645,6 +831,7 @@ function terminalBridge({
   checkpointTerminal,
   detachTerminal,
   exited = false,
+  openExternal,
   resizeTerminal,
   restartTerminal,
   sendTerminalInput
@@ -654,7 +841,7 @@ function terminalBridge({
     checkpointTerminal: checkpointTerminal ?? vi.fn().mockResolvedValue(undefined),
     detachTerminal: detachTerminal ?? vi.fn().mockResolvedValue(undefined),
     onTerminalEvent: vi.fn(() => () => undefined),
-    openExternal: vi.fn().mockResolvedValue(undefined),
+    openExternal: openExternal ?? vi.fn().mockResolvedValue(undefined),
     resizeTerminal: resizeTerminal ?? vi.fn().mockResolvedValue(undefined),
     restartTerminal,
     sendTerminalInput: sendTerminalInput ?? vi.fn().mockResolvedValue(undefined)

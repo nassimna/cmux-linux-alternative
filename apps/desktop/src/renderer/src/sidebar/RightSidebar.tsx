@@ -1,4 +1,15 @@
 import { useEffect, useRef, useState } from 'react'
+import {
+  BookOpenText,
+  FileText,
+  FolderTree,
+  GitCompareArrows,
+  History,
+  ListTodo,
+  RefreshCw,
+  Search as SearchIcon,
+  ShieldCheck
+} from 'lucide-react'
 
 import type {
   ContentDocumentIssueResult,
@@ -18,6 +29,7 @@ import type {
 import { messages } from '../messages'
 
 const LABELS: Record<SidebarSurface, string> = messages.sidebarSurfaces.labels
+const DESCRIPTIONS: Record<SidebarSurface, string> = messages.sidebarSurfaces.descriptions
 const MIN_WIDTH = 240
 const MAX_WIDTH = 720
 const DEFAULT_WIDTH = 320
@@ -141,6 +153,18 @@ export function RightSidebar({ enabled, workspaceId, paneId }: Props): React.JSX
           void save(effective.selected, widthRef.current)
         }}
       />
+      <header className="right-sidebar-header">
+        <div className="right-sidebar-heading">
+          <span className="right-sidebar-heading-icon" aria-hidden="true">
+            <SurfaceIcon surface={effective.selected} />
+          </span>
+          <div>
+            <span className="right-sidebar-eyebrow">Workspace tools</span>
+            <h2>{LABELS[effective.selected]}</h2>
+          </div>
+        </div>
+        <p>{DESCRIPTIONS[effective.selected]}</p>
+      </header>
       <nav aria-label="Tool surfaces" className="right-sidebar-tabs" role="tablist">
         {enabledOrder.map((surface, index) => (
           <button
@@ -152,10 +176,12 @@ export function RightSidebar({ enabled, workspaceId, paneId }: Props): React.JSX
             onClick={() => void save(surface, effective.width)}
             onKeyDown={(event) => {
               let nextIndex: number | null = null
-              if (event.key === 'ArrowLeft') {
+              if (event.key === 'ArrowLeft' || event.key === 'ArrowUp') {
                 nextIndex = (index - 1 + enabledOrder.length) % enabledOrder.length
               }
-              if (event.key === 'ArrowRight') nextIndex = (index + 1) % enabledOrder.length
+              if (event.key === 'ArrowRight' || event.key === 'ArrowDown') {
+                nextIndex = (index + 1) % enabledOrder.length
+              }
               if (event.key === 'Home') nextIndex = 0
               if (event.key === 'End') nextIndex = enabledOrder.length - 1
               if (nextIndex === null) return
@@ -172,15 +198,11 @@ export function RightSidebar({ enabled, workspaceId, paneId }: Props): React.JSX
             tabIndex={surface === effective.selected ? 0 : -1}
             type="button"
           >
-            {LABELS[surface]}
+            <SurfaceIcon surface={surface} />
+            <span>{LABELS[surface]}</span>
           </button>
         ))}
       </nav>
-      {error ? (
-        <p className="right-sidebar-error" role="alert">
-          {error}
-        </p>
-      ) : null}
       <section
         aria-label={LABELS[effective.selected]}
         aria-labelledby={`right-sidebar-tab-${effective.selected}`}
@@ -189,10 +211,37 @@ export function RightSidebar({ enabled, workspaceId, paneId }: Props): React.JSX
         role="tabpanel"
         tabIndex={0}
       >
+        {error ? (
+          <p className="right-sidebar-error" role="alert">
+            {error}
+          </p>
+        ) : null}
         <Surface surface={effective.selected} workspaceId={workspaceId} paneId={paneId} />
       </section>
     </aside>
   )
+}
+
+function SurfaceIcon({ surface }: { surface: SidebarSurface }): React.JSX.Element {
+  const props = { 'aria-hidden': true as const, size: 15, strokeWidth: 1.75 }
+  switch (surface) {
+    case 'textBox':
+      return <FileText {...props} />
+    case 'vault':
+      return <ShieldCheck {...props} />
+    case 'taskManager':
+      return <ListTodo {...props} />
+    case 'files':
+      return <FolderTree {...props} />
+    case 'markdown':
+      return <BookOpenText {...props} />
+    case 'diff':
+      return <GitCompareArrows {...props} />
+    case 'search':
+      return <SearchIcon {...props} />
+    case 'recentlyClosed':
+      return <History {...props} />
+  }
 }
 
 function Surface({
@@ -454,6 +503,7 @@ function Vault() {
 function Tasks() {
   const [tasks, setTasks] = useState<TaskSummary[]>([])
   const [status, setStatus] = useState('Loading…')
+  const [actingOn, setActingOn] = useState<string | null>(null)
   const load = async (): Promise<void> => {
     try {
       const result = await window.desktopBridge.listTasks?.({
@@ -473,6 +523,8 @@ function Tasks() {
     task: TaskSummary,
     action: 'detach' | 'cancel' | 'terminate' | 'forceTerminate'
   ): Promise<void> => {
+    const actionKey = `${task.target.sessionId}:${task.target.generation}:${action}`
+    setActingOn(actionKey)
     try {
       const result = await window.desktopBridge.actOnTask?.({ action, target: task.target })
       setStatus(
@@ -485,39 +537,81 @@ function Tasks() {
       await load()
     } catch (cause) {
       setStatus(messageOf(cause, 'Task action failed.'))
+    } finally {
+      setActingOn(null)
     }
   }
   return (
-    <div className="surface-stack">
-      <button onClick={() => void load()} type="button">
-        Refresh
-      </button>
+    <div className="surface-stack task-manager-surface">
+      <div className="surface-toolbar">
+        <div>
+          <span className="surface-kicker">Running now</span>
+          <strong>
+            {tasks.length === 0
+              ? 'No active tasks'
+              : `${String(tasks.length)} active task${tasks.length === 1 ? '' : 's'}`}
+          </strong>
+        </div>
+        <button aria-label="Refresh tasks" onClick={() => void load()} type="button">
+          <RefreshCw aria-hidden="true" size={14} />
+          Refresh
+        </button>
+      </div>
       {tasks.map((task) => (
         <article
-          className="surface-card"
+          className="surface-card task-card"
           key={`${task.target.sessionId}:${task.target.generation}`}
         >
-          <strong>{task.label}</strong>
-          <small>
+          <div className="task-card-heading">
+            <strong>{task.label}</strong>
+            <span className="task-state" data-lifecycle={task.lifecycle}>
+              {task.lifecycle}
+            </span>
+          </div>
+          <small className="task-summary">
             {task.kind} · {task.lifecycle} · {task.observation}
           </small>
-          <div className="surface-actions">
-            <button onClick={() => void action(task, 'detach')} type="button">
+          <div className="surface-actions task-primary-actions">
+            <button
+              disabled={actingOn !== null}
+              onClick={() => void action(task, 'detach')}
+              type="button"
+            >
               Detach
             </button>
-            <button onClick={() => void action(task, 'cancel')} type="button">
+            <button
+              disabled={actingOn !== null}
+              onClick={() => void action(task, 'cancel')}
+              type="button"
+            >
               Cancel
             </button>
-            <button onClick={() => void action(task, 'terminate')} type="button">
+            <button
+              className="surface-button-danger"
+              disabled={actingOn !== null}
+              onClick={() => void action(task, 'terminate')}
+              type="button"
+            >
               Terminate
             </button>
-            <button onClick={() => void action(task, 'forceTerminate')} type="button">
+          </div>
+          <details className="task-more-actions">
+            <summary>More actions</summary>
+            <p>Force termination should only be used when a task does not respond.</p>
+            <button
+              className="surface-button-danger"
+              disabled={actingOn !== null}
+              onClick={() => void action(task, 'forceTerminate')}
+              type="button"
+            >
               Force terminate
             </button>
-          </div>
+          </details>
         </article>
       ))}
-      <p role="status">{status}</p>
+      <p className="surface-status" role="status">
+        {status}
+      </p>
     </div>
   )
 }

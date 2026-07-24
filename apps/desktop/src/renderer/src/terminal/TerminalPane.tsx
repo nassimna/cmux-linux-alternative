@@ -31,6 +31,31 @@ const DEFAULT_TERMINAL_CONFIGURATION: TerminalConfiguration = Object.freeze({
 })
 const attachmentTransitions = new Map<string, Promise<void>>()
 
+interface TerminalScrollAnchor {
+  readonly distanceFromBottom: number
+}
+
+function captureScrollAnchor(terminal: Terminal): TerminalScrollAnchor {
+  const buffer = terminal.buffer.active
+  return { distanceFromBottom: Math.max(0, buffer.baseY - buffer.viewportY) }
+}
+
+function restoreScrollAnchor(terminal: Terminal, anchor: TerminalScrollAnchor): void {
+  if (anchor.distanceFromBottom === 0) return
+  terminal.scrollToLine(Math.max(0, terminal.buffer.active.baseY - anchor.distanceFromBottom))
+}
+
+function isTerminalCopyShortcut(event: KeyboardEvent): boolean {
+  const key = event.key.toLowerCase()
+  return (
+    event.type === 'keydown' &&
+    key === 'c' &&
+    !event.altKey &&
+    ((event.ctrlKey && event.shiftKey && !event.metaKey) ||
+      (event.metaKey && !event.ctrlKey && !event.shiftKey))
+  )
+}
+
 function serializeAttachmentTransition<T>(
   terminalId: string,
   transition: () => Promise<T>
@@ -163,6 +188,15 @@ export function TerminalPane({
     }
     let disposed = false
 
+    const openTerminalLink = (event: MouseEvent, uri: string): void => {
+      event.preventDefault()
+      void window.desktopBridge.openExternal(uri).catch(() => {
+        if (!disposed) setStatus(messages.terminalPane.errors.openLinkFailed)
+      })
+    }
+    const showTerminalLink = (_event: MouseEvent, uri: string): void => setLinkTarget(uri)
+    const clearTerminalLink = (): void => setLinkTarget(null)
+
     const initialConfiguration = terminalConfigurationRef.current
     const terminal = new Terminal({
       allowProposedApi: true,
@@ -177,13 +211,27 @@ export function TerminalPane({
       fontWeightBold: '600',
       letterSpacing: 0,
       lineHeight: 1.1,
+      linkHandler: {
+        activate: openTerminalLink,
+        hover: showTerminalLink,
+        leave: clearTerminalLink,
+        allowNonHttpProtocols: false
+      },
       screenReaderMode: false,
       scrollback: initialConfiguration.scrollback,
       theme: terminalTheme
     })
-    terminal.attachCustomKeyEventHandler(
-      (event) => !(event.type === 'keydown' && eventMatchesRegisteredShortcut(event))
-    )
+    terminal.attachCustomKeyEventHandler((event) => {
+      if (isTerminalCopyShortcut(event)) {
+        if (terminal.hasSelection()) {
+          void navigator.clipboard.writeText(terminal.getSelection()).catch(() => {
+            if (!disposed) setStatus(messages.terminalPane.errors.copyFailed)
+          })
+        }
+        return false
+      }
+      return !(event.type === 'keydown' && eventMatchesRegisteredShortcut(event))
+    })
     const fitAddon = new FitAddon()
     const searchAddon = new SearchAddon()
     const serializeAddon = new SerializeAddon()
@@ -194,16 +242,10 @@ export function TerminalPane({
     terminal.loadAddon(unicodeAddon)
     terminal.loadAddon(new ClipboardAddon(undefined, DENY_OSC52_CLIPBOARD_PROVIDER))
     terminal.loadAddon(
-      new WebLinksAddon(
-        (event, uri) => {
-          event.preventDefault()
-          void window.desktopBridge.openExternal(uri)
-        },
-        {
-          hover: (_event, text) => setLinkTarget(text),
-          leave: () => setLinkTarget(null)
-        }
-      )
+      new WebLinksAddon(openTerminalLink, {
+        hover: showTerminalLink,
+        leave: clearTerminalLink
+      })
     )
     terminal.unicode.activeVersion = '11'
     terminal.open(host)
@@ -292,7 +334,9 @@ export function TerminalPane({
     }
     const scheduler = new CheckpointScheduler(captureCheckpoint)
     const syncTerminalSize = async (checkpointAfterResize = true): Promise<boolean> => {
+      const scrollAnchor = captureScrollAnchor(terminal)
       fitAddon.fit()
+      restoreScrollAnchor(terminal, scrollAnchor)
       if (!isCurrent() || (terminal.rows === serviceRows && terminal.cols === serviceCols)) {
         return true
       }

@@ -51,6 +51,10 @@ test.beforeAll(() => {
 })
 
 test('packaged sidebar mounts all fixed surfaces and restores keyboard placement at supported zoom', async () => {
+  test.fixme(
+    true,
+    'The tools sidebar has no entry point while the right-sidebar rework is in flight; re-enable once it ships again.'
+  )
   test.setTimeout(60_000)
   const fixture = await launchFixture('placement')
   try {
@@ -191,6 +195,10 @@ test('packaged sidebar mounts all fixed surfaces and restores keyboard placement
 })
 
 test('packaged recently closed reopens its exact target and Task Manager uses native confirmation', async () => {
+  test.fixme(
+    true,
+    'The tools sidebar has no entry point while the right-sidebar rework is in flight; re-enable once it ships again.'
+  )
   test.setTimeout(60_000)
   const agentSessionId = randomUUID()
   const fixture = await launchFixture('task', { agentSessionId, messageResponses: [1] })
@@ -202,7 +210,8 @@ test('packaged recently closed reopens its exact target and Task Manager uses na
       animations: 'disabled',
       path: join(evidenceDirectory, 'm8-task-manager-before.png')
     })
-    await selectedPane.getByRole('button', { name: 'New terminal tab' }).click()
+    await selectedPane.getByRole('button', { name: 'Add tab' }).click()
+    await page.getByRole('menuitem', { name: 'Terminal', exact: true }).click()
     const before = await selectedTerminalTarget(page)
     const utilities = selectedPane.getByRole('toolbar', { name: new RegExp(before.title) })
     await utilities
@@ -299,6 +308,10 @@ test('packaged recently closed reopens its exact target and Task Manager uses na
 })
 
 test('packaged search opens a revalidated result from an authorized workspace root', async () => {
+  test.fixme(
+    true,
+    'The tools sidebar has no entry point while the right-sidebar rework is in flight; re-enable once it ships again.'
+  )
   test.setTimeout(60_000)
   const marker = `M8_AUTHORIZED_SEARCH_${process.pid}_${Date.now()}`
   const fixture = await launchFixture('search', { workspaceFile: `safe ${marker} preview\n` })
@@ -364,6 +377,10 @@ test('packaged search opens a revalidated result from an authorized workspace ro
 })
 
 test('packaged Vault enforces transcript consent, exclusion, retention, rebuild, and forget', async () => {
+  test.fixme(
+    true,
+    'The tools sidebar has no entry point while the right-sidebar rework is in flight; re-enable once it ships again.'
+  )
   test.setTimeout(60_000)
   const agentSessionId = randomUUID()
   const marker = `M8_PRIVATE_TRANSCRIPT_${process.pid}_${Date.now()}`

@@ -278,6 +278,59 @@ export const desktopRemoteConnectRequestSchema = z.strictObject({
   reconnect: remoteReconnectPolicySchema
 })
 export type DesktopRemoteTargetDraft = z.infer<typeof desktopRemoteTargetDraftSchema>
+
+export const DESKTOP_WORKSPACE_PATH_OPENER_IDS = [
+  'fileManager',
+  'vscode',
+  'vscodeInsiders',
+  'vscodium',
+  'cursor',
+  'windsurf',
+  'zed',
+  'sublimeText',
+  'kate',
+  't3Code',
+  'intellijIdea',
+  'webstorm',
+  'pycharm',
+  'goland',
+  'clion',
+  'rider',
+  'fleet',
+  'androidStudio'
+] as const
+
+export const desktopWorkspacePathOpenerIdSchema = z.enum(DESKTOP_WORKSPACE_PATH_OPENER_IDS)
+export type DesktopWorkspacePathOpenerId = z.infer<typeof desktopWorkspacePathOpenerIdSchema>
+
+export const desktopWorkspacePathOpenerSchema = z.strictObject({
+  id: desktopWorkspacePathOpenerIdSchema,
+  label: z.string().trim().min(1).max(80),
+  kind: z.enum(['fileManager', 'ide'])
+})
+export type DesktopWorkspacePathOpener = z.infer<typeof desktopWorkspacePathOpenerSchema>
+
+export const desktopWorkspacePathOpenersSchema = z
+  .array(desktopWorkspacePathOpenerSchema)
+  .min(1)
+  .max(DESKTOP_WORKSPACE_PATH_OPENER_IDS.length)
+  .superRefine((openers, context) => {
+    if (openers[0]?.id !== 'fileManager' || openers[0].kind !== 'fileManager') {
+      context.addIssue({ code: 'custom', message: 'The file manager opener must be first' })
+    }
+    if (new Set(openers.map(({ id }) => id)).size !== openers.length) {
+      context.addIssue({ code: 'custom', message: 'Workspace path opener IDs must be unique' })
+    }
+    if (openers.some(({ id, kind }) => (id === 'fileManager') !== (kind === 'fileManager'))) {
+      context.addIssue({ code: 'custom', message: 'Invalid workspace path opener kind' })
+    }
+  })
+
+export const desktopWorkspacePathOpenRequestSchema = z.strictObject({
+  workspaceId: remoteUuidSchema,
+  openerId: desktopWorkspacePathOpenerIdSchema
+})
+export type DesktopWorkspacePathOpenRequest = z.infer<typeof desktopWorkspacePathOpenRequestSchema>
 export type DesktopRemoteTargetDeleteRequest = z.infer<
   typeof desktopRemoteTargetDeleteRequestSchema
 >
@@ -886,6 +939,10 @@ export interface DesktopBridge {
   getWorkspaceRuntimeMetadata?(params: WorkspaceSnapshotParams): Promise<WorkspaceRuntimeMetadata>
   /** Optional only so older renderer test doubles remain source-compatible. The preload always provides it. */
   pickWorkspaceDirectory?(): Promise<string | null>
+  /** Optional only so older renderer test doubles remain source-compatible. The preload always provides it. */
+  listWorkspacePathOpeners?(): Promise<readonly DesktopWorkspacePathOpener[]>
+  /** Main resolves the trusted directory from workspaceId; renderer paths are never accepted. */
+  openWorkspacePath?(params: DesktopWorkspacePathOpenRequest): Promise<void>
   createWorkspace(params: WorkspaceCreateParams): Promise<MutationResult>
   updateWorkspace(params: WorkspaceUpdateParams): Promise<MutationResult>
   selectWorkspace(params: WorkspaceSelectParams): Promise<MutationResult>
@@ -1062,6 +1119,8 @@ export const DESKTOP_IPC = {
   attentionAcknowledge: 'attention:acknowledge',
   workspaceRuntimeMetadata: 'workspace:runtimeMetadata',
   workspacePickDirectory: 'workspace:pickDirectory',
+  workspacePathOpeners: 'workspace:pathOpeners',
+  workspacePathOpen: 'workspace:pathOpen',
   workspaceCreate: 'workspace:create',
   workspaceUpdate: 'workspace:update',
   workspaceSelect: 'workspace:select',

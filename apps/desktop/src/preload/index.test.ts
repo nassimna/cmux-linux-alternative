@@ -309,6 +309,28 @@ describe('notification preload bridge', () => {
     expect(electron.invoke).not.toHaveBeenCalled()
   })
 
+  it('validates workspace opener discovery and sends only workspace and opener IDs', async () => {
+    electron.invoke.mockResolvedValue([
+      { id: 'fileManager', label: 'File Explorer', kind: 'fileManager' },
+      { id: 'vscode', label: 'Visual Studio Code', kind: 'ide' }
+    ])
+    await expect(electron.exposed?.listWorkspacePathOpeners?.()).resolves.toHaveLength(2)
+    expect(electron.invoke).toHaveBeenLastCalledWith(DESKTOP_IPC.workspacePathOpeners)
+
+    electron.invoke.mockResolvedValueOnce(undefined)
+    const request = {
+      workspaceId: '10000000-0000-4000-8000-000000000001',
+      openerId: 'vscode' as const
+    }
+    await expect(electron.exposed?.openWorkspacePath?.(request)).resolves.toBeUndefined()
+    expect(electron.invoke).toHaveBeenLastCalledWith(DESKTOP_IPC.workspacePathOpen, request)
+
+    await expect(
+      electron.exposed?.openWorkspacePath?.({ ...request, openerId: '/bin/sh' } as never)
+    ).rejects.toThrow()
+    expect(electron.invoke).toHaveBeenCalledTimes(2)
+  })
+
   it('strictly validates lifecycle snapshots and event ingress', async () => {
     electron.invoke.mockResolvedValue({
       status: 'recovering',

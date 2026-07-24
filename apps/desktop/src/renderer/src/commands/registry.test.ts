@@ -48,6 +48,7 @@ describe('CommandRegistry', () => {
   it('owns canonical action IDs for every workspace card interaction', () => {
     expect(WORKSPACE_CARD_ACTION_IDS).toEqual([
       'workspace.card.select',
+      'workspace.card.openPath',
       'workspace.card.reorder',
       'workspace.card.close',
       'workspace.card.rename',
@@ -81,6 +82,7 @@ describe('CommandRegistry', () => {
       ])
     ).toEqual([
       ['select', 'workspace.card.select', 'workspace.select'],
+      ['openPath', 'workspace.card.openPath', 'workspace.openPath'],
       ['reorder', 'workspace.card.reorder', 'workspace.move'],
       ['close', 'workspace.card.close', 'workspace.close'],
       ['rename', 'workspace.card.rename', 'workspace.update'],

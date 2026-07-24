@@ -132,7 +132,8 @@ test('CLI identify, notification attention, exact tab jump, and read transition'
       throw new Error('Selected workspace, pane, and tab identifiers must be present.')
     }
 
-    await selectedPane.getByRole('button', { name: 'New terminal tab' }).click()
+    await selectedPane.getByRole('button', { name: 'Add tab' }).click()
+    await page.getByRole('menuitem', { name: 'Terminal', exact: true }).click()
     await expect(page.locator(`[data-tab-id="${tabId}"]`)).toHaveAttribute('data-selected', 'false')
 
     await execFileAsync(cliBinary, [
@@ -238,7 +239,8 @@ test('CLI identify, notification attention, exact tab jump, and read transition'
 
     const exactTargetPane = page.locator(`[data-pane-id="${paneId}"]`)
     const exactTargetTab = page.locator(`[data-tab-id="${tabId}"]`)
-    await exactTargetPane.getByRole('button', { name: 'New terminal tab' }).click()
+    await exactTargetPane.getByRole('button', { name: 'Add tab' }).click()
+    await page.getByRole('menuitem', { name: 'Terminal', exact: true }).click()
     await expect(exactTargetTab).toHaveAttribute('data-selected', 'false')
     await execFileAsync(cliBinary, [
       '--session-file',

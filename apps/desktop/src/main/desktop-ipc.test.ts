@@ -8,6 +8,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 const electron = vi.hoisted(() => ({
   handlers: new Map<string, (...args: unknown[]) => unknown>(),
   openExternal: vi.fn(),
+  openPath: vi.fn(),
   showOpenDialog: vi.fn(),
   showMessageBox: vi.fn(),
   showSaveDialog: vi.fn()
@@ -24,7 +25,7 @@ vi.mock('electron', () => ({
     showMessageBox: electron.showMessageBox,
     showSaveDialog: electron.showSaveDialog
   },
-  shell: { openExternal: electron.openExternal }
+  shell: { openExternal: electron.openExternal, openPath: electron.openPath }
 }))
 
 import { DESKTOP_IPC } from '../shared/desktop-bridge'
@@ -619,6 +620,69 @@ describe('desktop IPC boundary', () => {
       })
     ).rejects.toThrow()
     expect(snapshotWorkspace).toHaveBeenCalledOnce()
+  })
+
+  it('lists trusted openers and opens only the authoritative workspace directory', async () => {
+    const workspaceDirectory = await mkdtemp(join(tmpdir(), 'agent-workspace-open-path-'))
+    try {
+      const authoritativeWorkspace = {
+        ...structuredClone(projection.workspaces[0]!),
+        workingDirectory: workspaceDirectory
+      }
+      const listWindows = vi.fn().mockResolvedValue({
+        revision: 1,
+        idempotencyEpoch: '20000000-0000-4000-8000-000000000001',
+        windows: [
+          {
+            windowId: 'window-a',
+            revision: 1,
+            workspaceIds: [authoritativeWorkspace.id],
+            selectedWorkspaceId: authoritativeWorkspace.id,
+            focused: true
+          }
+        ]
+      })
+      const snapshotWorkspace = vi.fn().mockResolvedValue({
+        revision: projection.revision,
+        workspace: authoritativeWorkspace
+      })
+      const detectWorkspacePathOpeners = vi.fn().mockResolvedValue([
+        { id: 'fileManager', label: 'File Explorer', kind: 'fileManager' },
+        { id: 'vscode', label: 'Visual Studio Code', kind: 'ide' }
+      ])
+      const openWorkspacePath = vi.fn().mockResolvedValue(undefined)
+      registerDesktopHandlers(
+        window,
+        { listWindows, snapshotWorkspace } as unknown as ControlClient,
+        browserViews,
+        { detectWorkspacePathOpeners, openWorkspacePath }
+      )
+      const event = { sender: webContents, senderFrame: mainFrame }
+
+      await expect(
+        electron.handlers.get(DESKTOP_IPC.workspacePathOpeners)?.(event)
+      ).resolves.toEqual([
+        { id: 'fileManager', label: 'File Explorer', kind: 'fileManager' },
+        { id: 'vscode', label: 'Visual Studio Code', kind: 'ide' }
+      ])
+      await expect(
+        electron.handlers.get(DESKTOP_IPC.workspacePathOpen)?.(event, {
+          workspaceId: authoritativeWorkspace.id,
+          openerId: 'vscode'
+        })
+      ).resolves.toBeUndefined()
+
+      expect(openWorkspacePath).toHaveBeenCalledWith('vscode', workspaceDirectory)
+      await expect(
+        electron.handlers.get(DESKTOP_IPC.workspacePathOpen)?.(event, {
+          workspaceId: authoritativeWorkspace.id,
+          openerId: 'renderer-command'
+        })
+      ).rejects.toThrow()
+      expect(openWorkspacePath).toHaveBeenCalledOnce()
+    } finally {
+      await rm(workspaceDirectory, { recursive: true, force: true })
+    }
   })
 
   it('validates and routes notification list and mutation operations', async () => {

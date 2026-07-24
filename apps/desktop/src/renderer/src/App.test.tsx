@@ -97,6 +97,82 @@ describe('App', () => {
     expect(window.desktopBridge.getConfiguration).toHaveBeenCalledOnce()
   })
 
+  it('keeps the unfinished tools sidebar hidden when the service advertises it', async () => {
+    const identify = vi.fn().mockResolvedValue({
+      application: 'agent-workspace',
+      version: '0.1.0',
+      protocolVersion: 1,
+      capabilities: ['configuration-v2', 'sidebar-surfaces-v1']
+    })
+    window.desktopBridge = createBridge(identify)
+    render(<App />)
+
+    await screen.findByText('Browser content ready')
+    expect(
+      screen.queryByRole('button', { name: messages.workspaceShell.titlebar.toggleToolsSidebar })
+    ).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole('complementary', { name: messages.sidebarSurfaces.title })
+    ).not.toBeInTheDocument()
+  })
+
+  it('offers clear actions to add terminal and browser tabs', async () => {
+    const identify = vi.fn().mockResolvedValue({
+      application: 'agent-workspace',
+      version: '0.1.0',
+      protocolVersion: 1,
+      capabilities: ['configuration-v2', 'tab.openBrowser']
+    })
+    const bridge = createBridge(identify)
+    window.desktopBridge = bridge
+    render(<App />)
+
+    await screen.findByText('Browser content ready')
+    fireEvent.pointerDown(screen.getAllByRole('button', { name: 'Add tab' })[0]!, {
+      button: 0,
+      ctrlKey: false
+    })
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Terminal' }))
+    await waitFor(() => expect(bridge.openTerminalTab).toHaveBeenCalledOnce())
+
+    fireEvent.pointerDown(screen.getAllByRole('button', { name: 'Add tab' })[0]!, {
+      button: 0,
+      ctrlKey: false
+    })
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Browser' }))
+    await waitFor(() =>
+      expect(bridge.openBrowserTab).toHaveBeenCalledWith({
+        workspaceId: projectionFixture.workspaces[0]!.id,
+        paneId: projectionFixture.workspaces[0]!.panes[0]!.id,
+        metadata: { url: messages.workspaceShell.defaultBrowserUrl }
+      })
+    )
+  })
+
+  it('offers the file explorer and detected IDEs from each workspace card', async () => {
+    const bridge = createBridge()
+    window.desktopBridge = bridge
+    render(<App />)
+    await screen.findByText('Browser content ready')
+
+    fireEvent.pointerDown(
+      screen.getByRole('button', { name: 'Open workspace with… Fixture workspace' }),
+      { button: 0, ctrlKey: false }
+    )
+    expect(await screen.findByRole('menuitem', { name: 'Open in File Explorer' })).toBeVisible()
+    expect(
+      await screen.findByRole('menuitem', { name: 'Open in Visual Studio Code' })
+    ).toBeVisible()
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Open in Visual Studio Code' }))
+
+    await waitFor(() =>
+      expect(bridge.openWorkspacePath).toHaveBeenCalledWith({
+        workspaceId: projectionFixture.workspaces[0]!.id,
+        openerId: 'vscode'
+      })
+    )
+  })
+
   it('reinitializes renderer projections when the main desktop binding is replaced', async () => {
     const bridge = createBridge()
     let rebind: (() => void) | undefined
@@ -200,7 +276,12 @@ describe('App', () => {
         [...card.closest('.workspace-row-wrap')!.querySelectorAll('button')].map((button) =>
           button.getAttribute('data-workspace-action')
         )
-      ).toEqual(['workspace.card.select', 'workspace.card.reorder', 'workspace.card.close'])
+      ).toEqual([
+        'workspace.card.select',
+        'workspace.card.openPath',
+        'workspace.card.reorder',
+        'workspace.card.close'
+      ])
 
       selection.focus()
       fireEvent.keyDown(selection, {
@@ -313,6 +394,7 @@ describe('App', () => {
     ).toEqual([
       'workspace.card.select',
       'workspace.card.details',
+      'workspace.card.openPath',
       'workspace.card.reorder',
       'workspace.card.close'
     ])
@@ -877,7 +959,9 @@ describe('App', () => {
     const runtimeMetadata = await screen.findByLabelText(
       'Git branch feature/sidebar-metadata; Git status staged, unstaged, ahead 2, behind 1; process bash; listening ports 3000, 5173'
     )
-    expect(runtimeMetadata).toHaveTextContent('Branch: feature/sidebar-metadata')
+    expect(screen.getByTitle('feature/sidebar-metadata')).toHaveTextContent(
+      'feature/sidebar-metadata'
+    )
     expect(runtimeMetadata).toHaveTextContent('staged, unstaged, ahead 2, behind 1')
     expect(runtimeMetadata).toHaveTextContent('Process: bash')
     expect(runtimeMetadata).toHaveTextContent('Ports: 3000, 5173')
@@ -916,7 +1000,10 @@ describe('App', () => {
 
     expect(await screen.findByText('Ports: —')).toBeInTheDocument()
     await waitFor(() => expect(bridge.getWorkspaceRuntimeMetadata).toHaveBeenCalledTimes(2))
-    expect(await screen.findByText('Clean')).toBeInTheDocument()
+    // Clean status renders no pill; the status only appears when actionable.
+    await waitFor(() =>
+      expect(screen.queryByText('staged, unstaged, ahead 2, behind 1')).not.toBeInTheDocument()
+    )
   })
 
   it('uses one workspace tab stop and selects the row reached by roving focus', async () => {
@@ -1108,7 +1195,6 @@ describe('App', () => {
     bridge.renameGroup = vi.fn()
     bridge.collapseGroup = vi.fn()
     bridge.selectWorkspaces = vi.fn()
-    vi.stubGlobal('prompt', vi.fn().mockReturnValue('Renamed agents'))
     window.desktopBridge = bridge
     render(<App />)
 
@@ -1136,6 +1222,10 @@ describe('App', () => {
     )
 
     fireEvent.click(screen.getByRole('button', { name: 'Rename Agents' }))
+    fireEvent.change(screen.getByRole('textbox', { name: 'Group name' }), {
+      target: { value: 'Renamed agents' }
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }))
     await waitFor(() =>
       expect(bridge.invokePublicAction).toHaveBeenCalledWith({
         actionId: 'workspace.group.rename',
@@ -1146,6 +1236,50 @@ describe('App', () => {
     expect(bridge.pinWorkspace).not.toHaveBeenCalled()
     expect(bridge.collapseGroup).not.toHaveBeenCalled()
     expect(bridge.renameGroup).not.toHaveBeenCalled()
+  })
+
+  it('creates a workspace group through the app-native dialog', async () => {
+    const workspace = projectionFixture.workspaces[0]!
+    const bridge = createBridge(
+      vi.fn().mockResolvedValue({
+        application: 'agent-workspace',
+        version: '0.1.0',
+        protocolVersion: 1,
+        capabilities: ['workspace-groups-v1', 'configuration-v2']
+      })
+    )
+    bridge.getWorkspaceOrganization = vi.fn().mockResolvedValue({
+      organization: {
+        revision: 9,
+        selection: [workspace.id],
+        focusedWorkspaceId: workspace.id,
+        pins: [],
+        groups: [],
+        assignments: []
+      }
+    })
+    bridge.selectWorkspaces = vi.fn()
+    bridge.createGroup = vi.fn().mockResolvedValue(mutationAt(43, projectionFixture))
+    window.desktopBridge = bridge
+    render(<App />)
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Create workspace group' }))
+    expect(screen.getByRole('dialog', { name: 'Create workspace group' })).toBeVisible()
+    fireEvent.change(screen.getByRole('textbox', { name: 'Group name' }), {
+      target: { value: 'Client projects' }
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Create group' }))
+
+    await waitFor(() => expect(bridge.createGroup).toHaveBeenCalledOnce())
+    const request = vi.mocked(bridge.createGroup).mock.calls[0]?.[0]
+    expect(request).toMatchObject({ name: 'Client projects', expectedRevision: 9 })
+    expect(request?.groupId).toMatch(/^[0-9a-f-]{36}$/u)
+    expect(request?.idempotencyKey).toMatch(/^[0-9a-f-]{36}$/u)
+    await waitFor(() =>
+      expect(
+        screen.queryByRole('dialog', { name: 'Create workspace group' })
+      ).not.toBeInTheDocument()
+    )
   })
 
   it('blocks physical shortcut conflicts while preserving set, clear, and reset mutations', async () => {
@@ -1944,6 +2078,11 @@ function createBridge(
       .fn()
       .mockResolvedValue({ gitBranch: null, gitStatus: null, listeningPorts: [] }),
     pickWorkspaceDirectory: vi.fn().mockResolvedValue(null),
+    listWorkspacePathOpeners: vi.fn().mockResolvedValue([
+      { id: 'fileManager', label: 'File Explorer', kind: 'fileManager' },
+      { id: 'vscode', label: 'Visual Studio Code', kind: 'ide' }
+    ]),
+    openWorkspacePath: vi.fn().mockResolvedValue(undefined),
     snapshotWorkspace: vi.fn(),
     createWorkspace: vi.fn(resolvedMutation),
     updateWorkspace: vi.fn(resolvedMutation),

@@ -1,5 +1,5 @@
 import { constants } from 'node:fs'
-import { access, lstat, open, rename, unlink } from 'node:fs/promises'
+import { access, lstat, open, rename, stat, unlink } from 'node:fs/promises'
 import { createHash, randomUUID } from 'node:crypto'
 import { basename, dirname, join } from 'node:path'
 
@@ -191,8 +191,11 @@ import {
   desktopTextBoxCreateRequestSchema,
   desktopTextBoxDeleteRequestSchema,
   desktopTextBoxSaveRequestSchema,
+  desktopWorkspacePathOpenersSchema,
+  desktopWorkspacePathOpenRequestSchema,
   savedLayoutImportRequestSchema,
   type DesktopLifecycleState,
+  type DesktopWorkspacePathOpenerId,
   type SavedLayoutImportRequest
 } from '../shared/desktop-bridge'
 import { desktopMessages } from '../shared/desktop-messages'
@@ -206,6 +209,7 @@ import { DesktopWindowBinding } from './desktop-window-binding'
 import type { SenderBoundIpcRouter } from './sender-bound-ipc-router'
 import type { WindowRegistryBinding, WindowRegistryEntry } from './window-registry'
 import { resolveWorkspaceRuntimeMetadata } from './workspace-runtime-metadata'
+import { detectWorkspacePathOpeners, launchWorkspacePathInIde } from './workspace-path-openers'
 
 export const DESKTOP_LIFECYCLE_INVOKE_CHANNELS = [
   DESKTOP_IPC.lifecycleGet,
@@ -244,6 +248,11 @@ export interface DesktopHandlerDependencies {
   ownershipAcquired?: (windowId: string, resourceId: string) => void
   waitForOwnershipTransfer?: (windowId: string, resourceId: string) => Promise<void>
   waitForWindowActivation?: (entry: WindowRegistryEntry) => Promise<void>
+  detectWorkspacePathOpeners?: typeof detectWorkspacePathOpeners
+  openWorkspacePath?: (
+    openerId: DesktopWorkspacePathOpenerId,
+    workspacePath: string
+  ) => Promise<void>
   enrollRemoteCredential?: (
     targetId: string,
     expectedRevision: number,
@@ -472,6 +481,8 @@ export const DESKTOP_INVOKE_CHANNELS = [
   DESKTOP_IPC.attentionAcknowledge,
   DESKTOP_IPC.workspaceRuntimeMetadata,
   DESKTOP_IPC.workspacePickDirectory,
+  DESKTOP_IPC.workspacePathOpeners,
+  DESKTOP_IPC.workspacePathOpen,
   DESKTOP_IPC.workspaceCreate,
   DESKTOP_IPC.workspaceUpdate,
   DESKTOP_IPC.workspaceSelect,
@@ -1283,6 +1294,38 @@ function collectDesktopHandlers(
     })
     if (result.canceled || result.filePaths.length !== 1) return null
     return result.filePaths[0] ?? null
+  })
+  host.handle(DESKTOP_IPC.workspacePathOpeners, async (event) => {
+    validate(event)
+    return desktopWorkspacePathOpenersSchema.parse(
+      await (dependencies.detectWorkspacePathOpeners ?? detectWorkspacePathOpeners)()
+    )
+  })
+  host.handle(DESKTOP_IPC.workspacePathOpen, async (event, rawRequest: unknown) => {
+    validate(event)
+    const request = desktopWorkspacePathOpenRequestSchema.parse(rawRequest)
+    const [topology, snapshot] = await Promise.all([
+      client.listWindows(),
+      client.snapshotWorkspace({ workspaceId: request.workspaceId })
+    ])
+    const authority = topology.windows.find(({ windowId }) => windowId === entry.windowId)
+    const workspace = workspaceSnapshotResultSchema.parse(snapshot).workspace
+    if (!authority?.workspaceIds.includes(workspace.id)) {
+      throw new Error('The workspace is not hosted by this window')
+    }
+    const workspaceDirectory = await stat(workspace.workingDirectory)
+    if (!workspaceDirectory.isDirectory()) throw new Error('The workspace path is not a directory')
+
+    if (dependencies.openWorkspacePath) {
+      await dependencies.openWorkspacePath(request.openerId, workspace.workingDirectory)
+      return
+    }
+    if (request.openerId === 'fileManager') {
+      const failure = await shell.openPath(workspace.workingDirectory)
+      if (failure) throw new Error(failure)
+      return
+    }
+    await launchWorkspacePathInIde(request.openerId, workspace.workingDirectory)
   })
   registerMutation(DESKTOP_IPC.workspaceCreate, window, workspaceCreateParamsSchema, (params) =>
     client.createWorkspace(params)

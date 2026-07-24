@@ -306,6 +306,13 @@ export const messages = {
     }
   },
   workspaceContextMenu: {
+    openWith: 'Open workspace with…',
+    openInFileExplorer: 'Open in File Explorer',
+    openInIde: (ide: string) => `Open in ${ide}`,
+    detectingIdes: 'Detecting installed IDEs…',
+    noIdes: 'No supported IDEs detected',
+    openerDetectionFailed: 'Installed IDEs could not be detected',
+    openFailed: 'The workspace folder could not be opened.',
     rename: 'Rename workspace…',
     color: 'Workspace color',
     chooseColor: 'Choose custom color…',
@@ -378,6 +385,8 @@ export const messages = {
       resizeFailed: 'Terminal resize failed',
       attachFailed: 'Terminal attach failed',
       inputFailed: 'Terminal input failed',
+      copyFailed: 'Terminal selection could not be copied.',
+      openLinkFailed: 'The terminal link could not be opened.',
       withDetail: (context: string, detail: string) => `${context}. ${detail}`
     },
     pasteLinesPrompt: (lineCount: number) =>
@@ -443,6 +452,9 @@ export const messages = {
       openFolder: 'Open folder',
       listLabel: 'Workspace list',
       workspaceCount: (count: number) => `${String(count)} workspace${count === 1 ? '' : 's'}`,
+      groupCount: (count: number) => `${String(count)} group${count === 1 ? '' : 's'}`,
+      recentHeading: 'Recent',
+      lastActivity: (when: string) => `Last activity ${when}`,
       closeConfirmation: (workspaceName: string) => `Close workspace “${workspaceName}”?`,
       reorder: (workspaceName: string) => `Reorder ${workspaceName}`,
       reorderTitle: 'Drag to reorder · Alt+Up/Down',
@@ -458,6 +470,9 @@ export const messages = {
       unavailable: 'Pane unavailable',
       tabs: 'Pane tabs',
       attentionLabel: 'Pane',
+      addTab: 'Add tab',
+      terminalTab: 'Terminal',
+      browserTab: 'Browser',
       newTerminalTab: 'New terminal tab',
       splitRight: 'Split pane right',
       splitDown: 'Split pane down',
@@ -718,6 +733,16 @@ export const messages = {
       diff: 'Diff',
       search: 'Search',
       recentlyClosed: 'Recently Closed'
+    },
+    descriptions: {
+      textBox: 'Keep lightweight notes connected to this workspace.',
+      vault: 'Control which local files and agent transcripts can be searched.',
+      taskManager: 'Review running agent sessions and choose how they should stop.',
+      files: 'Browse files from workspace roots you have authorized.',
+      markdown: 'Preview an authorized Markdown document without running embedded code.',
+      diff: 'Compare two authorized document versions side by side.',
+      search: 'Search only the local sources you have explicitly enabled.',
+      recentlyClosed: 'Restore tabs and panes closed during this session.'
     },
     resize: 'Resize tools sidebar',
     serviceUnavailable: 'The sidebar service is unavailable.',

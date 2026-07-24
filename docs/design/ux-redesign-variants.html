@@ -1,0 +1,1561 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Agent Workspace — UX Redesign Variants</title>
+    <style>
+      :root {
+        --canvas: #17181b;
+        --panel: #1e2023;
+        --sidebar: #1a1c1f;
+        --line: #2b2d31;
+        --line-soft: #232529;
+        --accent: #4c8dff;
+        --accent-dim: rgba(76, 141, 255, 0.14);
+        --text: #e6e8ec;
+        --text-2: #9ba1ab;
+        --text-3: #6b7078;
+        --green: #3fca7c;
+        --orange: #f2a444;
+        --red: #ef6a6a;
+        --mono: 'JetBrains Mono', 'SF Mono', 'Cascadia Code', ui-monospace, monospace;
+        --ui: -apple-system, 'Segoe UI', 'Inter', system-ui, sans-serif;
+      }
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+      body {
+        background: #101114;
+        color: var(--text);
+        font-family: var(--ui);
+        padding: 32px 24px 80px;
+      }
+
+      /* ===== Artifact chrome ===== */
+      .artifact-head {
+        max-width: 1280px;
+        margin: 0 auto 20px;
+      }
+      .artifact-head h1 {
+        font-size: 22px;
+        font-weight: 650;
+        letter-spacing: -0.02em;
+      }
+      .artifact-head p {
+        color: var(--text-2);
+        font-size: 13.5px;
+        margin-top: 6px;
+        max-width: 820px;
+        line-height: 1.55;
+      }
+      .switcher {
+        max-width: 1280px;
+        margin: 22px auto 18px;
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+        position: sticky;
+        top: 12px;
+        z-index: 50;
+      }
+      .switcher button {
+        background: var(--panel);
+        color: var(--text-2);
+        border: 1px solid var(--line);
+        padding: 8px 16px;
+        border-radius: 8px;
+        font-size: 13px;
+        font-weight: 550;
+        cursor: pointer;
+        font-family: var(--ui);
+        transition: all 0.15s ease;
+      }
+      .switcher button:hover {
+        color: var(--text);
+        border-color: #3a3d43;
+      }
+      .switcher button.active {
+        background: var(--accent-dim);
+        border-color: rgba(76, 141, 255, 0.5);
+        color: #a9c8ff;
+      }
+      .variant {
+        display: none;
+        max-width: 1280px;
+        margin: 0 auto;
+      }
+      .variant.show {
+        display: block;
+      }
+      .variant-meta {
+        display: grid;
+        grid-template-columns: 1fr 1fr 1fr;
+        gap: 12px;
+        margin: 16px 0 26px;
+      }
+      .meta-card {
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        padding: 14px 16px;
+      }
+      .meta-card h4 {
+        font-size: 11px;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: var(--text-3);
+        margin-bottom: 8px;
+        font-weight: 650;
+      }
+      .meta-card ul {
+        list-style: none;
+      }
+      .meta-card li {
+        font-size: 12.5px;
+        color: var(--text-2);
+        line-height: 1.6;
+        padding-left: 14px;
+        position: relative;
+      }
+      .meta-card li::before {
+        content: '';
+        position: absolute;
+        left: 0;
+        top: 9px;
+        width: 5px;
+        height: 5px;
+        border-radius: 50%;
+        background: var(--accent);
+        opacity: 0.7;
+      }
+      .variant-title {
+        display: flex;
+        align-items: baseline;
+        gap: 12px;
+        margin-bottom: 4px;
+      }
+      .variant-title h2 {
+        font-size: 17px;
+        font-weight: 650;
+        letter-spacing: -0.01em;
+      }
+      .variant-title span {
+        font-size: 12.5px;
+        color: var(--text-3);
+      }
+
+      /* ===== Shared app frame ===== */
+      .frame {
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        overflow: hidden;
+        background: var(--panel);
+        box-shadow: 0 24px 64px rgba(0, 0, 0, 0.5);
+        height: 760px;
+        display: flex;
+        flex-direction: column;
+        font-size: 13px;
+      }
+      .titlebar {
+        height: 40px;
+        flex: 0 0 40px;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 0 12px;
+        border-bottom: 1px solid var(--line);
+        background: var(--sidebar);
+        -webkit-user-select: none;
+        user-select: none;
+      }
+      .traffic {
+        display: flex;
+        gap: 7px;
+        margin-right: 4px;
+      }
+      .traffic i {
+        width: 11px;
+        height: 11px;
+        border-radius: 50%;
+        background: #3a3d43;
+        display: block;
+      }
+      .logo {
+        width: 16px;
+        height: 16px;
+        border-radius: 4px;
+        background: linear-gradient(135deg, #4c8dff, #7db0ff);
+        flex: 0 0 16px;
+      }
+      .crumb {
+        display: flex;
+        align-items: center;
+        gap: 7px;
+        font-size: 12.5px;
+        color: var(--text-2);
+      }
+      .crumb b {
+        color: var(--text);
+        font-weight: 600;
+      }
+      .crumb .sep {
+        color: var(--text-3);
+      }
+      .tb-spacer {
+        flex: 1;
+      }
+      .kbd {
+        font-family: var(--mono);
+        font-size: 10.5px;
+        color: var(--text-3);
+        border: 1px solid var(--line);
+        border-radius: 5px;
+        padding: 2px 6px;
+        background: var(--panel);
+      }
+      .palette-pill {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        border: 1px solid var(--line);
+        border-radius: 7px;
+        padding: 5px 10px;
+        color: var(--text-3);
+        font-size: 12px;
+        background: var(--panel);
+        cursor: pointer;
+      }
+      .palette-pill:hover {
+        border-color: #3a3d43;
+        color: var(--text-2);
+      }
+      .tb-icon {
+        width: 28px;
+        height: 28px;
+        border-radius: 7px;
+        display: grid;
+        place-items: center;
+        color: var(--text-3);
+        cursor: pointer;
+        font-size: 14px;
+      }
+      .tb-icon:hover {
+        background: var(--line-soft);
+        color: var(--text);
+      }
+      .body {
+        flex: 1;
+        display: flex;
+        min-height: 0;
+      }
+
+      .main {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        min-width: 0;
+        background: var(--canvas);
+      }
+      .tabstrip {
+        height: 38px;
+        flex: 0 0 38px;
+        display: flex;
+        align-items: center;
+        padding: 0 8px;
+        gap: 2px;
+        border-bottom: 1px solid var(--line);
+        background: var(--panel);
+      }
+      .tab {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 6px 12px;
+        border-radius: 7px;
+        font-size: 12.5px;
+        color: var(--text-2);
+        cursor: pointer;
+      }
+      .tab.on {
+        background: var(--canvas);
+        color: var(--text);
+        box-shadow: inset 0 0 0 1px var(--line);
+      }
+      .tab .x {
+        color: var(--text-3);
+        font-size: 11px;
+      }
+      .tab-plus {
+        margin-left: 4px;
+      }
+      .term {
+        flex: 1;
+        padding: 16px 18px;
+        font-family: var(--mono);
+        font-size: 12.5px;
+        line-height: 1.8;
+        overflow: hidden;
+      }
+      .p-user {
+        color: #7fb4ff;
+      }
+      .p-path {
+        color: #5fd0a5;
+      }
+      .p-sym {
+        color: var(--text-3);
+      }
+      .t-dim {
+        color: var(--text-3);
+      }
+      .t-ok {
+        color: var(--green);
+      }
+      .t-warn {
+        color: var(--orange);
+      }
+      .cursor {
+        display: inline-block;
+        width: 7px;
+        height: 15px;
+        background: var(--text-2);
+        vertical-align: -2px;
+        animation: blink 1.1s steps(1) infinite;
+      }
+      @keyframes blink {
+        50% {
+          opacity: 0;
+        }
+      }
+      .statusbar {
+        height: 26px;
+        flex: 0 0 26px;
+        display: flex;
+        align-items: center;
+        gap: 14px;
+        padding: 0 12px;
+        border-top: 1px solid var(--line);
+        background: var(--sidebar);
+        font-size: 11px;
+        color: var(--text-3);
+      }
+      .statusbar .dot {
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: var(--green);
+      }
+      .sb-spacer {
+        flex: 1;
+      }
+      .dot {
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        flex: 0 0 auto;
+      }
+      .dot.g {
+        background: var(--green);
+      }
+      .dot.o {
+        background: var(--orange);
+      }
+      .dot.r {
+        background: var(--red);
+      }
+      .dot.idle {
+        background: #4a4e56;
+      }
+      .dot.pulse {
+        box-shadow: 0 0 0 3px rgba(63, 202, 124, 0.15);
+      }
+      .dot.o.pulse {
+        box-shadow: 0 0 0 3px rgba(242, 164, 68, 0.18);
+      }
+
+      /* =========================================================
+     VARIANT A — LEDGER (dense rail)
+     ========================================================= */
+      .a-side {
+        width: 248px;
+        flex: 0 0 248px;
+        background: var(--sidebar);
+        border-right: 1px solid var(--line);
+        display: flex;
+        flex-direction: column;
+      }
+      .a-search {
+        margin: 10px 10px 6px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 7px;
+        padding: 6px 9px;
+        color: var(--text-3);
+        font-size: 12px;
+      }
+      .a-search .kbd {
+        margin-left: auto;
+        border: none;
+        background: var(--line-soft);
+      }
+      .a-sect {
+        display: flex;
+        align-items: center;
+        padding: 12px 14px 6px;
+        font-size: 10.5px;
+        font-weight: 650;
+        letter-spacing: 0.09em;
+        text-transform: uppercase;
+        color: var(--text-3);
+      }
+      .a-sect .cnt {
+        margin-left: 6px;
+        opacity: 0.7;
+        font-weight: 500;
+      }
+      .a-sect .add {
+        margin-left: auto;
+        width: 20px;
+        height: 20px;
+        border-radius: 5px;
+        display: grid;
+        place-items: center;
+        cursor: pointer;
+        font-size: 13px;
+        color: var(--text-3);
+      }
+      .a-sect .add:hover {
+        background: var(--line-soft);
+        color: var(--text);
+      }
+      .a-list {
+        flex: 1;
+        overflow: hidden;
+        padding: 2px 6px;
+      }
+      .a-row {
+        display: flex;
+        align-items: center;
+        gap: 9px;
+        height: 30px;
+        padding: 0 8px;
+        border-radius: 6px;
+        cursor: pointer;
+        color: var(--text-2);
+        position: relative;
+      }
+      .a-row:hover {
+        background: var(--line-soft);
+        color: var(--text);
+      }
+      .a-row .nm {
+        font-size: 12.5px;
+        font-weight: 500;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .a-row .aux {
+        margin-left: auto;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 10.5px;
+        color: var(--text-3);
+        font-family: var(--mono);
+      }
+      .a-row .chip {
+        background: var(--line-soft);
+        border-radius: 4px;
+        padding: 1px 5px;
+      }
+      .a-row.sel {
+        background: var(--accent-dim);
+        color: var(--text);
+      }
+      .a-row.sel::before {
+        content: '';
+        position: absolute;
+        left: -6px;
+        top: 6px;
+        bottom: 6px;
+        width: 2.5px;
+        border-radius: 2px;
+        background: var(--accent);
+      }
+      .a-row.sel .nm {
+        font-weight: 600;
+      }
+      .a-foot {
+        border-top: 1px solid var(--line);
+        padding: 9px 12px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 11.5px;
+        color: var(--text-3);
+      }
+      .a-foot .kbd {
+        margin-left: auto;
+      }
+
+      /* =========================================================
+     VARIANT B — ATLAS (refined cards)
+     ========================================================= */
+      .b-side {
+        width: 272px;
+        flex: 0 0 272px;
+        background: var(--sidebar);
+        border-right: 1px solid var(--line);
+        display: flex;
+        flex-direction: column;
+      }
+      .b-head {
+        padding: 12px 14px 4px;
+        display: flex;
+        align-items: center;
+      }
+      .b-head h3 {
+        font-size: 13px;
+        font-weight: 650;
+      }
+      .b-head .b-new {
+        margin-left: auto;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 11.5px;
+        color: #a9c8ff;
+        background: var(--accent-dim);
+        border: 1px solid rgba(76, 141, 255, 0.35);
+        padding: 4px 10px;
+        border-radius: 6px;
+        cursor: pointer;
+      }
+      .b-group {
+        padding: 12px 12px 0;
+      }
+      .b-group-h {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 10.5px;
+        font-weight: 650;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--text-3);
+        padding: 0 4px 7px;
+      }
+      .b-group-h .car {
+        font-size: 8px;
+      }
+      .b-card {
+        border: 1px solid transparent;
+        border-radius: 8px;
+        padding: 9px 11px;
+        cursor: pointer;
+        margin-bottom: 3px;
+      }
+      .b-card:hover {
+        background: var(--line-soft);
+      }
+      .b-card.sel {
+        background: var(--panel);
+        border-color: var(--line);
+        box-shadow: 0 2px 10px rgba(0, 0, 0, 0.25);
+      }
+      .b-l1 {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .b-l1 .nm {
+        font-size: 12.5px;
+        font-weight: 600;
+      }
+      .b-l1 .when {
+        margin-left: auto;
+        font-size: 10.5px;
+        color: var(--text-3);
+      }
+      .b-l2 {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-top: 4px;
+        padding-left: 15px;
+        font-size: 11px;
+        color: var(--text-3);
+        overflow: hidden;
+      }
+      .b-l2 .path {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        font-family: var(--mono);
+        font-size: 10.5px;
+      }
+      .b-l2 .git {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        flex: 0 0 auto;
+      }
+      .b-act {
+        display: flex;
+        gap: 6px;
+        margin-top: 8px;
+        padding-left: 15px;
+      }
+      .b-act .tag {
+        font-size: 10.5px;
+        color: var(--text-2);
+        background: var(--line-soft);
+        padding: 2px 8px;
+        border-radius: 5px;
+        display: flex;
+        gap: 5px;
+        align-items: center;
+      }
+      .b-act .tag.run {
+        color: #8fe0b4;
+        background: rgba(63, 202, 124, 0.1);
+      }
+      .b-status-line {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        margin-top: 6px;
+        padding-left: 15px;
+        font-size: 11px;
+        color: var(--orange);
+      }
+
+      /* =========================================================
+     VARIANT C — MERIDIAN (command-first)
+     ========================================================= */
+      .c-switch {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 7px;
+        padding: 5px 12px;
+        font-size: 12.5px;
+        cursor: pointer;
+        color: var(--text);
+      }
+      .c-switch .car {
+        color: var(--text-3);
+        font-size: 9px;
+      }
+      .c-stage {
+        flex: 1;
+        position: relative;
+        background: var(--canvas);
+        display: flex;
+        flex-direction: column;
+      }
+      .c-dimmer {
+        position: absolute;
+        inset: 0;
+        background: rgba(10, 11, 13, 0.55);
+        backdrop-filter: blur(2px);
+        z-index: 5;
+      }
+      .c-palette {
+        position: absolute;
+        z-index: 6;
+        top: 64px;
+        left: 50%;
+        transform: translateX(-50%);
+        width: 560px;
+        background: #202226;
+        border: 1px solid #34373d;
+        border-radius: 12px;
+        box-shadow: 0 32px 80px rgba(0, 0, 0, 0.6);
+        overflow: hidden;
+      }
+      .c-p-input {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 13px 16px;
+        border-bottom: 1px solid var(--line);
+      }
+      .c-p-input .q {
+        font-size: 14px;
+        color: var(--text);
+        font-weight: 500;
+      }
+      .c-p-input .cursor {
+        height: 16px;
+      }
+      .c-p-sect {
+        font-size: 10.5px;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: var(--text-3);
+        font-weight: 650;
+        padding: 10px 16px 4px;
+      }
+      .c-p-row {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 8px 16px;
+        font-size: 13px;
+        color: var(--text-2);
+        cursor: pointer;
+      }
+      .c-p-row:hover,
+      .c-p-row.on {
+        background: var(--accent-dim);
+        color: var(--text);
+      }
+      .c-p-row .ico {
+        width: 22px;
+        height: 22px;
+        border-radius: 5px;
+        background: var(--line-soft);
+        display: grid;
+        place-items: center;
+        font-size: 11px;
+        flex: 0 0 22px;
+      }
+      .c-p-row .sub {
+        font-size: 11px;
+        color: var(--text-3);
+        font-family: var(--mono);
+      }
+      .c-p-row .aux {
+        margin-left: auto;
+        display: flex;
+        gap: 6px;
+        align-items: center;
+      }
+      .c-p-foot {
+        display: flex;
+        gap: 16px;
+        padding: 9px 16px;
+        border-top: 1px solid var(--line);
+        font-size: 11px;
+        color: var(--text-3);
+        background: #1c1e21;
+      }
+      .c-home {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 26px;
+      }
+      .c-home h3 {
+        font-size: 15px;
+        color: var(--text-2);
+        font-weight: 500;
+      }
+      .c-quick {
+        display: flex;
+        gap: 12px;
+      }
+      .c-q {
+        width: 150px;
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        padding: 14px;
+        cursor: pointer;
+        background: var(--panel);
+        display: flex;
+        flex-direction: column;
+        gap: 9px;
+      }
+      .c-q:hover {
+        border-color: #3a3d43;
+      }
+      .c-q .ico {
+        width: 28px;
+        height: 28px;
+        border-radius: 7px;
+        background: var(--accent-dim);
+        color: #a9c8ff;
+        display: grid;
+        place-items: center;
+        font-size: 14px;
+      }
+      .c-q .t {
+        font-size: 12.5px;
+        font-weight: 600;
+      }
+      .c-q .k {
+        font-size: 10.5px;
+        color: var(--text-3);
+        font-family: var(--mono);
+      }
+
+      /* =========================================================
+     VARIANT D — FOUNDRY (activity-focused)
+     ========================================================= */
+      .d-side {
+        width: 264px;
+        flex: 0 0 264px;
+        background: var(--sidebar);
+        border-right: 1px solid var(--line);
+        display: flex;
+        flex-direction: column;
+      }
+      .d-filters {
+        display: flex;
+        gap: 4px;
+        padding: 10px 10px 8px;
+      }
+      .d-filters .f {
+        font-size: 11px;
+        padding: 4px 10px;
+        border-radius: 6px;
+        color: var(--text-3);
+        cursor: pointer;
+        border: 1px solid transparent;
+      }
+      .d-filters .f.on {
+        background: var(--line-soft);
+        color: var(--text);
+      }
+      .d-filters .f .n {
+        font-family: var(--mono);
+        font-size: 10px;
+        opacity: 0.75;
+        margin-left: 4px;
+      }
+      .d-group-h {
+        display: flex;
+        align-items: center;
+        gap: 7px;
+        padding: 10px 14px 5px;
+        font-size: 10.5px;
+        font-weight: 650;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--text-3);
+        cursor: pointer;
+      }
+      .d-row {
+        padding: 7px 10px 7px 12px;
+        margin: 0 6px 2px;
+        border-radius: 7px;
+        cursor: pointer;
+        position: relative;
+      }
+      .d-row:hover {
+        background: var(--line-soft);
+      }
+      .d-row.sel {
+        background: var(--accent-dim);
+      }
+      .d-r1 {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .d-r1 .nm {
+        font-size: 12.5px;
+        font-weight: 550;
+        color: var(--text);
+      }
+      .d-r1 .badge {
+        margin-left: auto;
+        font-size: 10px;
+        font-family: var(--mono);
+        padding: 1px 6px;
+        border-radius: 8px;
+      }
+      .badge.run {
+        color: #8fe0b4;
+        background: rgba(63, 202, 124, 0.12);
+      }
+      .badge.attn {
+        color: #ffc98a;
+        background: rgba(242, 164, 68, 0.14);
+      }
+      .d-r2 {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        margin-top: 3px;
+        padding-left: 15px;
+        font-size: 11px;
+        color: var(--text-3);
+      }
+      .d-r2 .agent {
+        color: #8fe0b4;
+      }
+      .d-r2 .agent.wait {
+        color: #ffc98a;
+      }
+      .d-panehead {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        height: 30px;
+        padding: 0 12px;
+        font-size: 11.5px;
+        color: var(--text-3);
+        border-bottom: 1px solid var(--line-soft);
+        background: var(--panel);
+      }
+      .d-panehead .pill {
+        display: flex;
+        gap: 6px;
+        align-items: center;
+        background: var(--line-soft);
+        border-radius: 5px;
+        padding: 2px 8px;
+        font-family: var(--mono);
+        font-size: 10.5px;
+      }
+      .d-split {
+        flex: 1;
+        display: flex;
+        min-height: 0;
+      }
+      .d-split .pane {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        min-width: 0;
+      }
+      .d-split .pane + .pane {
+        border-left: 1px solid var(--line);
+      }
+
+      .footnote {
+        max-width: 1280px;
+        margin: 28px auto 0;
+        color: var(--text-3);
+        font-size: 12px;
+        line-height: 1.6;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="artifact-head">
+      <h1>Agent Workspace — UX redesign variants</h1>
+      <p>
+        Four directions that keep the Basalt palette (canvas <code>#17181b</code> · accent
+        <code>#4c8dff</code>) but fix the current UX problems: repeated “Status unavailable” noise,
+        heavy 5-line workspace cards, an empty terminal with no guidance, and weak hierarchy in the
+        chrome. Switch variants below.
+      </p>
+    </div>
+
+    <div class="switcher">
+      <button class="active" data-v="a">A · Ledger — dense rail</button>
+      <button data-v="b">B · Atlas — refined cards</button>
+      <button data-v="c">C · Meridian — command-first</button>
+      <button data-v="d">D · Foundry — activity hub</button>
+    </div>
+
+    <!-- ======================= VARIANT A ======================= -->
+    <section class="variant show" id="v-a">
+      <div class="variant-title">
+        <h2>A — Ledger</h2>
+        <span
+          >Dense single-line rail, like Zed / VS Code project lists. Max workspaces on screen,
+          details on demand.</span
+        >
+      </div>
+      <div class="frame">
+        <div class="titlebar">
+          <div class="traffic"><i></i><i></i><i></i></div>
+          <div class="logo"></div>
+          <div class="crumb"><b>General Chat</b><span class="sep">·</span><span>zsh</span></div>
+          <div class="tb-spacer"></div>
+          <div class="palette-pill">Search or run a command… <span class="kbd">⌘K</span></div>
+          <div class="tb-icon">🔔</div>
+          <div class="tb-icon">⚙</div>
+        </div>
+        <div class="body">
+          <aside class="a-side">
+            <div class="a-search">🔎 Filter workspaces <span class="kbd">⌘P</span></div>
+            <div class="a-sect">
+              Workspaces <span class="cnt">8</span><span class="add">＋</span>
+            </div>
+            <div class="a-list">
+              <div class="a-row">
+                <span class="dot idle"></span><span class="nm">nassimna</span
+                ><span class="aux"><span class="chip">zsh</span></span>
+              </div>
+              <div class="a-row">
+                <span class="dot idle"></span><span class="nm">workspace</span
+                ><span class="aux">1</span>
+              </div>
+              <div class="a-row">
+                <span class="dot o pulse"></span><span class="nm">cmux-linux-alternative</span
+                ><span class="aux"
+                  ><span class="chip" style="color: #ffc98a; background: rgba(242, 164, 68, 0.12)"
+                    >needs input</span
+                  ></span
+                >
+              </div>
+              <div class="a-row">
+                <span class="dot g"></span><span class="nm">e-commerce</span
+                ><span class="aux">1</span>
+              </div>
+              <div class="a-row">
+                <span class="dot g"></span><span class="nm">joodbooking-backoffice</span
+                ><span class="aux">1</span>
+              </div>
+              <div class="a-row">
+                <span class="dot idle"></span><span class="nm">t3code</span
+                ><span class="aux">1</span>
+              </div>
+              <div class="a-row">
+                <span class="dot idle"></span><span class="nm">Joodbeds</span
+                ><span class="aux"><span class="chip">zsh</span></span>
+              </div>
+              <div class="a-row sel">
+                <span class="dot g pulse"></span><span class="nm">General Chat</span
+                ><span class="aux"><span class="chip">zsh</span></span>
+              </div>
+            </div>
+            <div class="a-foot">
+              <span class="dot g" style="width: 6px; height: 6px"></span> Connected
+              <span class="kbd">⌘O Open folder</span>
+            </div>
+          </aside>
+          <div class="main">
+            <div class="tabstrip">
+              <div class="tab on"><span>❯_</span> Terminal <span class="x">✕</span></div>
+              <div class="tab tab-plus">＋</div>
+              <div class="tb-spacer"></div>
+              <div class="tb-icon" title="Split">◫</div>
+              <div class="tb-icon">⋯</div>
+            </div>
+            <div class="term">
+              <div>
+                <span class="p-user">nassimna</span><span class="p-sym">@</span
+                ><span class="p-path">general-chat</span> <span class="p-sym">❯</span> git status
+              </div>
+              <div class="t-dim">On branch main — nothing to commit, working tree clean</div>
+              <div style="margin-top: 8px">
+                <span class="p-user">nassimna</span><span class="p-sym">@</span
+                ><span class="p-path">general-chat</span> <span class="p-sym">❯</span>
+                <span class="cursor"></span>
+              </div>
+            </div>
+            <div class="statusbar">
+              <span class="dot"></span> Connected · PID 409107
+              <div class="sb-spacer"></div>
+              main · zsh · protocol 1 · 0.1.0
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="variant-meta">
+        <div class="meta-card">
+          <h4>What changed</h4>
+          <ul>
+            <li>Workspace = one 30px row: status dot, name, one contextual chip</li>
+            <li>
+              Paths, branch, tab chips removed from the list — shown in a hover tooltip / detail
+              popover instead
+            </li>
+            <li>Filter field replaces the “Saved layouts” block; layouts move to the ⌘K palette</li>
+          </ul>
+        </div>
+        <div class="meta-card">
+          <h4>Why it’s better</h4>
+          <ul>
+            <li>
+              8 workspaces used ~900px of sidebar; here they use 240px — everything scannable at
+              once
+            </li>
+            <li>
+              Status only appears when it means something (“needs input”), killing the repeated
+              “Status unavailable” noise
+            </li>
+            <li>Central ⌘K pill makes the keyboard-first model discoverable</li>
+          </ul>
+        </div>
+        <div class="meta-card">
+          <h4>Trade-offs</h4>
+          <ul>
+            <li>Paths not visible at a glance — relies on tooltips</li>
+            <li>Less room for per-workspace actions; needs a context menu</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <!-- ======================= VARIANT B ======================= -->
+    <section class="variant" id="v-b">
+      <div class="variant-title">
+        <h2>B — Atlas</h2>
+        <span
+          >Keeps the card metaphor but compresses to 2 lines, adds Pinned/Recent grouping and
+          relative-time context.</span
+        >
+      </div>
+      <div class="frame">
+        <div class="titlebar">
+          <div class="traffic"><i></i><i></i><i></i></div>
+          <div class="logo"></div>
+          <div class="crumb">
+            <span>Agent Workspace</span><span class="sep">/</span><b>General Chat</b>
+          </div>
+          <div class="tb-spacer"></div>
+          <div class="palette-pill"><span class="kbd">⌘K</span></div>
+          <div class="tb-icon">🔔</div>
+          <div class="tb-icon">⚙</div>
+        </div>
+        <div class="body">
+          <aside class="b-side">
+            <div class="b-head">
+              <h3>Workspaces</h3>
+              <div class="b-new">＋ New</div>
+            </div>
+            <div class="b-group">
+              <div class="b-group-h"><span class="car">▾</span> Pinned</div>
+              <div class="b-card">
+                <div class="b-l1">
+                  <span class="dot o pulse"></span><span class="nm">cmux-linux-alternative</span
+                  ><span class="when">2m</span>
+                </div>
+                <div class="b-l2">
+                  <span class="path">~/drive/workspace/cmux-linux-…</span
+                  ><span class="git">⎇ main</span>
+                </div>
+                <div class="b-status-line">⚠ Agent is waiting for input</div>
+              </div>
+              <div class="b-card sel">
+                <div class="b-l1">
+                  <span class="dot g pulse"></span><span class="nm">General Chat</span
+                  ><span class="when">now</span>
+                </div>
+                <div class="b-l2">
+                  <span class="path">…/workspace/general-chat</span><span class="git">⎇ main</span>
+                </div>
+                <div class="b-act">
+                  <span class="tag run">● zsh</span><span class="tag">＋ tab</span>
+                </div>
+              </div>
+            </div>
+            <div class="b-group">
+              <div class="b-group-h"><span class="car">▾</span> Recent</div>
+              <div class="b-card">
+                <div class="b-l1">
+                  <span class="dot g"></span><span class="nm">e-commerce</span
+                  ><span class="when">1h</span>
+                </div>
+                <div class="b-l2">
+                  <span class="path">~/drive/workspace/e-commerce</span
+                  ><span class="git">⎇ main</span>
+                </div>
+              </div>
+              <div class="b-card">
+                <div class="b-l1">
+                  <span class="dot g"></span><span class="nm">joodbooking-backoffice</span
+                  ><span class="when">3h</span>
+                </div>
+                <div class="b-l2">
+                  <span class="path">~/drive/workspace/joodbooking…</span
+                  ><span class="git">⎇ dev</span>
+                </div>
+              </div>
+              <div class="b-card">
+                <div class="b-l1">
+                  <span class="dot idle"></span><span class="nm">t3code</span
+                  ><span class="when">1d</span>
+                </div>
+                <div class="b-l2">
+                  <span class="path">~/t3code</span><span class="git">⎇ main</span>
+                </div>
+              </div>
+              <div class="b-card">
+                <div class="b-l1">
+                  <span class="dot idle"></span><span class="nm">Joodbeds</span
+                  ><span class="when">2d</span>
+                </div>
+                <div class="b-l2"><span class="path">~/drive/workspace/joodbeds</span></div>
+              </div>
+              <div class="b-card">
+                <div class="b-l1">
+                  <span class="dot idle"></span><span class="nm">workspace</span
+                  ><span class="when">4d</span>
+                </div>
+                <div class="b-l2"><span class="path">~/drive/workspace</span></div>
+              </div>
+              <div class="b-card">
+                <div class="b-l1">
+                  <span class="dot idle"></span><span class="nm">nassimna</span
+                  ><span class="when">1w</span>
+                </div>
+                <div class="b-l2"><span class="path">~</span></div>
+              </div>
+            </div>
+          </aside>
+          <div class="main">
+            <div class="tabstrip">
+              <div class="tab on"><span>❯_</span> Terminal <span class="x">✕</span></div>
+              <div class="tab tab-plus">＋</div>
+              <div class="tb-spacer"></div>
+              <div class="tb-icon">◫</div>
+              <div class="tb-icon">⋯</div>
+            </div>
+            <div class="term">
+              <div>
+                <span class="p-user">nassimna</span><span class="p-sym">@</span
+                ><span class="p-path">general-chat</span> <span class="p-sym">❯</span> pnpm test
+              </div>
+              <div class="t-ok">✓ 128 tests passed <span class="t-dim">(4.2s)</span></div>
+              <div style="margin-top: 8px">
+                <span class="p-user">nassimna</span><span class="p-sym">@</span
+                ><span class="p-path">general-chat</span> <span class="p-sym">❯</span>
+                <span class="cursor"></span>
+              </div>
+            </div>
+            <div class="statusbar">
+              <span class="dot"></span> Connected · PID 409107
+              <div class="sb-spacer"></div>
+              8 workspaces · 0.1.0
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="variant-meta">
+        <div class="meta-card">
+          <h4>What changed</h4>
+          <ul>
+            <li>Cards shrink from 5 lines to 2 (+1 only when there’s an alert or it’s selected)</li>
+            <li>Pinned / Recent groups with relative timestamps replace one flat list</li>
+            <li>Branch and path merge into one metadata line; tab chips only on the active card</li>
+          </ul>
+        </div>
+        <div class="meta-card">
+          <h4>Why it’s better</h4>
+          <ul>
+            <li>Keeps the at-a-glance context (path, branch) the dense variant loses</li>
+            <li>Recency answers “where was I?” — the most common navigation question</li>
+            <li>Status text appears only as an actionable alert line, in amber</li>
+          </ul>
+        </div>
+        <div class="meta-card">
+          <h4>Trade-offs</h4>
+          <ul>
+            <li>Still ~2.5× taller per item than Ledger</li>
+            <li>Pin management adds a small interaction surface to build</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <!-- ======================= VARIANT C ======================= -->
+    <section class="variant" id="v-c">
+      <div class="variant-title">
+        <h2>C — Meridian</h2>
+        <span
+          >Command-first, no persistent sidebar. The switcher lives in the titlebar; ⌘K is the
+          primary navigation (shown open).</span
+        >
+      </div>
+      <div class="frame">
+        <div class="titlebar">
+          <div class="traffic"><i></i><i></i><i></i></div>
+          <div class="logo"></div>
+          <div class="tb-spacer"></div>
+          <div class="c-switch">
+            <span class="dot g"></span> General Chat <span class="car">▾</span>
+          </div>
+          <div class="tb-spacer"></div>
+          <div class="tb-icon">🔔</div>
+          <div class="tb-icon">⚙</div>
+        </div>
+        <div class="c-stage">
+          <div class="tabstrip">
+            <div class="tab on"><span>❯_</span> Terminal <span class="x">✕</span></div>
+            <div class="tab tab-plus">＋</div>
+          </div>
+          <div class="c-home">
+            <h3>General Chat — no panes yet</h3>
+            <div class="c-quick">
+              <div class="c-q">
+                <div class="ico">❯_</div>
+                <div class="t">New terminal</div>
+                <div class="k">⌘T</div>
+              </div>
+              <div class="c-q">
+                <div class="ico">◫</div>
+                <div class="t">Split pane</div>
+                <div class="k">⌘D</div>
+              </div>
+              <div class="c-q">
+                <div class="ico">🌐</div>
+                <div class="t">Browser pane</div>
+                <div class="k">⌘B</div>
+              </div>
+              <div class="c-q">
+                <div class="ico">▦</div>
+                <div class="t">Apply layout</div>
+                <div class="k">⌘L</div>
+              </div>
+            </div>
+          </div>
+          <div class="c-dimmer"></div>
+          <div class="c-palette">
+            <div class="c-p-input">
+              <span style="color: var(--text-3)">🔎</span><span class="q">gen</span
+              ><span class="cursor"></span>
+            </div>
+            <div class="c-p-sect">Workspaces</div>
+            <div class="c-p-row on">
+              <span class="ico">▣</span> General Chat <span class="sub">…/general-chat</span
+              ><span class="aux"><span class="dot g"></span><span class="kbd">↵</span></span>
+            </div>
+            <div class="c-p-row">
+              <span class="ico">▣</span> cmux-linux-alternative
+              <span class="sub">~/drive/workspace</span
+              ><span class="aux"><span class="badge attn">needs input</span></span>
+            </div>
+            <div class="c-p-row">
+              <span class="ico">▣</span> e-commerce <span class="sub">~/drive/workspace</span
+              ><span class="aux"><span class="dot g"></span></span>
+            </div>
+            <div class="c-p-sect">Actions</div>
+            <div class="c-p-row">
+              <span class="ico">＋</span> New workspace from folder…
+              <span class="aux"><span class="kbd">⌘O</span></span>
+            </div>
+            <div class="c-p-row"><span class="ico">▦</span> Save current layout…</div>
+            <div class="c-p-foot">
+              <span>↑↓ navigate</span><span>↵ open</span><span>⌘↵ open in split</span
+              ><span>esc close</span>
+            </div>
+          </div>
+          <div class="statusbar">
+            <span class="dot"></span> Connected · PID 409107
+            <div class="sb-spacer"></div>
+            ⌘K anywhere · 0.1.0
+          </div>
+        </div>
+      </div>
+      <div class="variant-meta">
+        <div class="meta-card">
+          <h4>What changed</h4>
+          <ul>
+            <li>
+              Sidebar removed; a titlebar workspace switcher + ⌘K palette handle all navigation
+            </li>
+            <li>Empty workspace shows quick actions with shortcuts instead of a blank terminal</li>
+            <li>
+              Palette unifies workspaces, layouts, and actions in one fuzzy-searchable surface
+            </li>
+          </ul>
+        </div>
+        <div class="meta-card">
+          <h4>Why it’s better</h4>
+          <ul>
+            <li>100% of horizontal space goes to terminals — the actual work</li>
+            <li>Scales to 50+ workspaces where any list UI degrades</li>
+            <li>Feels like Raycast/Warp/Linear — the “modern product” signal you asked for</li>
+          </ul>
+        </div>
+        <div class="meta-card">
+          <h4>Trade-offs</h4>
+          <ul>
+            <li>No ambient awareness of other workspaces’ status (needs titlebar badges)</li>
+            <li>Bigger departure — higher build cost and re-learning for current users</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <!-- ======================= VARIANT D ======================= -->
+    <section class="variant" id="v-d">
+      <div class="variant-title">
+        <h2>D — Foundry</h2>
+        <span
+          >Built around what agents are doing: filters, per-workspace agent status, and split panes
+          as first-class citizens.</span
+        >
+      </div>
+      <div class="frame">
+        <div class="titlebar">
+          <div class="traffic"><i></i><i></i><i></i></div>
+          <div class="logo"></div>
+          <div class="crumb"><b>General Chat</b><span class="sep">·</span><span>2 panes</span></div>
+          <div class="tb-spacer"></div>
+          <div class="palette-pill">⌘K</div>
+          <div class="tb-icon">🔔</div>
+          <div class="tb-icon">⚙</div>
+        </div>
+        <div class="body">
+          <aside class="d-side">
+            <div class="d-filters">
+              <div class="f on">All <span class="n">8</span></div>
+              <div class="f">Running <span class="n">3</span></div>
+              <div class="f" style="color: #ffc98a">Needs input <span class="n">1</span></div>
+            </div>
+            <div class="d-group-h">▾ Active</div>
+            <div class="d-row">
+              <div class="d-r1">
+                <span class="dot o pulse"></span><span class="nm">cmux-linux-alternative</span
+                ><span class="badge attn">waiting</span>
+              </div>
+              <div class="d-r2">
+                <span class="agent wait">claude · needs approval</span><span>· 2m</span>
+              </div>
+            </div>
+            <div class="d-row sel">
+              <div class="d-r1">
+                <span class="dot g pulse"></span><span class="nm">General Chat</span
+                ><span class="badge run">2 panes</span>
+              </div>
+              <div class="d-r2">
+                <span class="agent">claude · working 4m</span><span>· zsh</span>
+              </div>
+            </div>
+            <div class="d-row">
+              <div class="d-r1">
+                <span class="dot g"></span><span class="nm">e-commerce</span
+                ><span class="badge run">1</span>
+              </div>
+              <div class="d-r2"><span>dev server · port 3000</span></div>
+            </div>
+            <div class="d-group-h">▾ Idle</div>
+            <div class="d-row">
+              <div class="d-r1">
+                <span class="dot idle"></span><span class="nm">joodbooking-backoffice</span>
+              </div>
+            </div>
+            <div class="d-row">
+              <div class="d-r1"><span class="dot idle"></span><span class="nm">t3code</span></div>
+            </div>
+            <div class="d-row">
+              <div class="d-r1"><span class="dot idle"></span><span class="nm">Joodbeds</span></div>
+            </div>
+            <div class="d-row">
+              <div class="d-r1">
+                <span class="dot idle"></span><span class="nm">workspace</span>
+              </div>
+            </div>
+            <div class="d-row">
+              <div class="d-r1"><span class="dot idle"></span><span class="nm">nassimna</span></div>
+            </div>
+            <div class="a-foot">
+              <span class="dot g" style="width: 6px; height: 6px"></span> 3 agents running
+              <span class="kbd">⌘O</span>
+            </div>
+          </aside>
+          <div class="main">
+            <div class="d-split">
+              <div class="pane">
+                <div class="d-panehead">
+                  <span class="pill">❯_ zsh</span> ~/…/general-chat
+                  <div class="sb-spacer"></div>
+                  ◫ ✕
+                </div>
+                <div class="term">
+                  <div>
+                    <span class="p-user">nassimna</span> <span class="p-sym">❯</span> claude "review
+                    the diff"
+                  </div>
+                  <div class="t-ok">
+                    ● Working… reading apps/desktop/src/renderer <span class="t-dim">(4m 12s)</span>
+                  </div>
+                </div>
+              </div>
+              <div class="pane">
+                <div class="d-panehead">
+                  <span class="pill">❯_ zsh</span> ~/…/general-chat
+                  <div class="sb-spacer"></div>
+                  ◫ ✕
+                </div>
+                <div class="term">
+                  <div>
+                    <span class="p-user">nassimna</span> <span class="p-sym">❯</span> git log
+                    --oneline -3
+                  </div>
+                  <div class="t-dim">9a22665 init</div>
+                  <div style="margin-top: 8px">
+                    <span class="p-user">nassimna</span> <span class="p-sym">❯</span>
+                    <span class="cursor"></span>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="statusbar">
+              <span class="dot"></span> Connected · PID 409107
+              <div class="sb-spacer"></div>
+              1 workspace needs input · 0.1.0
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="variant-meta">
+        <div class="meta-card">
+          <h4>What changed</h4>
+          <ul>
+            <li>
+              Sidebar is grouped by state (Active / Idle) with filter chips — not a flat
+              alphabetical list
+            </li>
+            <li>Each active row shows what the agent is doing and for how long</li>
+            <li>
+              Idle workspaces collapse to a single quiet line; panes get slim headers with path +
+              actions
+            </li>
+          </ul>
+        </div>
+        <div class="meta-card">
+          <h4>Why it’s better</h4>
+          <ul>
+            <li>
+              Matches the real job: monitoring several agents, jumping to the one that needs you
+            </li>
+            <li>
+              “Needs input” is a global, filterable state — never lost in the list or a buried badge
+            </li>
+            <li>Idle rows stop paying the visual cost of status they don’t have</li>
+          </ul>
+        </div>
+        <div class="meta-card">
+          <h4>Trade-offs</h4>
+          <ul>
+            <li>Depends on reliable agent-status detection (currently “Status unavailable”)</li>
+            <li>
+              Rows move between groups as state changes — needs careful animation to avoid jumpiness
+            </li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <p class="footnote">
+      All four variants share the Basalt token palette so any of them can be built by adjusting
+      layout and component CSS without a re-theme. They also share three global fixes: status text
+      only renders when actionable, the ⌘K palette is promoted to the titlebar, and empty panes
+      always offer next actions. A/B and D can be combined (dense rows + activity grouping); C can
+      layer on top of any of them as the keyboard path.
+    </p>
+
+    <script>
+      const buttons = document.querySelectorAll('.switcher button')
+      buttons.forEach((btn) =>
+        btn.addEventListener('click', () => {
+          buttons.forEach((b) => b.classList.remove('active'))
+          btn.classList.add('active')
+          document.querySelectorAll('.variant').forEach((v) => v.classList.remove('show'))
+          document.getElementById('v-' + btn.dataset.v).classList.add('show')
+        })
+      )
+    </script>
+  </body>
+</html>

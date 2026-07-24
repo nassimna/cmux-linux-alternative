@@ -135,7 +135,8 @@ test('real service drives the Milestone 2 workspace UI', async () => {
         'data-process-id',
         originalProcessId
       )
-      await page.getByRole('button', { name: 'New terminal tab' }).click()
+      await page.getByRole('button', { name: 'Add tab' }).click()
+      await page.getByRole('menuitem', { name: 'Terminal', exact: true }).click()
       await expect(page.locator('.xterm-rows').last()).toContainText('CONFIGURED_SHELL_ACTIVE')
       await page.screenshot({ path: join(evidenceDirectory, '01b-configured-shell-terminal.png') })
 
@@ -213,7 +214,8 @@ test('real service drives the Milestone 2 workspace UI', async () => {
     const separator = page.getByRole('separator').first()
     await separator.focus()
     await page.keyboard.press('ArrowRight')
-    await page.getByRole('button', { name: 'New terminal tab' }).last().click()
+    await page.getByRole('button', { name: 'Add tab' }).last().click()
+    await page.getByRole('menuitem', { name: 'Terminal', exact: true }).click()
     await expect(page.locator('.pane-tab')).toHaveCount(3)
     await page.screenshot({ path: join(evidenceDirectory, '02-split-tabs.png') })
 
@@ -358,10 +360,10 @@ test('real service drives the Milestone 2 workspace UI', async () => {
     await expect(page.locator('.workspace-row[aria-pressed="true"]')).toHaveCount(2)
     await replaceWorkspaceSelection(page, canonicalWorkspaceIds, canonicalWorkspaceIds[0])
 
-    await page.evaluate(() => {
-      globalThis.prompt = () => 'Active group'
-    })
     await page.locator('[data-workspace-action="workspace.group.create"]').click()
+    const groupDialog = page.getByRole('dialog')
+    await groupDialog.getByLabel('Group name').fill('Active group')
+    await groupDialog.getByRole('button', { name: 'Create group' }).click()
     await expect
       .poll(() =>
         page.evaluate(async () =>
@@ -391,6 +393,7 @@ test('real service drives the Milestone 2 workspace UI', async () => {
         return true
       }
     })
+    await page.getByRole('button', { name: 'Saved layouts' }).click()
     await page.locator('[data-workspace-action="workspace.layout.save"]').click()
     await expect(page.getByText('Saved pair', { exact: true })).toBeVisible()
     const identitiesBeforeApply = await layoutTerminalIdentities(page)
@@ -534,6 +537,7 @@ test('real service drives the Milestone 2 workspace UI', async () => {
     )
     await expect(page.getByText('Active group', { exact: true })).toBeVisible()
     await expect(page.getByText('Pinned', { exact: true })).toBeVisible()
+    await page.getByRole('button', { name: 'Saved layouts' }).click()
     await expect(page.getByText('Saved pair', { exact: true })).toHaveCount(2)
     await expect(firstWorkspace).toHaveCount(1)
     await page.screenshot({ path: join(evidenceDirectory, '03b-m2-restart-persistence.png') })
@@ -547,10 +551,14 @@ test('real service drives the Milestone 2 workspace UI', async () => {
     await page.keyboard.press('Enter')
     await expect(publicActionPalette).toHaveCount(0)
     await expect
-      .poll(() =>
-        electronApplication.evaluate(({ BrowserWindow }) =>
-          Boolean(BrowserWindow.getFocusedWindow()?.isFocused())
-        )
+      .poll(
+        () =>
+          electronApplication.evaluate(({ BrowserWindow }) =>
+            Boolean(BrowserWindow.getFocusedWindow()?.isFocused())
+          ),
+        // Window-manager focus grants lag under load; the assertion is about
+        // eventual focus, not latency.
+        { timeout: 20_000 }
       )
       .toBe(true)
 

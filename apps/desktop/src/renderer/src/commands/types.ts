@@ -31,6 +31,7 @@ export type CommandId = (typeof COMMAND_IDS)[number]
 
 export const WORKSPACE_CARD_ACTION_IDS = [
   'workspace.card.select',
+  'workspace.card.openPath',
   'workspace.card.reorder',
   'workspace.card.close',
   'workspace.card.rename',
@@ -60,6 +61,7 @@ export const WORKSPACE_CARD_ACTION_IDS = [
 export type WorkspaceCardActionId = (typeof WORKSPACE_CARD_ACTION_IDS)[number]
 export type WorkspaceCardCommandId =
   | 'workspace.select'
+  | 'workspace.openPath'
   | 'workspace.move'
   | 'workspace.close'
   | 'workspace.update'
@@ -87,6 +89,7 @@ interface WorkspaceCardActionDefinition {
 
 export const WORKSPACE_CARD_ACTION_DEFINITIONS = [
   { key: 'select', actionId: 'workspace.card.select', commandId: 'workspace.select' },
+  { key: 'openPath', actionId: 'workspace.card.openPath', commandId: 'workspace.openPath' },
   { key: 'reorder', actionId: 'workspace.card.reorder', commandId: 'workspace.move' },
   { key: 'close', actionId: 'workspace.card.close', commandId: 'workspace.close' },
   { key: 'rename', actionId: 'workspace.card.rename', commandId: 'workspace.update' },

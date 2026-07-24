@@ -192,6 +192,8 @@ import {
   desktopTextBoxCreateRequestSchema,
   desktopTextBoxDeleteRequestSchema,
   desktopTextBoxSaveRequestSchema,
+  desktopWorkspacePathOpenersSchema,
+  desktopWorkspacePathOpenRequestSchema,
   savedLayoutImportRequestSchema,
   desktopActionInvokeRequestSchema,
   type DesktopBridge,
@@ -616,6 +618,12 @@ const desktopBridge = Object.freeze({
     }
     return result
   },
+  listWorkspacePathOpeners: async () =>
+    desktopWorkspacePathOpenersSchema.parse(
+      await ipcRenderer.invoke(DESKTOP_IPC.workspacePathOpeners)
+    ),
+  openWorkspacePath: async (params) =>
+    invokeVoid(DESKTOP_IPC.workspacePathOpen, desktopWorkspacePathOpenRequestSchema.parse(params)),
   createWorkspace: async (params) =>
     invokeMutation(DESKTOP_IPC.workspaceCreate, workspaceCreateParamsSchema.parse(params)),
   updateWorkspace: async (params) =>
