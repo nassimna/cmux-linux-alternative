@@ -44,6 +44,10 @@ jobs:
     name: Build ${{ matrix.label }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
+    # Linux is required for a release; macOS/Windows are best-effort while the
+    # backend is ported off Linux-only syscalls. Their assets auto-append to the
+    # same release once they start building green.
+    continue-on-error: ${{ matrix.label != 'linux-x64' }}
     strategy:
       fail-fast: false
       matrix:
