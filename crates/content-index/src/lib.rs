@@ -2,18 +2,26 @@
 //! Separate, consent-gated encrypted content index.
 
 use agent_workspace_agent_adapter::{AdapterError, CodexAdapter, CodexTranscriptRole};
+#[cfg(target_os = "linux")]
 use agent_workspace_protocol::{
     MAX_SEARCH_RESULTS, OpaqueDocumentRef, SearchResult, SearchSourceKind,
 };
+#[cfg(not(target_os = "linux"))]
+use agent_workspace_protocol::{OpaqueDocumentRef, SearchResult, SearchSourceKind};
 use async_trait::async_trait;
+#[cfg(target_os = "linux")]
 use chacha20poly1305::{
     XChaCha20Poly1305, XNonce,
     aead::{Aead, KeyInit},
 };
+#[cfg(target_os = "linux")]
 use rusqlite::{Connection, OpenFlags, OptionalExtension, params, params_from_iter};
+#[cfg(target_os = "linux")]
 use rustix::fs::{self as rfs, Mode, OFlags, ResolveFlags};
+#[cfg(target_os = "linux")]
 use secret_service::{EncryptionType, SecretService};
 use serde::Deserialize;
+#[cfg(target_os = "linux")]
 use std::{
     collections::{BTreeSet, HashSet, VecDeque},
     fmt,
@@ -27,6 +35,17 @@ use std::{
     },
     time::{Instant, SystemTime, UNIX_EPOCH},
 };
+#[cfg(not(target_os = "linux"))]
+use std::{
+    collections::{HashSet, VecDeque},
+    fmt,
+    path::Path,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
+    time::Instant,
+};
 use thiserror::Error;
 use uuid::Uuid;
 use zeroize::Zeroizing;
@@ -39,13 +58,21 @@ pub const INDEX_QUEUE_CAPACITY: usize = 256;
 pub const INDEX_INTERACTIVE_BATCH: usize = 8;
 const MAX_TRANSCRIPT_BYTES: usize = 8 * 1024 * 1024;
 const MAX_TRANSCRIPT_RECORDS: usize = 10_000;
+#[cfg(target_os = "linux")]
 const PROFILE_KEY_ID_FILE: &str = "content-index-key-id";
+#[cfg(target_os = "linux")]
 const SECRET_SERVICE_APPLICATION: &str = "cmux-linux-alternative";
+#[cfg(target_os = "linux")]
 const SECRET_SERVICE_KIND: &str = "content-index-key-v1";
+#[cfg(target_os = "linux")]
 const SECRET_SERVICE_CONTENT_TYPE: &str = "application/octet-stream";
+#[cfg(target_os = "linux")]
 const EXPECTED_METADATA: &str = "CREATE TABLE metadata (singleton INTEGER PRIMARY KEY CHECK(singleton=1), schema_version INTEGER NOT NULL CHECK(schema_version=1), sentinel_nonce BLOB NOT NULL, sentinel_ciphertext BLOB NOT NULL)";
+#[cfg(target_os = "linux")]
 const EXPECTED_AUTHORIZATIONS: &str = "CREATE TABLE source_authorizations (authorization_id TEXT PRIMARY KEY CHECK(length(authorization_id)=36), excluded INTEGER NOT NULL CHECK(excluded IN (0,1)), consented_at_ms INTEGER NOT NULL CHECK(consented_at_ms>=0), retention_days INTEGER NOT NULL CHECK(retention_days BETWEEN 1 AND 365), ignore_nonce BLOB NOT NULL, ignore_ciphertext BLOB NOT NULL)";
+#[cfg(target_os = "linux")]
 const EXPECTED_DOCUMENTS: &str = "CREATE TABLE documents (id INTEGER PRIMARY KEY, authorization_id TEXT NOT NULL REFERENCES source_authorizations(authorization_id) ON DELETE CASCADE, identity_hash BLOB NOT NULL UNIQUE CHECK(length(identity_hash)=32), identity_version INTEGER NOT NULL CHECK(identity_version BETWEEN 1 AND 9007199254740991), document_nonce BLOB NOT NULL, document_ciphertext BLOB NOT NULL, snippet_nonce BLOB NOT NULL, snippet_ciphertext BLOB NOT NULL, source_kind TEXT NOT NULL CHECK(source_kind IN ('workspaceFile','agentTranscript')), pinned INTEGER NOT NULL CHECK(pinned IN (0,1)), indexed_at_ms INTEGER NOT NULL)";
+#[cfg(target_os = "linux")]
 const EXPECTED_TOKENS: &str = "CREATE TABLE tokens (document_row INTEGER NOT NULL REFERENCES documents(id) ON DELETE CASCADE, token_hash BLOB NOT NULL, UNIQUE(document_row,token_hash))";
 
 /// A content-only request to one audited agent transcript provider. It deliberately contains no
@@ -231,9 +258,11 @@ pub trait ProfileSecretStore: Send + Sync {
 }
 
 /// Production Secret Service implementation. It never unlocks collections or items.
+#[cfg(target_os = "linux")]
 #[derive(Clone, Copy, Debug, Default)]
 pub struct SecretServiceProfileSecretStore;
 
+#[cfg(target_os = "linux")]
 #[async_trait]
 impl ProfileSecretStore for SecretServiceProfileSecretStore {
     async fn find_exact(&self, key_id: &str) -> Result<ProfileSecretMatches, ProfileKeyLoadError> {
@@ -305,10 +334,18 @@ impl ProfileSecretStore for SecretServiceProfileSecretStore {
 ///
 /// Existing unsafe locator storage, locked or duplicate items, and malformed secrets fail closed.
 /// No index artifact is opened or mutated by this function.
+#[cfg(target_os = "linux")]
 pub async fn load_or_create_profile_key(
     profile: &Path,
 ) -> Result<LoadedProfileKey, ProfileKeyLoadError> {
     load_or_create_profile_key_with(profile, &SecretServiceProfileSecretStore).await
+}
+
+#[cfg(not(target_os = "linux"))]
+pub async fn load_or_create_profile_key(
+    _profile: &Path,
+) -> Result<LoadedProfileKey, ProfileKeyLoadError> {
+    Err(ProfileKeyLoadError::Unavailable)
 }
 
 pub async fn load_or_create_profile_key_with(
@@ -346,7 +383,7 @@ fn loaded_key(secret: &Zeroizing<Vec<u8>>) -> Result<LoadedProfileKey, ProfileKe
     Ok(LoadedProfileKey(Zeroizing::new(key)))
 }
 
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
 fn load_or_create_key_id(profile: &Path) -> Result<String, ProfileKeyLoadError> {
     let directory = open_safe_profile_directory(profile)?;
     match rfs::openat2(
@@ -374,7 +411,7 @@ fn load_or_create_key_id(profile: &Path) -> Result<String, ProfileKeyLoadError> 
     }
 }
 
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
 fn open_safe_profile_directory(profile: &Path) -> Result<File, ProfileKeyLoadError> {
     use std::os::unix::fs::{MetadataExt as _, PermissionsExt as _};
 
@@ -419,7 +456,7 @@ fn open_safe_profile_directory(profile: &Path) -> Result<File, ProfileKeyLoadErr
     Ok(directory)
 }
 
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
 fn validate_locator_file(file: &File) -> Result<(), ProfileKeyLoadError> {
     use std::os::unix::fs::{MetadataExt as _, PermissionsExt as _};
 
@@ -437,12 +474,12 @@ fn validate_locator_file(file: &File) -> Result<(), ProfileKeyLoadError> {
     Ok(())
 }
 
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
 fn read_safe_key_id(directory: &File) -> Result<String, ProfileKeyLoadError> {
     read_safe_key_id_with_hook(directory, || {})
 }
 
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
 fn read_safe_key_id_with_hook<F: FnOnce()>(
     directory: &File,
     hook: F,
@@ -469,11 +506,12 @@ fn read_safe_key_id_with_hook<F: FnOnce()>(
     Ok(value.to_owned())
 }
 
-#[cfg(not(unix))]
+#[cfg(not(target_os = "linux"))]
 fn load_or_create_key_id(_profile: &Path) -> Result<String, ProfileKeyLoadError> {
     Err(ProfileKeyLoadError::Unavailable)
 }
 
+#[cfg(target_os = "linux")]
 fn copy_profile_key(keys: &dyn ProfileKeyProvider) -> Option<Zeroizing<[u8; 32]>> {
     let mut key = Zeroizing::new([0_u8; 32]);
     let mut called = false;
@@ -486,7 +524,9 @@ fn copy_profile_key(keys: &dyn ProfileKeyProvider) -> Option<Zeroizing<[u8; 32]>
     (available && called).then_some(key)
 }
 
+#[cfg(target_os = "linux")]
 struct FixedKeyProvider(Zeroizing<[u8; 32]>);
+#[cfg(target_os = "linux")]
 impl ProfileKeyProvider for FixedKeyProvider {
     fn with_profile_key(&self, consumer: &mut dyn FnMut(&[u8; 32])) -> bool {
         consumer(&self.0);
@@ -526,6 +566,7 @@ pub struct IndexBudget {
     pub deadline: Instant,
 }
 
+#[cfg(target_os = "linux")]
 pub struct ContentIndex {
     connection: Connection,
     directory: File,
@@ -533,6 +574,7 @@ pub struct ContentIndex {
     authorized: HashSet<Uuid>,
     excluded: HashSet<Uuid>,
 }
+#[cfg(target_os = "linux")]
 impl ContentIndex {
     /// Preserves validated owner-only database artifacts under unique corruption names, then
     /// creates a fresh index. This is intentionally explicit; [`Self::open`] never destroys data.
@@ -1013,6 +1055,77 @@ impl ContentIndex {
             .map_err(|_| IndexError::Unauthorized)
     }
 }
+
+#[cfg(not(target_os = "linux"))]
+pub struct ContentIndex;
+
+#[cfg(not(target_os = "linux"))]
+impl ContentIndex {
+    pub fn open(
+        _profile: &Path,
+        _keys: &dyn ProfileKeyProvider,
+    ) -> Result<(IndexAvailability, Option<Self>), IndexError> {
+        Ok((IndexAvailability::DisabledKeyringUnavailable, None))
+    }
+    pub fn authorize_source(
+        &mut self,
+        _id: Uuid,
+        _consented_at_ms: u64,
+    ) -> Result<(), IndexError> {
+        Err(IndexError::Disabled)
+    }
+    pub fn authorize_source_read(&self, _id: Uuid) -> Result<(), IndexError> {
+        Err(IndexError::Disabled)
+    }
+    pub fn set_source_policy(
+        &mut self,
+        _id: Uuid,
+        _retention_days: u16,
+        _excluded_document_ids: &[String],
+    ) -> Result<(), IndexError> {
+        Err(IndexError::Disabled)
+    }
+    pub fn exclude_source(&mut self, _id: Uuid) -> Result<(), IndexError> {
+        Err(IndexError::Disabled)
+    }
+    pub fn forget_source(&mut self, _id: Uuid) -> Result<(), IndexError> {
+        Err(IndexError::Disabled)
+    }
+    pub fn rebuild_source(&mut self, _id: Uuid) -> Result<(), IndexError> {
+        Err(IndexError::Disabled)
+    }
+    pub fn clear_runtime_bound_documents(&mut self) -> Result<(), IndexError> {
+        Err(IndexError::Disabled)
+    }
+    pub fn export_source_summary(
+        &mut self,
+        _source: Uuid,
+    ) -> Result<IndexExportSummary, IndexError> {
+        Err(IndexError::Disabled)
+    }
+    #[allow(clippy::too_many_arguments)]
+    pub fn index_text(
+        &mut self,
+        _authorization: Uuid,
+        _document: &OpaqueDocumentRef,
+        _kind: SearchSourceKind,
+        _text: &str,
+        _pinned: bool,
+        _indexed_at_ms: u64,
+        _budget: IndexBudget,
+    ) -> Result<(), IndexError> {
+        Err(IndexError::Disabled)
+    }
+    pub fn search(
+        &mut self,
+        _query: &str,
+        _limit: usize,
+    ) -> Result<Vec<SearchResult>, IndexError> {
+        Err(IndexError::Disabled)
+    }
+}
+
+#[cfg(target_os = "linux")]
 fn epoch_ms() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -1020,15 +1133,18 @@ fn epoch_ms() -> u64 {
         .and_then(|value| u64::try_from(value.as_millis()).ok())
         .unwrap_or(0)
 }
+#[cfg(target_os = "linux")]
 fn retention_cutoff(now_ms: u64, retention_days: u16) -> u64 {
     now_ms.saturating_sub(u64::from(retention_days) * 86_400_000)
 }
+#[cfg(target_os = "linux")]
 fn kind_string(k: SearchSourceKind) -> &'static str {
     match k {
         SearchSourceKind::WorkspaceFile => "workspaceFile",
         SearchSourceKind::AgentTranscript => "agentTranscript",
     }
 }
+#[cfg(target_os = "linux")]
 fn tokenize(text: &str) -> Vec<String> {
     let mut values: Vec<_> = text
         .split(|c: char| !c.is_alphanumeric())
@@ -1040,6 +1156,7 @@ fn tokenize(text: &str) -> Vec<String> {
     values.dedup();
     values
 }
+#[cfg(target_os = "linux")]
 fn tokenize_before(text: &str, deadline: Instant) -> Result<Vec<String>, IndexError> {
     let mut values = Vec::new();
     for (index, value) in text
@@ -1058,6 +1175,7 @@ fn tokenize_before(text: &str, deadline: Instant) -> Result<Vec<String>, IndexEr
     ensure_before(deadline)?;
     Ok(values)
 }
+#[cfg(target_os = "linux")]
 fn ensure_before(deadline: Instant) -> Result<(), IndexError> {
     if Instant::now() < deadline {
         Ok(())
@@ -1065,6 +1183,7 @@ fn ensure_before(deadline: Instant) -> Result<(), IndexError> {
         Err(IndexError::Capacity)
     }
 }
+#[cfg(target_os = "linux")]
 fn encrypt(key: &[u8; 32], value: &[u8]) -> Result<(Vec<u8>, Vec<u8>), IndexError> {
     let nonce_bytes = *Uuid::new_v4().as_bytes();
     let mut nonce = [0u8; 24];
@@ -1076,6 +1195,7 @@ fn encrypt(key: &[u8; 32], value: &[u8]) -> Result<(Vec<u8>, Vec<u8>), IndexErro
         .map_err(|_| IndexError::Crypto)?;
     Ok((nonce.to_vec(), ciphertext))
 }
+#[cfg(target_os = "linux")]
 fn decrypt(key: &[u8; 32], nonce: &[u8], ciphertext: &[u8]) -> Result<Vec<u8>, IndexError> {
     if nonce.len() != 24 {
         return Err(IndexError::Crypto);
@@ -1084,6 +1204,7 @@ fn decrypt(key: &[u8; 32], nonce: &[u8], ciphertext: &[u8]) -> Result<Vec<u8>, I
         .decrypt(XNonce::from_slice(nonce), ciphertext)
         .map_err(|_| IndexError::Crypto)
 }
+#[cfg(target_os = "linux")]
 fn open_beneath(directory: &File, name: &str, flags: OFlags) -> Result<File, IndexError> {
     rfs::openat2(
         directory,
@@ -1096,6 +1217,7 @@ fn open_beneath(directory: &File, name: &str, flags: OFlags) -> Result<File, Ind
     .map_err(|_| IndexError::UnsafeDatabase)
 }
 
+#[cfg(target_os = "linux")]
 fn open_absolute_directory(path: &Path) -> Result<File, IndexError> {
     if !path.is_absolute()
         || path
@@ -1126,6 +1248,7 @@ fn open_absolute_directory(path: &Path) -> Result<File, IndexError> {
     .map_err(|_| IndexError::UnsafeDatabase)
 }
 
+#[cfg(target_os = "linux")]
 fn validate_owned_directory(directory: &File) -> Result<(), IndexError> {
     use std::os::unix::fs::MetadataExt;
     let metadata = directory
@@ -1138,6 +1261,7 @@ fn validate_owned_directory(directory: &File) -> Result<(), IndexError> {
         .map_err(|_| IndexError::UnsafeDatabase)
 }
 
+#[cfg(target_os = "linux")]
 fn validate_profile_directory(directory: &File) -> Result<(), IndexError> {
     use std::os::unix::fs::MetadataExt;
     let metadata = directory
@@ -1150,6 +1274,7 @@ fn validate_profile_directory(directory: &File) -> Result<(), IndexError> {
     }
 }
 
+#[cfg(target_os = "linux")]
 fn prepare_index_directory(profile: &Path) -> Result<File, IndexError> {
     let profile = open_absolute_directory(profile)?;
     validate_profile_directory(&profile)?;
@@ -1170,6 +1295,7 @@ fn prepare_index_directory(profile: &Path) -> Result<File, IndexError> {
     Ok(version)
 }
 
+#[cfg(target_os = "linux")]
 fn artifact_exists(directory: &File, name: &str) -> Result<bool, IndexError> {
     match rfs::openat2(
         directory,
@@ -1184,6 +1310,7 @@ fn artifact_exists(directory: &File, name: &str) -> Result<bool, IndexError> {
     }
 }
 
+#[cfg(target_os = "linux")]
 fn secure_artifact_at(directory: &File, name: &str) -> Result<(), IndexError> {
     use std::os::unix::fs::MetadataExt;
     let file = open_beneath(directory, name, OFlags::RDWR)?;
@@ -1197,6 +1324,7 @@ fn secure_artifact_at(directory: &File, name: &str) -> Result<(), IndexError> {
     rfs::fchmod(&file, Mode::RUSR | Mode::WUSR).map_err(|_| IndexError::UnsafeDatabase)
 }
 
+#[cfg(target_os = "linux")]
 fn secure_artifacts_at(directory: &File) -> Result<(), IndexError> {
     for name in ["search.sqlite3", "search.sqlite3-wal", "search.sqlite3-shm"] {
         if artifact_exists(directory, name)? {
@@ -1206,6 +1334,7 @@ fn secure_artifacts_at(directory: &File) -> Result<(), IndexError> {
     Ok(())
 }
 
+#[cfg(target_os = "linux")]
 fn artifact_bytes(directory: &File) -> Result<u64, IndexError> {
     let mut total = 0u64;
     for name in ["search.sqlite3", "search.sqlite3-wal", "search.sqlite3-shm"] {
@@ -1223,6 +1352,7 @@ fn artifact_bytes(directory: &File) -> Result<u64, IndexError> {
     Ok(total)
 }
 
+#[cfg(target_os = "linux")]
 fn verify_exact_schema(connection: &Connection) -> Result<(), IndexError> {
     let mut statement = connection
         .prepare("SELECT type,name,tbl_name,sql FROM sqlite_schema ORDER BY type,name")
@@ -1415,6 +1545,7 @@ pub fn parse_transcript(adapter: TranscriptAdapter, input: &[u8]) -> TranscriptP
 }
 
 #[cfg(test)]
+#[cfg(target_os = "linux")]
 mod tests {
     use super::*;
     use agent_workspace_content::{WorkspaceIndexEnumeration, WorkspacePathProvider};
