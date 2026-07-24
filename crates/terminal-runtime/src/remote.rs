@@ -16,10 +16,11 @@ use agent_workspace_protocol::{
 use thiserror::Error;
 use uuid::Uuid;
 
+#[cfg(target_os = "linux")]
 mod credential_broker;
+#[cfg(target_os = "linux")]
 pub use credential_broker::{
-    CredentialReference, SecretServiceCredentialProvider, delete_target_credential,
-    enroll_target_credential_from_file,
+    SecretServiceCredentialProvider, delete_target_credential, enroll_target_credential_from_file,
 };
 mod host_keys;
 pub use host_keys::{HostKeyDescriptor, SystemHostKeyScanner, write_known_host_atomic};
@@ -119,6 +120,31 @@ impl CredentialBrokerLease {
     #[must_use]
     pub const fn socket(&self) -> &EphemeralAgentSocket {
         &self.socket
+    }
+}
+
+/// Non-secret locator for one profile's Secret Service item.
+///
+/// The value is intentionally not exposed through protocol snapshots, diagnostics, or `Debug`.
+#[derive(Clone, Eq, Hash, PartialEq)]
+pub struct CredentialReference(String);
+
+impl CredentialReference {
+    /// Derives the stable opaque Secret Service locator owned by a remote target profile.
+    #[must_use]
+    pub fn for_target(target_id: Uuid) -> Self {
+        Self(format!("v1-{target_id}"))
+    }
+
+    #[cfg(target_os = "linux")]
+    fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl fmt::Debug for CredentialReference {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("CredentialReference([REDACTED])")
     }
 }
 

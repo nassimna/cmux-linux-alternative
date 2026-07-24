@@ -11,9 +11,6 @@ async-trait.workspace = true
 portable-pty.workspace = true
 rustix.workspace = true
 sha2 = "0.10.9"
-secret-service.workspace = true
-signature.workspace = true
-ssh-agent-lib.workspace = true
 ssh-key.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
@@ -24,6 +21,11 @@ zeroize.workspace = true
 
 [target.'cfg(unix)'.dependencies]
 uzers.workspace = true
+
+[target.'cfg(target_os = "linux")'.dependencies]
+secret-service.workspace = true
+signature.workspace = true
+ssh-agent-lib.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

@@ -24,30 +24,15 @@ use tokio::{net::UnixListener, task::JoinHandle};
 use uuid::Uuid;
 use zeroize::Zeroizing;
 
-use super::{CredentialBrokerLease, CredentialProvider, EphemeralAgentSocket, RemoteRuntimeError};
+use super::{
+    CredentialBrokerLease, CredentialProvider, CredentialReference, EphemeralAgentSocket,
+    RemoteRuntimeError,
+};
 
 const SECRET_SERVICE_APPLICATION: &str = "cmux-linux-alternative";
 const SECRET_SERVICE_KIND: &str = "openssh-private-key-v1";
 const MAX_PRIVATE_KEY_BYTES: usize = 64 * 1024;
 const MAX_SIGN_REQUEST_BYTES: usize = 256 * 1024;
-
-/// Non-secret locator for one profile's Secret Service item.
-///
-/// The value is intentionally not exposed through protocol snapshots, diagnostics, or `Debug`.
-#[derive(Clone, Eq, Hash, PartialEq)]
-pub struct CredentialReference(String);
-
-impl CredentialReference {
-    /// Derives the stable opaque Secret Service locator owned by a remote target profile.
-    #[must_use]
-    pub fn for_target(target_id: Uuid) -> Self {
-        Self(format!("v1-{target_id}"))
-    }
-
-    fn as_str(&self) -> &str {
-        &self.0
-    }
-}
 
 fn credential_attributes(reference: &CredentialReference) -> HashMap<&str, &str> {
     HashMap::from([
@@ -212,12 +197,6 @@ fn validate_private_key(secret: &[u8]) -> Result<ssh_key::PublicKey, RemoteRunti
         return Err(RemoteRuntimeError::InvalidCredential);
     }
     Ok(key.public_key().clone())
-}
-
-impl fmt::Debug for CredentialReference {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str("CredentialReference([REDACTED])")
-    }
 }
 
 /// Secret Service provider which creates a fresh Unix agent for every target attempt.

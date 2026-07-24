@@ -33,6 +33,7 @@ use agent_workspace_storage::{
     SqliteStateStore, StorageError,
 };
 use agent_workspace_terminal_runtime::TerminalManager;
+#[cfg(target_os = "linux")]
 use agent_workspace_terminal_runtime::remote::{
     delete_target_credential, enroll_target_credential_from_file,
 };
@@ -737,6 +738,22 @@ fn open_inherited_credential_fd(key_fd: u8) -> Result<File, SafeError> {
     }
     // No user-selected pathname is accepted or reopened by the utility.
     File::open("/proc/self/fd/3").map_err(|_| SafeError("the credential descriptor is invalid"))
+}
+
+// The Secret Service credential broker is Linux-only; off Linux these operations are unavailable.
+#[cfg(not(target_os = "linux"))]
+async fn delete_target_credential(
+    _target_id: Uuid,
+) -> Result<(), agent_workspace_terminal_runtime::remote::RemoteRuntimeError> {
+    Err(agent_workspace_terminal_runtime::remote::RemoteRuntimeError::CredentialProviderUnavailable)
+}
+
+#[cfg(all(unix, not(target_os = "linux")))]
+async fn enroll_target_credential_from_file(
+    _target_id: Uuid,
+    _key_file: File,
+) -> Result<(), agent_workspace_terminal_runtime::remote::RemoteRuntimeError> {
+    Err(agent_workspace_terminal_runtime::remote::RemoteRuntimeError::CredentialProviderUnavailable)
 }
 
 fn run_credential_future<F>(future: F) -> Result<(), SafeError>

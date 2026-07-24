@@ -28,13 +28,16 @@ use agent_workspace_storage::{
     SqliteStateStore, StorageError,
 };
 use agent_workspace_terminal_runtime::TerminalEvent;
-#[cfg(test)]
+#[cfg(any(test, not(target_os = "linux")))]
 use agent_workspace_terminal_runtime::remote::UnavailableCredentialProvider;
+#[cfg(target_os = "linux")]
+use agent_workspace_terminal_runtime::remote::{
+    SecretServiceCredentialProvider, delete_target_credential,
+};
 use agent_workspace_terminal_runtime::remote::{
     CredentialBrokerLease, CredentialProvider, CredentialReference, HostKeyDescriptor,
-    RemoteRuntimeError, SecretServiceCredentialProvider, SshLaunchPlan, SystemHostKeyScanner,
-    TmuxOperation, VerifiedRemoteTarget, delete_target_credential, parse_tmux_sessions,
-    reconnect_delay, resolve_ssh_executable, write_known_host_atomic,
+    RemoteRuntimeError, SshLaunchPlan, SystemHostKeyScanner, TmuxOperation, VerifiedRemoteTarget,
+    parse_tmux_sessions, reconnect_delay, resolve_ssh_executable, write_known_host_atomic,
 };
 use serde::{Serialize, de::DeserializeOwned};
 use serde_json::Value;
@@ -197,7 +200,16 @@ struct ProductionCredentialCleanup;
 #[async_trait::async_trait]
 impl CredentialCleanup for ProductionCredentialCleanup {
     async fn remove_target(&self, target_id: Uuid) -> Result<(), RemoteRuntimeError> {
-        delete_target_credential(target_id).await
+        #[cfg(target_os = "linux")]
+        {
+            delete_target_credential(target_id).await
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            // No Secret Service credential store exists off Linux, so there is nothing to remove.
+            let _ = target_id;
+            Ok(())
+        }
     }
 }
 
@@ -485,7 +497,10 @@ impl RemoteSessionControlRuntime {
             store,
             ssh,
             known_hosts_root,
+            #[cfg(target_os = "linux")]
             credentials: Arc::new(SecretServiceCredentialProvider::new(broker_root)?),
+            #[cfg(not(target_os = "linux"))]
+            credentials: Arc::new(UnavailableCredentialProvider),
             credential_cleanup: Arc::new(ProductionCredentialCleanup),
             host_keys,
             executor: Arc::new(ProductionExecutor(backend)),
