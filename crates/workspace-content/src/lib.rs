@@ -6,7 +6,9 @@ use agent_workspace_protocol::{
     WorkspaceDirectoryEntry, WorkspaceDirectoryListResult, WorkspaceEntryKind,
     WorkspaceRootDescriptor, WorkspaceRootListResult,
 };
-use rustix::fs::{self as rfs, AtFlags, Mode, OFlags, RenameFlags, ResolveFlags};
+use rustix::fs::{self as rfs, AtFlags, Mode, OFlags};
+#[cfg(target_os = "linux")]
+use rustix::fs::{RenameFlags, ResolveFlags};
 use std::{
     collections::{HashMap, HashSet, VecDeque},
     fs::File,
@@ -829,6 +831,7 @@ impl WorkspacePathProvider {
             .map_err(|_| ContentError::Io)?;
         let target = open_beneath(&root, &doc.relative, OFlags::RDONLY)?;
         let original = identity_file(&target)?;
+        #[cfg(target_os = "linux")]
         let original_fingerprint = file_fingerprint(&target)?;
         if original != doc.identity {
             return Err(ContentError::IdentityChanged);
@@ -862,18 +865,7 @@ impl WorkspacePathProvider {
                 return Err(ContentError::IdentityChanged);
             }
             let name = doc.relative.file_name().ok_or(ContentError::InvalidPath)?;
-            rfs::renameat_with(
-                &parent,
-                &temporary,
-                &current_parent,
-                name,
-                RenameFlags::EXCHANGE,
-            )
-            .map_err(|_| ContentError::Io)?;
-            let swapped_out = open_beneath(&parent, Path::new(&temporary), OFlags::RDONLY)?;
-            let swapped_identity = identity_file(&swapped_out)?;
-            if !same_file_after_exchange(swapped_identity, original)
-                || file_fingerprint(&swapped_out)? != original_fingerprint
+            #[cfg(target_os = "linux")]
             {
                 rfs::renameat_with(
                     &parent,
@@ -883,10 +875,31 @@ impl WorkspacePathProvider {
                     RenameFlags::EXCHANGE,
                 )
                 .map_err(|_| ContentError::Io)?;
-                return Err(ContentError::IdentityChanged);
+                let swapped_out = open_beneath(&parent, Path::new(&temporary), OFlags::RDONLY)?;
+                let swapped_identity = identity_file(&swapped_out)?;
+                if !same_file_after_exchange(swapped_identity, original)
+                    || file_fingerprint(&swapped_out)? != original_fingerprint
+                {
+                    rfs::renameat_with(
+                        &parent,
+                        &temporary,
+                        &current_parent,
+                        name,
+                        RenameFlags::EXCHANGE,
+                    )
+                    .map_err(|_| ContentError::Io)?;
+                    return Err(ContentError::IdentityChanged);
+                }
+                drop(swapped_out);
+                rfs::unlinkat(&parent, &temporary, AtFlags::empty())
+                    .map_err(|_| ContentError::Io)?;
             }
-            drop(swapped_out);
-            rfs::unlinkat(&parent, &temporary, AtFlags::empty()).map_err(|_| ContentError::Io)?;
+            #[cfg(not(target_os = "linux"))]
+            {
+                // macOS lacks renameat2(RENAME_EXCHANGE); use a plain atomic replace. The pre-write identity check above still guards against a changed original; the exchange-based swap-back verification is Linux-only.
+                rfs::renameat(&parent, &temporary, &current_parent, name)
+                    .map_err(|_| ContentError::Io)?;
+            }
             current_parent.sync_all().map_err(|_| ContentError::Io)?;
             let new_file = open_beneath(&current_parent, Path::new(name), OFlags::RDONLY)?;
             let record = self
@@ -1035,6 +1048,7 @@ fn validate_open(file: &File, expected: Identity) -> Result<(), ContentError> {
         .then_some(())
         .ok_or(ContentError::IdentityChanged)
 }
+#[cfg(target_os = "linux")]
 fn same_file_after_exchange(actual: Identity, expected: Identity) -> bool {
     actual.device == expected.device
         && actual.inode == expected.inode
@@ -1042,6 +1056,7 @@ fn same_file_after_exchange(actual: Identity, expected: Identity) -> bool {
         && actual.modified_seconds == expected.modified_seconds
         && actual.modified_nanoseconds == expected.modified_nanoseconds
 }
+#[cfg(target_os = "linux")]
 fn file_fingerprint(file: &File) -> Result<blake3::Hash, ContentError> {
     let mut reader = file.try_clone().map_err(|_| ContentError::Io)?;
     let mut hasher = blake3::Hasher::new();
