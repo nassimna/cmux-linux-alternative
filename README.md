@@ -18,6 +18,8 @@ there is no published download, signed stable release, or public support guarant
   metadata for working directory, Git branch, selected process, and listening ports.
 - Sandboxed Electron UI with xterm.js terminals and isolated native browser views that receive no
   Node, preload, or desktop-bridge privileges.
+- Visible workspace pins and saved SSH workspaces that launch OpenSSH with an existing alias, key,
+  or host configuration.
 - Searchable command palette, editable shortcuts, keyboard navigation, appearance/terminal/
   notification settings, and explicit stable/beta update controls.
 - Authenticated local protocol and packaged JSON CLI for workspace list/create, terminal
@@ -45,6 +47,7 @@ review succeed.
 
 - [Installation and uninstall](docs/INSTALLATION.md)
 - [Configuration](docs/CONFIGURATION.md)
+- [SSH workspaces](docs/SSH_WORKSPACES.md)
 - [Keyboard shortcuts](docs/SHORTCUTS.md)
 - [CLI reference](docs/CLI.md)
 - [Agent integrations](docs/AGENT_INTEGRATIONS.md)
