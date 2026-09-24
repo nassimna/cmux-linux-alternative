@@ -211,6 +211,8 @@ export function TerminalPane({
       fontWeightBold: '600',
       letterSpacing: 0,
       lineHeight: 1.1,
+      // Preserve unfinished output on narrow-and-wide resizes in xterm 6.
+      reflowCursorLine: true,
       linkHandler: {
         activate: openTerminalLink,
         hover: showTerminalLink,
@@ -273,6 +275,7 @@ export function TerminalPane({
     let restoring: Promise<void> | undefined
     let serviceRows = terminal.rows
     let serviceCols = terminal.cols
+    let resizeQueue: Promise<void> = Promise.resolve()
 
     const isCurrent = (): boolean =>
       !disposed && terminalRef.current === terminal && terminalIdRef.current === terminalId
@@ -333,27 +336,32 @@ export function TerminalPane({
       await window.desktopBridge.checkpointTerminal(projection.terminalId, projection.checkpoint)
     }
     const scheduler = new CheckpointScheduler(captureCheckpoint)
-    const syncTerminalSize = async (checkpointAfterResize = true): Promise<boolean> => {
+    const syncTerminalSize = (checkpointAfterResize = true): Promise<boolean> => {
       const scrollAnchor = captureScrollAnchor(terminal)
       fitAddon.fit()
       restoreScrollAnchor(terminal, scrollAnchor)
-      if (!isCurrent() || (terminal.rows === serviceRows && terminal.cols === serviceCols)) {
-        return true
-      }
-      try {
-        await window.desktopBridge.resizeTerminal(terminalId, terminal.rows, terminal.cols)
-        if (isCurrent()) {
-          serviceRows = terminal.rows
-          serviceCols = terminal.cols
-          if (checkpointAfterResize) {
-            scheduler.afterResize()
-          }
+      const resize = resizeQueue.then(async () => {
+        if (!isCurrent()) return false
+        const rows = terminal.rows
+        const cols = terminal.cols
+        if (rows === serviceRows && cols === serviceCols) return true
+        try {
+          await window.desktopBridge.resizeTerminal(terminalId, rows, cols)
+          if (!isCurrent()) return false
+          serviceRows = rows
+          serviceCols = cols
+          if (checkpointAfterResize) scheduler.afterResize()
+          return true
+        } catch (error) {
+          reportPaneError(messages.terminalPane.errors.resizeFailed, error)
+          return false
         }
-        return true
-      } catch (error) {
-        reportPaneError(messages.terminalPane.errors.resizeFailed, error)
-        return false
-      }
+      })
+      resizeQueue = resize.then(
+        () => undefined,
+        () => undefined
+      )
+      return resize
     }
     syncSizeRef.current = () => void syncTerminalSize()
 
@@ -426,6 +434,9 @@ export function TerminalPane({
       } else if (event.event === 'terminal.resized') {
         serviceRows = event.data.rows
         serviceCols = event.data.cols
+        if (terminal.rows !== serviceRows || terminal.cols !== serviceCols) {
+          void syncTerminalSize()
+        }
       } else if (event.event === 'terminal.checkpointRequested') {
         scheduler.request()
       } else if (event.event === 'terminal.exited') {

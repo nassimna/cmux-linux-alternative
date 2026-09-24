@@ -535,6 +535,7 @@ describe('TerminalPane', () => {
     expect(control).not.toBeChecked()
     expect(terminalSpies.constructorOptions).toMatchObject({ screenReaderMode: false })
     expect(terminalSpies.constructorOptions).toMatchObject({ cursorBlink: false })
+    expect(terminalSpies.constructorOptions).toMatchObject({ reflowCursorLine: true })
     expect(terminalSpies.constructorOptions).toMatchObject({ theme: terminalTheme })
     expect(terminalSpies.instance?.options.screenReaderMode).toBe(false)
 
@@ -694,6 +695,74 @@ describe('TerminalPane', () => {
     window.removeEventListener('unhandledrejection', unhandled)
   })
 
+  it('serializes resizes and sends the latest dimensions after an in-flight resize', async () => {
+    vi.stubGlobal('ResizeObserver', ResizeObserverMock)
+    let finishFirst: (() => void) | undefined
+    const resizeTerminal = vi
+      .fn<DesktopBridge['resizeTerminal']>()
+      .mockImplementationOnce(
+        () =>
+          new Promise<void>((resolve) => {
+            finishFirst = resolve
+          })
+      )
+      .mockResolvedValue(undefined)
+    window.desktopBridge = terminalBridge({
+      resizeTerminal,
+      restartTerminal: vi.fn().mockResolvedValue(mutationResult())
+    })
+
+    renderTerminalPane()
+    await screen.findByText('Connected', { selector: '.terminal-statusbar span' })
+    const terminal = terminalSpies.instance
+    if (!terminal) throw new Error('Expected the xterm instance')
+
+    terminal.cols = 121
+    terminalSpies.resizeObserver?.([], {} as ResizeObserver)
+    await waitFor(() => expect(resizeTerminal).toHaveBeenCalledWith(terminalId, 30, 121))
+
+    terminal.cols = 122
+    terminalSpies.resizeObserver?.([], {} as ResizeObserver)
+    await new Promise((resolve) => setTimeout(resolve, 75))
+    expect(resizeTerminal).toHaveBeenCalledTimes(1)
+
+    await act(async () => {
+      finishFirst?.()
+      await Promise.resolve()
+    })
+    await waitFor(() => expect(resizeTerminal).toHaveBeenCalledWith(terminalId, 30, 122))
+    expect(resizeTerminal).toHaveBeenCalledTimes(2)
+  })
+
+  it('corrects a late resize event that reports old service dimensions', async () => {
+    vi.stubGlobal('ResizeObserver', ResizeObserverMock)
+    let onTerminalEvent: Parameters<DesktopBridge['onTerminalEvent']>[0] | undefined
+    const resizeTerminal = vi.fn<DesktopBridge['resizeTerminal']>().mockResolvedValue(undefined)
+    window.desktopBridge = terminalBridge({
+      onTerminalEvent: (listener) => {
+        onTerminalEvent = listener
+        return () => undefined
+      },
+      resizeTerminal,
+      restartTerminal: vi.fn().mockResolvedValue(mutationResult())
+    })
+
+    renderTerminalPane()
+    await screen.findByText('Connected', { selector: '.terminal-statusbar span' })
+    const terminal = terminalSpies.instance
+    if (!terminal) throw new Error('Expected the xterm instance')
+    terminal.cols = 122
+    terminalSpies.resizeObserver?.([], {} as ResizeObserver)
+    await waitFor(() => expect(resizeTerminal).toHaveBeenCalledWith(terminalId, 30, 122))
+
+    onTerminalEvent?.({
+      event: 'terminal.resized',
+      data: { terminalId, rows: 30, cols: 121 }
+    })
+    await waitFor(() => expect(resizeTerminal).toHaveBeenCalledTimes(2))
+    expect(resizeTerminal).toHaveBeenLastCalledWith(terminalId, 30, 122)
+  })
+
   it('preserves the scroll distance from the bottom while fitting a resized terminal', async () => {
     vi.stubGlobal('ResizeObserver', ResizeObserverMock)
     const resizeTerminal = vi.fn<DesktopBridge['resizeTerminal']>().mockResolvedValue(undefined)
@@ -821,6 +890,7 @@ interface TerminalBridgeOptions {
   detachTerminal?: DesktopBridge['detachTerminal']
   exited?: boolean
   openExternal?: DesktopBridge['openExternal']
+  onTerminalEvent?: DesktopBridge['onTerminalEvent']
   resizeTerminal?: DesktopBridge['resizeTerminal']
   restartTerminal: DesktopBridge['restartTerminal']
   sendTerminalInput?: DesktopBridge['sendTerminalInput']
@@ -832,6 +902,7 @@ function terminalBridge({
   detachTerminal,
   exited = false,
   openExternal,
+  onTerminalEvent,
   resizeTerminal,
   restartTerminal,
   sendTerminalInput
@@ -840,7 +911,7 @@ function terminalBridge({
     attachTerminal: attachTerminal ?? vi.fn().mockResolvedValue(terminalAttachResult(exited)),
     checkpointTerminal: checkpointTerminal ?? vi.fn().mockResolvedValue(undefined),
     detachTerminal: detachTerminal ?? vi.fn().mockResolvedValue(undefined),
-    onTerminalEvent: vi.fn(() => () => undefined),
+    onTerminalEvent: onTerminalEvent ?? vi.fn(() => () => undefined),
     openExternal: openExternal ?? vi.fn().mockResolvedValue(undefined),
     resizeTerminal: resizeTerminal ?? vi.fn().mockResolvedValue(undefined),
     restartTerminal,
