@@ -19,6 +19,8 @@ const evidenceDirectory =
   process.env.AGENT_WORKSPACE_EVIDENCE_DIR ??
   join(repositoryDirectory, 'dogfood-output/ssh-workspaces')
 
+test.skip(process.platform !== 'linux', 'The isolated OpenSSH executable fixture is Linux-only.')
+
 async function auditDialog(page) {
   await page.evaluate(axe.source)
   const violations = await page.evaluate(async () => {
@@ -49,7 +51,6 @@ test.beforeAll(async () => {
 })
 
 test('keeps output responsive and manages a saved SSH workspace', async () => {
-  test.skip(process.platform !== 'linux', 'The isolated OpenSSH executable fixture is Linux-only.')
   test.setTimeout(120_000)
   const cacheDirectory = join(homedir(), '.cache')
   await mkdir(cacheDirectory, { recursive: true })
