@@ -24,14 +24,6 @@ body {
   background: var(--aw-color-surface-canvas);
 }
 
-button,
-input,
-textarea,
-select {
-  color: inherit;
-  font: inherit;
-}
-
 button {
   border: 0;
 }
@@ -1059,6 +1051,11 @@ button {
   background: color-mix(in oklch, var(--aw-color-accent) 23%, var(--aw-color-surface-raised));
 }
 
+.sidebar-open-ssh {
+  margin-top: -7px;
+  background: var(--aw-color-surface-interactive);
+}
+
 .sidebar-open-folder > span {
   min-width: 0;
   overflow: hidden;
@@ -1652,6 +1649,7 @@ button {
 .workspace-drag,
 .workspace-remove,
 .workspace-open-path,
+.workspace-pin,
 .workspace-attention-open {
   position: absolute;
   top: 5px;
@@ -1664,6 +1662,97 @@ button {
   right: 51px;
   cursor: grab;
   touch-action: none;
+}
+
+.workspace-pin {
+  right: 75px;
+  color: var(--aw-color-text-secondary);
+  border: var(--aw-border-width) solid transparent;
+  border-radius: var(--aw-radius-sm);
+  background: transparent;
+  cursor: pointer;
+}
+
+.workspace-pin[data-pinned='true'] {
+  color: var(--aw-color-accent);
+  opacity: 1;
+}
+
+.workspace-pin:hover,
+.workspace-pin:focus-visible {
+  background: var(--aw-color-surface-interactive-hover);
+  opacity: 1;
+}
+
+.workspace-ssh-target {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  justify-content: space-between;
+  color: var(--aw-color-text-secondary);
+}
+
+.workspace-ssh-target small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workspace-ssh-target button {
+  flex: 0 0 auto;
+  padding: 2px 5px;
+  color: var(--aw-color-accent);
+  border: var(--aw-border-width) solid transparent;
+  border-radius: var(--aw-radius-sm);
+  background: transparent;
+  cursor: pointer;
+}
+
+.workspace-ssh-target button:hover,
+.workspace-ssh-target button:focus-visible {
+  border-color: var(--aw-color-border-default);
+  background: var(--aw-color-surface-interactive-hover);
+}
+
+.saved-ssh-connections {
+  margin-top: 14px;
+  border-top: var(--aw-border-width) solid var(--aw-color-border-default);
+  padding-top: 12px;
+}
+
+.saved-ssh-connections h3 {
+  margin: 0 0 4px;
+  font-size: 13px;
+}
+
+.saved-ssh-connections p {
+  margin: 0 0 9px;
+  color: var(--aw-color-text-secondary);
+  font-size: 12px;
+}
+
+.saved-ssh-connections ul {
+  display: grid;
+  gap: 7px;
+  max-height: 170px;
+  margin: 0;
+  overflow: auto;
+  padding: 0;
+  list-style: none;
+}
+
+.saved-ssh-connections li {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.saved-ssh-connections li span {
+  flex: 1 1 140px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-size: 12px;
 }
 
 .workspace-remove {
@@ -1699,16 +1788,19 @@ button {
 .workspace-row-wrap:hover .workspace-drag,
 .workspace-row-wrap:hover .workspace-remove,
 .workspace-row-wrap:hover .workspace-open-path,
+.workspace-row-wrap:hover .workspace-pin,
 .workspace-drag:focus-visible,
 .workspace-remove:focus-visible,
-.workspace-open-path:focus-visible {
+.workspace-open-path:focus-visible,
+.workspace-pin:focus-visible {
   opacity: 1;
 }
 
 /* Actions overlay the card on hover; a gradient keeps text legible beneath them. */
 .workspace-drag,
 .workspace-remove,
-.workspace-open-path {
+.workspace-open-path,
+.workspace-pin {
   z-index: var(--aw-z-content);
 }
 

@@ -165,6 +165,13 @@ import { WorkspaceCardSlotsV2 } from './WorkspaceCardSlotsV2'
 import { WorkspaceActivityBadge, workspaceActivity } from './WorkspaceActivityBadge'
 import { LegacyOverLimitNotice } from './LegacyOverLimitNotice'
 import {
+  parseSshWorkspace,
+  readSshWorkspaces,
+  saveSshWorkspaces,
+  sshCommand,
+  type SavedSshWorkspace
+} from './ssh-workspaces'
+import {
   workspacePresentationSections,
   workspaceBatchCloseReplacement,
   workspaceCardSelectionState,
@@ -208,6 +215,14 @@ interface ShellProps {
 export function WorkspaceShell({ workspace }: ShellProps): React.JSX.Element {
   const projection = useProjectionStore()
   const [createOpen, setCreateOpen] = useState(false)
+  const [createMode, setCreateMode] = useState<'folder' | 'ssh'>('folder')
+  const [sshWorkspaces, setSshWorkspaces] = useState(readSshWorkspaces)
+  const [editingSshWorkspaceId, setEditingSshWorkspaceId] = useState<string | null>(null)
+  useEffect(() => {
+    const syncSshWorkspaces = (): void => setSshWorkspaces(readSshWorkspaces())
+    window.addEventListener('storage', syncSshWorkspaces)
+    return () => window.removeEventListener('storage', syncSshWorkspaces)
+  }, [])
   const [windowMove, setWindowMove] = useState<WindowMoveDialogState | null>(null)
   const [notificationsOpen, setNotificationsOpen] = useState(false)
   const [preserveNotificationTargetFocus, setPreserveNotificationTargetFocus] = useState(false)
@@ -461,6 +476,77 @@ export function WorkspaceShell({ workspace }: ShellProps): React.JSX.Element {
     [projection]
   )
 
+  const createSshWorkspace = async (
+    name: string,
+    directory: string,
+    profile: SavedSshWorkspace
+  ): Promise<boolean> => {
+    let workspaceCreated = false
+    try {
+      saveSshWorkspaces(readSshWorkspaces())
+      const before = new Set(useProjectionStore.getState().snapshot?.workspaces.map(({ id }) => id))
+      const result = await window.desktopBridge.createWorkspace({
+        name,
+        workingDirectory: directory,
+        initialTerminal: { ...terminalLaunch(directory), command: sshCommand(profile) }
+      })
+      projection.applyMutation(result)
+      const created = result.snapshot.workspaces.find(({ id }) => !before.has(id))
+      if (!created) throw new Error('The new SSH workspace could not be identified.')
+      workspaceCreated = true
+      const next = { ...readSshWorkspaces(), [created.id]: profile }
+      saveSshWorkspaces(next)
+      setSshWorkspaces(next)
+      const organization = await window.desktopBridge.getWorkspaceOrganization?.()
+      if (!organization || !window.desktopBridge.pinWorkspace) {
+        throw new Error('SSH workspace created, but pinning is unavailable.')
+      }
+      projection.applyMutation(
+        await window.desktopBridge.pinWorkspace({
+          workspaceId: created.id,
+          pinned: true,
+          expectedRevision: organization.organization.revision,
+          idempotencyKey: crypto.randomUUID()
+        })
+      )
+      await projection.refreshOrganization()
+      return true
+    } catch (error) {
+      projection.reportMutationError(error)
+      return workspaceCreated
+    }
+  }
+
+  const updateSshWorkspace = (workspaceId: string, profile: SavedSshWorkspace): boolean => {
+    try {
+      const next = { ...readSshWorkspaces(), [workspaceId]: profile }
+      saveSshWorkspaces(next)
+      setSshWorkspaces(next)
+      return true
+    } catch (error) {
+      projection.reportMutationError(error)
+      return false
+    }
+  }
+
+  const forgetSshWorkspace = (workspaceId: string): void => {
+    if (
+      !window.confirm(
+        'Forget the saved SSH connection? The workspace and its open tabs stay available.'
+      )
+    ) {
+      return
+    }
+    try {
+      const next = { ...readSshWorkspaces() }
+      delete next[workspaceId]
+      saveSshWorkspaces(next)
+      setSshWorkspaces(next)
+    } catch (error) {
+      projection.reportMutationError(error)
+    }
+  }
+
   const jumpNotification = useCallback(
     async (notification: NotificationSnapshot): Promise<void> => {
       setPreserveNotificationTargetFocus(true)
@@ -596,6 +682,7 @@ export function WorkspaceShell({ workspace }: ShellProps): React.JSX.Element {
         return
       }
       if (commandId === 'workspace.new') {
+        setCreateMode('folder')
         setCreateOpen(true)
         return
       }
@@ -1021,7 +1108,16 @@ export function WorkspaceShell({ workspace }: ShellProps): React.JSX.Element {
           cardSlots={projection.cardSlots}
           cardSlotsV2={projection.cardSlotsV2}
           metadata={workspaceRuntimeMetadata}
-          onCreate={() => setCreateOpen(true)}
+          onCreate={() => {
+            setCreateMode('folder')
+            setCreateOpen(true)
+          }}
+          onCreateSsh={() => {
+            setCreateMode('ssh')
+            setCreateOpen(true)
+          }}
+          onEditSsh={setEditingSshWorkspaceId}
+          onForgetSsh={forgetSshWorkspace}
           onMutation={runMutation}
           onLayoutMutation={(operation) => {
             void operation
@@ -1033,6 +1129,7 @@ export function WorkspaceShell({ workspace }: ShellProps): React.JSX.Element {
           processTitles={processTitles}
           organization={projection.organization}
           savedLayouts={projection.savedLayouts}
+          sshWorkspaces={sshWorkspaces}
           shortcutLabel={commandShortcutLabel('workspace.new', overrides, platform)}
           selectedWorkspaceId={projection.snapshot?.selectedWorkspaceId ?? null}
           workspaces={projection.snapshot?.workspaces ?? []}
@@ -1096,14 +1193,34 @@ export function WorkspaceShell({ workspace }: ShellProps): React.JSX.Element {
             workspace={workspace}
           />
         ) : (
-          <EmptyWorkspace onCreate={() => setCreateOpen(true)} />
+          <EmptyWorkspace
+            onCreate={() => {
+              setCreateMode('folder')
+              setCreateOpen(true)
+            }}
+          />
         )}
       </section>
       <CreateWorkspaceDialog
         fallbackDirectory={workspace?.workingDirectory ?? '/'}
+        mode={createMode}
         onCreated={runMutation}
+        onCreateSsh={createSshWorkspace}
+        onForgetSsh={forgetSshWorkspace}
         onOpenChange={setCreateOpen}
         open={createOpen}
+        savedSshWorkspaces={sshWorkspaces}
+        workspaceIds={projection.snapshot?.workspaces.map(({ id }) => id) ?? []}
+      />
+      <EditSshWorkspaceDialog
+        key={editingSshWorkspaceId ?? 'closed'}
+        onOpenChange={(open) => {
+          if (!open) setEditingSshWorkspaceId(null)
+        }}
+        onSave={updateSshWorkspace}
+        open={editingSshWorkspaceId !== null}
+        profile={editingSshWorkspaceId ? sshWorkspaces[editingSshWorkspaceId] : undefined}
+        workspaceId={editingSshWorkspaceId}
       />
       <MoveTabToWindowDialog
         getFreshTopology={refreshWindowTopology}
@@ -1318,6 +1435,9 @@ function WorkspaceSidebar({
   cardSlotsV2,
   metadata,
   onCreate,
+  onCreateSsh,
+  onEditSsh,
+  onForgetSsh,
   onMutation,
   onLayoutMutation,
   onOpenAttention,
@@ -1325,6 +1445,7 @@ function WorkspaceSidebar({
   organization,
   processTitles,
   savedLayouts,
+  sshWorkspaces,
   shortcutLabel,
   selectedWorkspaceId,
   workspaces
@@ -1334,6 +1455,9 @@ function WorkspaceSidebar({
   cardSlotsV2: WorkspaceCardSlotsV2Projection
   metadata: Readonly<Record<string, CachedWorkspaceRuntimeMetadata>>
   onCreate: () => void
+  onCreateSsh: () => void
+  onEditSsh: (workspaceId: string) => void
+  onForgetSsh: (workspaceId: string) => void
   onOpenAttention: (attention: WorkspaceAttentionSnapshot) => Promise<void>
   onLayoutMutation: (operation: Promise<unknown>) => void
   onPublicAction: (
@@ -1343,6 +1467,7 @@ function WorkspaceSidebar({
   organization: WorkspaceOrganizationSnapshot | null
   processTitles: Readonly<Record<string, string>>
   savedLayouts: LayoutListResult | null
+  sshWorkspaces: Readonly<Record<string, SavedSshWorkspace>>
   shortcutLabel: string | null
   selectedWorkspaceId: string | null
   workspaces: readonly WorkspaceSnapshot[]
@@ -1489,6 +1614,15 @@ function WorkspaceSidebar({
         <span>{messages.workspaceShell.sidebar.openFolder}</span>
         {shortcutLabel ? <kbd>{shortcutLabel}</kbd> : null}
       </Button>
+      <Button
+        aria-label="Create SSH workspace"
+        className="sidebar-open-folder sidebar-open-ssh"
+        disabled={!!organization?.legacyOverLimit}
+        onClick={onCreateSsh}
+      >
+        <TerminalSquare size={14} />
+        <span>SSH workspace</span>
+      </Button>
       {organization?.legacyOverLimit ? (
         <LegacyOverLimitNotice
           legacy={organization.legacyOverLimit}
@@ -1565,11 +1699,14 @@ function WorkspaceSidebar({
                       key={workspace.id}
                       metadata={metadata[workspace.id]}
                       onMutation={onMutation}
+                      onEditSsh={onEditSsh}
+                      onForgetSsh={onForgetSsh}
                       onOpenAttention={onOpenAttention}
                       onPublicAction={onPublicAction}
                       onSelectWorkspace={selectWorkspace}
                       organization={organizationEnabled ? organization : null}
                       processTitle={workspaceProcessTitle(workspace, processTitles)}
+                      sshProfile={sshWorkspaces[workspace.id]}
                       selected={selectionState.selected}
                       selectedWorkspaceNames={workspaces
                         .filter(({ id }) => selectedIds.has(id))
@@ -2008,11 +2145,14 @@ function SortableWorkspace({
   index,
   metadata,
   onMutation,
+  onEditSsh,
+  onForgetSsh,
   onOpenAttention,
   onPublicAction,
   onSelectWorkspace,
   organization,
   processTitle,
+  sshProfile,
   selected,
   selectedWorkspaceNames,
   tabStop,
@@ -2026,6 +2166,8 @@ function SortableWorkspace({
   focused: boolean
   index: number
   metadata: CachedWorkspaceRuntimeMetadata | undefined
+  onEditSsh: (workspaceId: string) => void
+  onForgetSsh: (workspaceId: string) => void
   onOpenAttention: (attention: WorkspaceAttentionSnapshot) => Promise<void>
   onSelectWorkspace: (workspaceId: string, modifiers: SelectionModifiers) => void
   onPublicAction: (
@@ -2034,6 +2176,7 @@ function SortableWorkspace({
   ) => Promise<boolean>
   organization: WorkspaceOrganizationSnapshot | null
   processTitle: string
+  sshProfile: SavedSshWorkspace | undefined
   selected: boolean
   selectedWorkspaceNames: readonly string[]
   tabStop: boolean
@@ -2111,6 +2254,26 @@ function SortableWorkspace({
     }
   }
   const pinned = organization?.pins.includes(workspace.id) ?? false
+  const newSshShell = (): void => {
+    if (!sshProfile) return
+    const pane = workspace.panes.find(({ id }) => id === workspace.selectedPaneId)
+    if (!pane) return
+    void (async () => {
+      if (useProjectionStore.getState().snapshot?.selectedWorkspaceId !== workspace.id) {
+        const selected = await onMutation(
+          window.desktopBridge.selectWorkspace({ workspaceId: workspace.id })
+        )
+        if (!selected) return
+      }
+      await onMutation(
+        window.desktopBridge.openTerminalTab({
+          workspaceId: workspace.id,
+          paneId: pane.id,
+          launch: { ...terminalLaunch(workspace.workingDirectory), command: sshCommand(sshProfile) }
+        })
+      )
+    })()
+  }
   const togglePin = (): void => {
     if (!organization) return
     void onPublicAction('workspace.card.pin', {
@@ -2383,6 +2546,23 @@ function SortableWorkspace({
                 </span>
               </small>
               <WorkspaceCardSlots slots={cardSlots} />
+              {sshProfile ? (
+                <div className="workspace-ssh-target">
+                  <small title={sshProfile.host}>
+                    SSH · {sshProfile.user ? `${sshProfile.user}@` : ''}
+                    {sshProfile.host}
+                    {sshProfile.port === 22 ? '' : `:${sshProfile.port}`}
+                  </small>
+                  <button
+                    aria-label={`New SSH shell in ${workspace.name}`}
+                    onClick={newSshShell}
+                    title="Open a fresh SSH shell; existing remote processes are not resumed"
+                    type="button"
+                  >
+                    New shell
+                  </button>
+                </div>
+              ) : null}
               <WorkspaceCardSlotsV2 slots={cardSlotsV2} />
               {workspace.attention.latestUnread ? (
                 <span className="workspace-attention-excerpt">
@@ -2433,6 +2613,19 @@ function SortableWorkspace({
               ) : null}
             </DropdownMenuContent>
           </DropdownMenu>
+          {organization ? (
+            <button
+              aria-label={`${pinned ? 'Unpin' : 'Pin'} ${workspace.name}`}
+              aria-pressed={pinned}
+              className="workspace-pin"
+              data-pinned={pinned}
+              onClick={togglePin}
+              title={pinned ? 'Unpin workspace' : 'Pin workspace'}
+              type="button"
+            >
+              <Pin aria-hidden="true" size={13} />
+            </button>
+          ) : null}
           <button
             className="workspace-drag"
             aria-label={messages.workspaceShell.sidebar.reorder(workspace.name)}
@@ -2480,6 +2673,17 @@ function SortableWorkspace({
         </div>
       </ContextMenuTrigger>
       <ContextMenuContent aria-label={messages.workspaceShell.sidebar.actions(workspace.name)}>
+        {sshProfile ? (
+          <>
+            <ContextMenuItem onSelect={newSshShell}>New SSH shell</ContextMenuItem>
+            <ContextMenuItem onSelect={() => onEditSsh(workspace.id)}>
+              Edit SSH connection
+            </ContextMenuItem>
+            <ContextMenuItem onSelect={() => onForgetSsh(workspace.id)}>
+              Forget SSH connection
+            </ContextMenuItem>
+          </>
+        ) : null}
         {organization ? (
           <>
             <ContextMenuItem
@@ -3697,17 +3901,35 @@ function MoveTabToWindowDialog({
 
 function CreateWorkspaceDialog({
   fallbackDirectory,
+  mode,
   onCreated,
+  onCreateSsh,
+  onForgetSsh,
   onOpenChange,
-  open
+  open,
+  savedSshWorkspaces,
+  workspaceIds
 }: {
   fallbackDirectory: string
+  mode: 'folder' | 'ssh'
   onCreated: MutationOwner['onMutation']
+  onCreateSsh: (name: string, directory: string, profile: SavedSshWorkspace) => Promise<boolean>
+  onForgetSsh: (workspaceId: string) => void
   onOpenChange: (open: boolean) => void
   open: boolean
+  savedSshWorkspaces: Readonly<Record<string, SavedSshWorkspace>>
+  workspaceIds: readonly string[]
 }): React.JSX.Element {
   const [directory, setDirectory] = useState('')
+  const [sshName, setSshName] = useState('')
+  const [sshHost, setSshHost] = useState('')
+  const [sshUser, setSshUser] = useState('')
+  const [sshPort, setSshPort] = useState('22')
+  const [sshError, setSshError] = useState<string | null>(null)
   const [choosingDirectory, setChoosingDirectory] = useState(false)
+  const closedSshWorkspaces = Object.entries(savedSshWorkspaces).filter(
+    ([workspaceId]) => !workspaceIds.includes(workspaceId)
+  )
   const openDirectory = async (selectedDirectory: string): Promise<void> => {
     const normalizedDirectory = selectedDirectory.trim()
     if (!normalizedDirectory) return
@@ -3736,52 +3958,259 @@ function CreateWorkspaceDialog({
   }
   const submit = async (event: React.FormEvent): Promise<void> => {
     event.preventDefault()
+    if (mode === 'ssh') {
+      try {
+        const profile = parseSshWorkspace(sshHost, sshUser, Number(sshPort))
+        const name = sshName.trim() || profile.host
+        if (name.length > MAX_WORKSPACE_NAME_CHARS) {
+          throw new Error('Workspace name is too long.')
+        }
+        setSshError(null)
+        if (await onCreateSsh(name, fallbackDirectory, profile)) {
+          setSshName('')
+          setSshHost('')
+          setSshUser('')
+          setSshPort('22')
+          onOpenChange(false)
+        }
+      } catch (error) {
+        setSshError(error instanceof Error ? error.message : 'Invalid SSH workspace')
+      }
+      return
+    }
     await openDirectory(directory)
   }
   return (
     <Dialog onOpenChange={onOpenChange} open={open}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>{messages.workspaceShell.createWorkspace.title}</DialogTitle>
+          <DialogTitle>
+            {mode === 'ssh'
+              ? 'Create SSH workspace'
+              : messages.workspaceShell.createWorkspace.title}
+          </DialogTitle>
           <DialogDescription>
-            {messages.workspaceShell.createWorkspace.description}
+            {mode === 'ssh'
+              ? 'Create a pinned workspace with a fresh OpenSSH shell. Existing keys and host verification stay with OpenSSH. For managed tmux resume, use Settings > Remote sessions.'
+              : messages.workspaceShell.createWorkspace.description}
           </DialogDescription>
         </DialogHeader>
         <form className="dialog-form" onSubmit={(event) => void submit(event)}>
-          <Button
-            className="workspace-folder-picker"
-            disabled={choosingDirectory || !window.desktopBridge.pickWorkspaceDirectory}
-            onClick={() => void chooseDirectory()}
-            variant="primary"
-          >
-            <FolderOpen size={16} />
-            {choosingDirectory
-              ? messages.workspaceShell.createWorkspace.choosingFolder
-              : messages.workspaceShell.createWorkspace.chooseFolder}
-          </Button>
-          <div className="workspace-path-divider">
-            {messages.workspaceShell.createWorkspace.manualDivider}
-          </div>
-          <label>
-            <span>{messages.workspaceShell.createWorkspace.workingDirectory}</span>
-            <input
-              autoFocus={!window.desktopBridge.pickWorkspaceDirectory}
-              onChange={(event) => setDirectory(event.target.value)}
-              placeholder={
-                fallbackDirectory === '/'
-                  ? messages.workspaceShell.createWorkspace.workingDirectoryPlaceholder
-                  : fallbackDirectory
-              }
-              spellCheck={false}
-              value={directory}
-            />
-          </label>
+          {mode === 'ssh' ? (
+            <>
+              <label>
+                <span>Workspace name</span>
+                <input
+                  autoFocus
+                  maxLength={MAX_WORKSPACE_NAME_CHARS}
+                  onChange={(event) => setSshName(event.target.value)}
+                  placeholder="Production server"
+                  value={sshName}
+                />
+              </label>
+              <label>
+                <span>SSH host or alias</span>
+                <input
+                  autoComplete="off"
+                  maxLength={253}
+                  onChange={(event) => setSshHost(event.target.value)}
+                  placeholder="my-server"
+                  required
+                  spellCheck={false}
+                  value={sshHost}
+                />
+              </label>
+              <label>
+                <span>Username (optional)</span>
+                <input
+                  autoComplete="username"
+                  maxLength={64}
+                  onChange={(event) => setSshUser(event.target.value)}
+                  placeholder="Use SSH config or local username"
+                  spellCheck={false}
+                  value={sshUser}
+                />
+              </label>
+              <label>
+                <span>Port</span>
+                <input
+                  max={65535}
+                  min={1}
+                  onChange={(event) => setSshPort(event.target.value)}
+                  required
+                  type="number"
+                  value={sshPort}
+                />
+              </label>
+              {sshError ? <p role="alert">{sshError}</p> : null}
+            </>
+          ) : (
+            <>
+              <Button
+                className="workspace-folder-picker"
+                disabled={choosingDirectory || !window.desktopBridge.pickWorkspaceDirectory}
+                onClick={() => void chooseDirectory()}
+                variant="primary"
+              >
+                <FolderOpen size={16} />
+                {choosingDirectory
+                  ? messages.workspaceShell.createWorkspace.choosingFolder
+                  : messages.workspaceShell.createWorkspace.chooseFolder}
+              </Button>
+              <div className="workspace-path-divider">
+                {messages.workspaceShell.createWorkspace.manualDivider}
+              </div>
+              <label>
+                <span>{messages.workspaceShell.createWorkspace.workingDirectory}</span>
+                <input
+                  autoFocus={!window.desktopBridge.pickWorkspaceDirectory}
+                  onChange={(event) => setDirectory(event.target.value)}
+                  placeholder={
+                    fallbackDirectory === '/'
+                      ? messages.workspaceShell.createWorkspace.workingDirectoryPlaceholder
+                      : fallbackDirectory
+                  }
+                  spellCheck={false}
+                  value={directory}
+                />
+              </label>
+            </>
+          )}
           <DialogFooter>
             <Button onClick={() => onOpenChange(false)} type="button">
               {messages.workspaceShell.createWorkspace.cancel}
             </Button>
-            <Button disabled={!directory.trim()} type="submit" variant="primary">
-              {messages.workspaceShell.createWorkspace.create}
+            <Button
+              disabled={mode === 'ssh' ? !sshHost.trim() : !directory.trim()}
+              type="submit"
+              variant="primary"
+            >
+              {mode === 'ssh' ? 'Create and pin' : messages.workspaceShell.createWorkspace.create}
+            </Button>
+          </DialogFooter>
+        </form>
+        {mode === 'ssh' && closedSshWorkspaces.length > 0 ? (
+          <section aria-label="Previously saved SSH connections" className="saved-ssh-connections">
+            <h3>Previously saved connections</h3>
+            <p>
+              Closing a workspace keeps its connection details so you can reuse or remove them here.
+            </p>
+            <ul>
+              {closedSshWorkspaces.map(([workspaceId, profile]) => (
+                <li key={workspaceId}>
+                  <span>
+                    {profile.user ? `${profile.user}@` : ''}
+                    {profile.host}:{profile.port}
+                  </span>
+                  <Button
+                    onClick={() => {
+                      setSshName(profile.host)
+                      setSshHost(profile.host)
+                      setSshUser(profile.user)
+                      setSshPort(String(profile.port))
+                    }}
+                    size="small"
+                    type="button"
+                  >
+                    Use details
+                  </Button>
+                  <Button
+                    aria-label={`Remove saved SSH details for ${profile.host}`}
+                    onClick={() => onForgetSsh(workspaceId)}
+                    size="small"
+                    type="button"
+                    variant="destructive"
+                  >
+                    Remove
+                  </Button>
+                </li>
+              ))}
+            </ul>
+          </section>
+        ) : null}
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+function EditSshWorkspaceDialog({
+  onOpenChange,
+  onSave,
+  open,
+  profile,
+  workspaceId
+}: {
+  onOpenChange: (open: boolean) => void
+  onSave: (workspaceId: string, profile: SavedSshWorkspace) => boolean
+  open: boolean
+  profile: SavedSshWorkspace | undefined
+  workspaceId: string | null
+}): React.JSX.Element {
+  const [host, setHost] = useState(profile?.host ?? '')
+  const [user, setUser] = useState(profile?.user ?? '')
+  const [port, setPort] = useState(String(profile?.port ?? 22))
+  const [error, setError] = useState<string | null>(null)
+  const submit = (event: React.FormEvent): void => {
+    event.preventDefault()
+    if (!workspaceId) return
+    try {
+      const next = parseSshWorkspace(host, user, Number(port))
+      setError(null)
+      if (onSave(workspaceId, next)) onOpenChange(false)
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Invalid SSH connection')
+    }
+  }
+  return (
+    <Dialog onOpenChange={onOpenChange} open={open}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Edit SSH connection</DialogTitle>
+          <DialogDescription>
+            New shells use these details. Existing SSH tabs keep running with their original
+            command.
+          </DialogDescription>
+        </DialogHeader>
+        <form className="dialog-form" onSubmit={submit}>
+          <label>
+            <span>SSH host or alias</span>
+            <input
+              autoFocus
+              maxLength={253}
+              onChange={(event) => setHost(event.target.value)}
+              required
+              spellCheck={false}
+              value={host}
+            />
+          </label>
+          <label>
+            <span>Username (optional)</span>
+            <input
+              autoComplete="username"
+              maxLength={64}
+              onChange={(event) => setUser(event.target.value)}
+              spellCheck={false}
+              value={user}
+            />
+          </label>
+          <label>
+            <span>Port</span>
+            <input
+              max={65535}
+              min={1}
+              onChange={(event) => setPort(event.target.value)}
+              required
+              type="number"
+              value={port}
+            />
+          </label>
+          {error ? <p role="alert">{error}</p> : null}
+          <DialogFooter>
+            <Button onClick={() => onOpenChange(false)} type="button">
+              Cancel
+            </Button>
+            <Button type="submit" variant="primary">
+              Save connection
             </Button>
           </DialogFooter>
         </form>
