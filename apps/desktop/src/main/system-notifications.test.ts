@@ -7,7 +7,7 @@ import type {
 } from '@agent-workspace/protocol-client'
 
 import type { ControlClient } from './control-client'
-import settings from '../../../../crates/protocol/fixtures/milestone2-settings.json'
+import settings from '../../../../packages/protocol-client/fixtures/milestone2-settings.json'
 import {
   forwardSystemNotifications,
   shouldShowSystemNotification,

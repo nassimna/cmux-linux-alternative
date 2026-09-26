@@ -1,0 +1,47 @@
+name: Linux Node preview packages
+
+# Manual Linux Node package inspection. The standard release uses the same runtime.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: pnpm/action-setup@008330803749db0355799c700092d9a85fd074e9 # v6.0.9
+        with:
+          version: 10.34.5
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22.22.3
+          cache: pnpm
+      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends rpm cpio
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm stage:node:linux
+      - run: pnpm --filter @agent-workspace/desktop build
+      - name: Package Node preview artifacts
+        run: >-
+          pnpm --filter @agent-workspace/desktop exec electron-builder
+          --linux AppImage deb rpm --x64 --publish never
+          -c.directories.output=../../target/node-preview-release
+          '-c.linux.artifactName=agent-workspace-node-preview-${version}-x86_64.${ext}'
+      - name: Inspect packaged Node runtime
+        run: |
+          version=$(node -p "require('./package.json').version")
+          for type in AppImage deb rpm; do
+            scripts/release/inspect-node-preview.sh "target/node-preview-release/agent-workspace-node-preview-${version}-x86_64.${type}" "$type"
+          done
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: linux-node-isolated-preview
+          path: |
+            target/node-preview-release/agent-workspace-node-preview-*-x86_64.AppImage
+            target/node-preview-release/agent-workspace-node-preview-*-x86_64.deb
+            target/node-preview-release/agent-workspace-node-preview-*-x86_64.rpm
+          if-no-files-found: error
+          retention-days: 7

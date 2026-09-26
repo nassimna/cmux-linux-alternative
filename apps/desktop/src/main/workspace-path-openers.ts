@@ -6,7 +6,7 @@ import { delimiter, join } from 'node:path'
 import type {
   DesktopWorkspacePathOpener,
   DesktopWorkspacePathOpenerId
-} from '../shared/desktop-bridge'
+} from '@agent-workspace/contracts/desktop/desktop-bridge'
 
 interface IdeDefinition {
   readonly id: Exclude<DesktopWorkspacePathOpenerId, 'fileManager'>

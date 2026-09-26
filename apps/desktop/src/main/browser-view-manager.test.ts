@@ -31,6 +31,7 @@ import type {
 
 import {
   BrowserViewManager,
+  createNodeBrowserControl,
   createSecureBrowserWebPreferences,
   isAppOwnedBrowserPartition,
   transferBrowserView,
@@ -38,7 +39,7 @@ import {
   type BrowserViewManagerDependencies,
   type PermissionPromptRequest
 } from './browser-view-manager'
-import { browserMessages } from '../shared/browser-messages'
+import { browserMessages } from '@agent-workspace/contracts/desktop/browser-messages'
 
 const WORKSPACE_A = '10000000-0000-4000-8000-000000000001'
 const WORKSPACE_B = '10000000-0000-4000-8000-000000000002'
@@ -91,6 +92,8 @@ class FakeWebContents extends EventEmitter {
   })
   public readonly reload = vi.fn()
   public readonly stop = vi.fn()
+  public readonly startPainting = vi.fn()
+  public readonly invalidate = vi.fn()
   public readonly loadURL = vi.fn((url: string) => {
     this.url = url
     return Promise.resolve()
@@ -108,9 +111,15 @@ class FakeWebContents extends EventEmitter {
     goForward: vi.fn(),
     goToIndex: vi.fn(),
     getActiveIndex: vi.fn(() => (this.canBack ? 1 : 0)),
-    getAllEntries: vi.fn(() =>
-      Array.from({ length: this.canForward ? (this.canBack ? 3 : 2) : this.canBack ? 2 : 1 })
-    )
+    getAllEntries: vi.fn((): Electron.NavigationEntry[] =>
+      Array.from(
+        { length: this.canForward ? (this.canBack ? 3 : 2) : this.canBack ? 2 : 1 },
+        (_, index) => ({ url: this.url || 'https://example.test/', title: `Page ${index}` })
+      )
+    ),
+    restore: vi.fn(async ({ entries, index }: Electron.RestoreOptions) => {
+      this.url = entries[index ?? entries.length - 1]?.url ?? ''
+    })
   }
   public popupHandler: ((details: { url: string }) => { action: string }) | undefined
   public url = ''
@@ -448,6 +457,27 @@ function structuralEvent(
 }
 
 describe('BrowserViewManager', () => {
+  it('derives native browser mount state from the Node workspace projection', async () => {
+    const nodeSnapshot = workspaceListResult([workspaceResult(WORKSPACE_A).workspace], 11)
+    const listWorkspaces = vi.fn().mockResolvedValue(nodeSnapshot)
+    const focusPane = vi.fn().mockResolvedValue(mutationResult(WORKSPACE_A, browserState()))
+    const observeBrowser = vi.fn().mockResolvedValue(mutationResult(WORKSPACE_A, browserState()))
+    const control = createNodeBrowserControl({ listWorkspaces, focusPane, observeBrowser })
+
+    await expect(control.snapshotWorkspace({ workspaceId: WORKSPACE_B })).rejects.toThrow(
+      /does not contain this workspace/u
+    )
+    await expect(control.snapshotWorkspace({ workspaceId: WORKSPACE_A })).resolves.toEqual({
+      revision: 11,
+      workspace: nodeSnapshot.snapshot.workspaces[0]
+    })
+    expect(listWorkspaces).toHaveBeenCalledTimes(2)
+    await expect(control.observeBrowser({} as BrowserObserveParams)).resolves.toMatchObject({
+      revision: 5
+    })
+    expect(observeBrowser).toHaveBeenCalledOnce()
+  })
+
   it('creates hostile-page automation views without Node, preload, devtools, permissions, or persistence', async () => {
     const partitions: string[] = []
     const preferences: Electron.WebPreferences[] = []
@@ -461,10 +491,26 @@ describe('BrowserViewManager', () => {
       createAutomationWindow: ({ webPreferences }) => {
         preferences.push(webPreferences)
         automationWindow = new FakeAutomationWindow(remoteSession)
+        let dimensions = { width: 1, height: 1 }
+        automationWindow.setContentSize.mockImplementation((width: number, height: number) => {
+          dimensions = { width, height }
+        })
+        automationWindow.webContents.invalidate.mockImplementation(() => {
+          if (automationWindow?.webContents.getURL() !== 'about:blank') return
+          automationWindow.webContents.emit(
+            'paint',
+            {},
+            { x: 0, y: 0, ...dimensions },
+            {
+              getSize: () => dimensions,
+              toPNG: () => Buffer.from('png')
+            }
+          )
+        })
         return automationWindow as unknown as Electron.BrowserWindow
       }
     })
-    const page = harness.manager.createEphemeralAutomationPage({
+    const page = await harness.manager.createEphemeralAutomationPage({
       automationSessionId: '10000000-0000-4000-8000-000000000099',
       generation: 1,
       navigationEpoch: 0,
@@ -496,8 +542,11 @@ describe('BrowserViewManager', () => {
     expect('preload' in preferences[0]!).toBe(false)
     expect(preferences[0]).toMatchObject({ backgroundThrottling: false, offscreen: true })
     expect(remoteSession.permissionCheck?.(null, 'media', '', {} as never)).toBe(false)
+    expect(automationWindow?.webContents.loadURL).toHaveBeenCalledWith('about:blank')
     await expect(page.capture(320, 240)).resolves.toEqual(Buffer.from('png'))
     expect(automationWindow?.setContentSize).toHaveBeenCalledWith(320, 240, false)
+    expect(automationWindow?.webContents.capturePage).not.toHaveBeenCalled()
+    expect(automationWindow?.webContents.invalidate).toHaveBeenCalledOnce()
     await page.destroy()
     expect(automationWindow?.destroy).toHaveBeenCalledOnce()
     expect(remoteSession.clearStorageData).toHaveBeenCalledOnce()
@@ -648,6 +697,126 @@ describe('BrowserViewManager', () => {
     expect(target.views[0]?.getVisible()).toBe(false)
     expect(source.manager.size).toBe(0)
     expect(target.manager.size).toBe(1)
+  })
+
+  it('stages a trusted transfer from a verified global snapshot while target reads remain scoped', async () => {
+    const source = createHarness()
+    const target = createHarness()
+    await mount(source)
+    target.control.snapshotWorkspace.mockRejectedValue(new Error('workspace not yet bound'))
+
+    const [descriptor] = source.manager.ownedTransferDescriptors()
+    expect(descriptor).toBeDefined()
+    await target.manager.mountTransferred(descriptor!, workspaceResult(WORKSPACE_A))
+
+    expect(target.control.snapshotWorkspace).not.toHaveBeenCalled()
+    expect(target.manager.ownsSession(SESSION_ID)).toBe(true)
+    expect(target.views[0]?.getVisible()).toBe(false)
+    await vi.runAllTimersAsync()
+    expect(target.control.observeBrowser).not.toHaveBeenCalled()
+    target.manager.activateTransferredSession(SESSION_ID)
+    await vi.runAllTimersAsync()
+    expect(target.control.observeBrowser).toHaveBeenCalledOnce()
+  })
+
+  it('restores bounded native back/forward history and Chromium page state before activation', async () => {
+    const source = createHarness()
+    const target = createHarness()
+    const sourceView = await mount(source)
+    const history = [
+      { url: 'https://example.test/first', title: 'First', pageState: 'c3RhdGU=' },
+      { url: 'https://example.test/second', title: 'Second', pageState: 'c2Nyb2xs' },
+      { url: 'https://example.test/third', title: 'Third' }
+    ]
+    sourceView.webContents.navigationHistory.getAllEntries.mockReturnValue(history)
+    sourceView.webContents.navigationHistory.getActiveIndex.mockReturnValue(1)
+    const [descriptor] = source.manager.ownedTransferDescriptors()
+    expect(descriptor?.history).toEqual({ entries: history, index: 1 })
+
+    await target.manager.mountTransferred(descriptor!, workspaceResult(WORKSPACE_A))
+
+    expect(target.views[0]?.webContents.navigationHistory.restore).toHaveBeenCalledWith({
+      entries: history,
+      index: 1
+    })
+    expect(target.views[0]?.webContents.loadURL).not.toHaveBeenCalled()
+    expect(target.control.observeBrowser).not.toHaveBeenCalled()
+    target.manager.activateTransferredSession(SESSION_ID)
+    await vi.runAllTimersAsync()
+    expect(target.control.observeBrowser).toHaveBeenCalledOnce()
+  })
+
+  it('rejects unsafe source history and destroys a target whose history restore fails', async () => {
+    const source = createHarness()
+    let targetView: FakeView | undefined
+    const target = createHarness(browserState(), {
+      createView: ({ webPreferences }) => {
+        targetView = new FakeView(webPreferences.session as unknown as FakeSession)
+        targetView.webContents.navigationHistory.restore.mockRejectedValueOnce(
+          new Error('load failed')
+        )
+        return targetView as unknown as Electron.WebContentsView
+      }
+    })
+    const sourceView = await mount(source)
+    sourceView.webContents.navigationHistory.getAllEntries.mockReturnValue([
+      { url: 'file:///secret', title: 'Private' }
+    ])
+    expect(() => source.manager.ownedTransferDescriptors()).toThrow('cannot be transferred')
+
+    sourceView.webContents.navigationHistory.getAllEntries.mockReturnValue([
+      { url: 'https://example.test/', title: 'Page', pageState: 'c3RhdGU=' }
+    ])
+    const [descriptor] = source.manager.ownedTransferDescriptors()
+    await expect(
+      target.manager.mountTransferred(descriptor!, workspaceResult(WORKSPACE_A))
+    ).rejects.toThrow('could not be restored')
+    expect(target.manager.ownsSession(SESSION_ID)).toBe(false)
+    expect(targetView?.webContents.close).toHaveBeenCalledOnce()
+    expect(sourceView.webContents.close).not.toHaveBeenCalled()
+  })
+
+  it('keeps a suspended source detached when its renderer sends late bounds', async () => {
+    const source = createHarness()
+    const view = await mount(source)
+    source.manager.setBounds({
+      browserSessionId: SESSION_ID,
+      lifecycleId: LIFECYCLE_ID,
+      revision: 3,
+      x: 0,
+      y: 0,
+      width: 300,
+      height: 200,
+      visible: true
+    })
+    await vi.runAllTimersAsync()
+    const attachments = source.window.contentView.addChildView.mock.calls.length
+    const resume = source.manager.suspendOwnedSession(SESSION_ID)
+    source.manager.setBounds({
+      browserSessionId: SESSION_ID,
+      lifecycleId: LIFECYCLE_ID,
+      revision: 4,
+      x: 0,
+      y: 0,
+      width: 300,
+      height: 200,
+      visible: true
+    })
+    await vi.runAllTimersAsync()
+    expect(source.window.contentView.addChildView).toHaveBeenCalledTimes(attachments)
+    resume()
+    expect(source.window.contentView.addChildView).toHaveBeenLastCalledWith(view)
+    expect(source.manager.ownsSession(SESSION_ID)).toBe(true)
+  })
+
+  it('provides a transfer lifecycle for a browser whose renderer has unmounted', async () => {
+    const source = createHarness()
+    await mount(source)
+    source.manager.unmount({ browserSessionId: SESSION_ID, lifecycleId: LIFECYCLE_ID })
+    const [descriptor] = source.manager.ownedTransferDescriptors()
+    expect(descriptor?.browserSessionId).toBe(SESSION_ID)
+    expect(descriptor?.lifecycleId).toMatch(/^[0-9a-f-]{36}$/u)
+    expect(descriptor?.lifecycleId).not.toBe(LIFECYCLE_ID)
   })
 
   it('restores source browser ownership when target recreation fails', async () => {

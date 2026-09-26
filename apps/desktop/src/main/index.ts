@@ -1,6 +1,10 @@
 import { dirname, join } from 'node:path'
 import { pathToFileURL } from 'node:url'
+import { execFile } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
+import { constants } from 'node:fs'
+import { lstat, mkdir, open } from 'node:fs/promises'
+import { promisify } from 'node:util'
 
 import {
   app,
@@ -14,15 +18,25 @@ import {
   shell
 } from 'electron'
 import {
+  advancedTabMutationResultSchema,
   configurationGetResultSchema,
+  diagnosticBundlePreviewSchema,
+  focusHistoryNavigateResultSchema,
+  recoveryExportResultSchema,
   isSafeExternalUrl,
+  taskListParamsSchema,
+  tabMoveExactParamsSchema,
+  tabDetachParamsSchema,
+  windowMutationResultSchema,
   windowStateGetResultSchema,
   type WindowStateSnapshot,
   type DesktopProviderAcknowledgeParams,
   type DesktopProviderIdentityParams,
   type DesktopProviderRequest,
-  type WindowCloseParams
+  type WindowCloseParams,
+  type WorkspaceSnapshotResult
 } from '@agent-workspace/protocol-client'
+import type { DesktopLifecycleState } from '@agent-workspace/contracts/desktop/desktop-bridge'
 import electronUpdater from 'electron-updater'
 
 import { BrowserViewManager } from './browser-view-manager'
@@ -79,18 +93,23 @@ import { registerSenderBoundDesktopUpdateHandlers } from './update-ipc'
 import { WindowCreationEntrypoints } from './window-creation-entrypoints'
 import { connectWindowScopedClient, rebindRegisteredWindows } from './window-client-rebinding'
 import { WindowCreationCoordinator } from './window-lifecycle-coordinator'
-import { WindowRegistry } from './window-registry'
+import { WindowRegistry, type WindowRegistryEntry } from './window-registry'
 import { SenderBoundIpcRouter } from './sender-bound-ipc-router'
 import { invalidateProviderWindowBindings } from './provider-loss-cleanup'
 import { closeTransferredProviderWindow, focusProviderWindow } from './provider-window-operations'
 import { ProviderRecoveryCoordinator } from './provider-recovery-coordinator'
 import { ProviderPollingGate } from './provider-polling-gate'
 import { recoverProviderOwnership } from './provider-ownership-recovery'
-import { DESKTOP_IPC } from '../shared/desktop-bridge'
+import { DESKTOP_IPC } from '@agent-workspace/contracts/desktop/desktop-bridge'
 import { reloadRendererAfterCrash } from './renderer-crash-reloader'
 import { runtimeResourceIds } from './renderer-ownership-reconciliation'
 import { shouldRequestServiceWindowClose } from './window-close-policy'
 import { DesktopProviderClaims } from './desktop-provider-claims'
+import { NodeSidecar } from './node-sidecar'
+import { NodeCopyDiagnostics } from './node-copy-diagnostics'
+import { matchesNodeCopyBase } from './node-copy-topology'
+import { rehomeNodeBrowsers } from './node-window-browser-rehome'
+import { moveNodeBrowserTab } from './node-tab-browser-move'
 
 type ActiveDesktopProvider = DesktopProviderController<
   DesktopProviderRequest,
@@ -104,7 +123,17 @@ interface DesktopProviderRecoveryContext {
 
 let supervisor: ServiceSupervisor | undefined
 let lifecycle: LifecycleController | undefined
+let nodeSidecar: NodeSidecar | undefined
+let nodeCoreDemoReady = false
+let nativeNodeDesktop = false
+let nativeLifecycleState: DesktopLifecycleState = { status: 'starting' }
+let nativeRestartOperation: Promise<void> | undefined
+const execFileAsync = promisify(execFile)
+/** Native placements created only in the isolated copy must never enter Rust provider claims. */
+const nodeOnlyWindowIds = new Set<string>()
+const nativeRecoveryWindowIds = new Set<string>()
 let readyBindingOperation: Promise<void> = Promise.resolve()
+let terminalCleanupDuringQuit = false
 const providerPollingGate = new ProviderPollingGate()
 const providerClaims = new DesktopProviderClaims()
 let stopUpdateForwarding: (() => void) | undefined
@@ -132,7 +161,131 @@ const desktopProviderRecovery = new ProviderRecoveryCoordinator<DesktopProviderR
   logError: (error) => console.error('[desktop-provider] recovery attempt failed', error)
 })
 const applicationMenu = new NativeApplicationMenu(process.platform, PRODUCT_NAME)
-const windowRegistry = new WindowRegistry()
+const windowRegistry = new WindowRegistry((windowId) => {
+  stopNodeHostingForWindow(windowId)
+  const sidecar = nodeSidecar
+  if (sidecar) void sidecar.revokeWindowCapabilities(windowId).catch(() => undefined)
+})
+const nodeAutomationProviders = new Map<
+  string,
+  {
+    generation: number
+    sidecar: NodeSidecar
+    profileKey: string
+    browserViews: BrowserViewManager
+    provider: BrowserAutomationProvider
+    manager: BrowserAutomationManager
+    identity: DesktopProviderIdentityParams
+  }
+>()
+const nodeHostingClaims = new Map<
+  string,
+  {
+    entry: WindowRegistryEntry
+    sidecar: NodeSidecar
+    timer?: NodeJS.Timeout
+    pending: boolean
+    registration: Promise<void>
+  }
+>()
+
+function stopNodeHostingForWindow(windowId: string): void {
+  const claim = nodeHostingClaims.get(windowId)
+  if (claim) {
+    nodeHostingClaims.delete(windowId)
+    if (claim.timer) clearInterval(claim.timer)
+    void claim.sidecar
+      .reconcileHostingForTrustedOwner('revokeHosting', windowId, claim.entry.generation)
+      .catch(() => undefined)
+  }
+  stopNodeAutomationForWindow(windowId, 'Node hosting stopped')
+}
+
+function stopNodeAutomationForWindow(windowId: string, reason: string): void {
+  cancelNodeAutomationRecovery(windowId)
+  const active = nodeAutomationProviders.get(windowId)
+  if (!active) return
+  nodeAutomationProviders.delete(windowId)
+  void Promise.allSettled([
+    active.provider.stop(reason),
+    active.sidecar.revokeAutomationProviderForTrustedOwner(
+      windowId,
+      active.generation,
+      active.identity
+    )
+  ])
+}
+
+function startNodeHostingForWindow(
+  entry: WindowRegistryEntry,
+  sidecar: NodeSidecar
+): Promise<void> {
+  const previous = nodeHostingClaims.get(entry.windowId)
+  if (previous?.entry === entry && previous.sidecar === sidecar) return previous.registration
+  if (previous) stopNodeHostingForWindow(entry.windowId)
+  const claim = { entry, sidecar, pending: false } as {
+    entry: WindowRegistryEntry
+    sidecar: NodeSidecar
+    timer?: NodeJS.Timeout
+    pending: boolean
+    registration: Promise<void>
+  }
+  const current = () =>
+    nodeSidecar === sidecar &&
+    windowRegistry.get(entry.windowId) === entry &&
+    !entry.window.isDestroyed()
+  if (!current()) return Promise.reject(new Error('The Node hosting window changed'))
+  nodeHostingClaims.set(entry.windowId, claim)
+  claim.registration = sidecar
+    .reconcileHostingForTrustedOwner('registerHosting', entry.windowId, entry.generation)
+    .then(() => {
+      if (!current()) {
+        if (nodeHostingClaims.get(entry.windowId) === claim)
+          stopNodeHostingForWindow(entry.windowId)
+        return
+      }
+      claim.timer = setInterval(() => {
+        if (!current()) {
+          if (nodeHostingClaims.get(entry.windowId) === claim)
+            stopNodeHostingForWindow(entry.windowId)
+          return
+        }
+        if (claim.pending) return
+        claim.pending = true
+        void sidecar
+          .reconcileHostingForTrustedOwner('heartbeatHosting', entry.windowId, entry.generation)
+          .then(() => {
+            if (!current() && nodeHostingClaims.get(entry.windowId) === claim)
+              stopNodeHostingForWindow(entry.windowId)
+          })
+          .catch(() => {
+            if (nodeHostingClaims.get(entry.windowId) === claim)
+              stopNodeHostingForWindow(entry.windowId)
+          })
+          .finally(() => {
+            claim.pending = false
+          })
+      }, 5_000)
+      claim.timer.unref()
+    })
+    .catch((error) => {
+      if (nodeHostingClaims.get(entry.windowId) === claim) stopNodeHostingForWindow(entry.windowId)
+      throw error
+    })
+  return claim.registration
+}
+const nodeAutomationStarts = new Map<string, Promise<void>>()
+interface NodeAutomationRecoveryContext {
+  readonly entry: WindowRegistryEntry
+  readonly sidecar: NodeSidecar
+  readonly profileKey: string
+  readonly browserViews: BrowserViewManager
+}
+const nodeAutomationRecovery = new Map<
+  string,
+  ProviderRecoveryCoordinator<NodeAutomationRecoveryContext>
+>()
+const nodeBrowserViews = new Map<string, BrowserViewManager>()
 const closingWindowIds = new Set<string>()
 const placementCreations = new Map<string, Promise<BrowserWindow>>()
 const placementGenerations = new Map<string, number>()
@@ -146,19 +299,336 @@ const suspendedTerminalTransfers = new Map<
 >()
 const senderBoundIpc = new SenderBoundIpcRouter(windowRegistry)
 registerDesktopHandlers(senderBoundIpc, {
+  isNodeCoreEnabled: () => nodeCoreDemoReady,
+  isNodeConfigurationEnabled: () =>
+    nodeCoreDemoReady && nodeSidecar?.configurationWritable === true,
+  isNodeRemoteEnabled: () =>
+    nodeCoreDemoReady &&
+    (nativeNodeDesktop || process.env.AGENT_WORKSPACE_DESKTOP_NODE_REMOTE_DEMO === '1'),
+  isNodeRemoteEnrollmentEnabled: () =>
+    nodeCoreDemoReady && nodeSidecar?.remoteEnrollmentEnabled === true,
+  isNodeRemoteReplacementEnabled: () =>
+    nodeCoreDemoReady && nodeSidecar?.remoteReplacementEnabled === true,
+  isNodeRemoteDeletionEnabled: () =>
+    nodeCoreDemoReady && nodeSidecar?.remoteDeletionEnabled === true,
+  isNodeAgentAssessmentEnabled: () =>
+    nodeCoreDemoReady && nodeSidecar?.agentAssessmentEnabled === true,
+  isNodeAgentRegistrationEnabled: () =>
+    nodeCoreDemoReady && nodeSidecar?.agentRegistrationEnabled === true,
+  isNodeAgentForkEnabled: () => nodeCoreDemoReady && nodeSidecar?.agentForkEnabled === true,
+  isNodeRecentlyClosedEnabled: () =>
+    nodeCoreDemoReady && nodeSidecar?.recentlyClosedEnabled === true,
+  isNodeTaskListEnabled: () =>
+    nodeCoreDemoReady &&
+    (nativeNodeDesktop || process.env.AGENT_WORKSPACE_DESKTOP_NODE_TASK_LIST === '1') &&
+    nodeSidecar?.taskListEnabled === true,
+  isNodeTaskDetachEnabled: () =>
+    nodeCoreDemoReady &&
+    (nativeNodeDesktop || process.env.AGENT_WORKSPACE_DESKTOP_NODE_TASK_LIST === '1') &&
+    nodeSidecar?.taskActionsEnabled === true,
+  isNodeEncryptedSearchEnabled: () =>
+    nodeCoreDemoReady && nodeSidecar?.encryptedSearchEnabled === true,
+  issueNodeSearchExportConfirmation: (params) => {
+    if (!nodeCoreDemoReady || !nodeSidecar?.encryptedSearchEnabled)
+      throw new Error('Encrypted search is unavailable in this Node sidecar')
+    return nodeSidecar.issueSearchExportConfirmation(params)
+  },
+  exportNodeSearchSource: (params) => {
+    if (!nodeCoreDemoReady || !nodeSidecar?.encryptedSearchEnabled)
+      throw new Error('Encrypted search is unavailable in this Node sidecar')
+    return nodeSidecar.exportSearchSource(params)
+  },
+  invokeNodeCore: (entry, channel, args) => {
+    const sidecar = nodeSidecar
+    if (!sidecar || !nodeCoreDemoReady) return undefined
+    if (windowRegistry.get(entry.windowId) !== entry || entry.window.isDestroyed()) {
+      throw new Error('The Node core window changed')
+    }
+    return sidecar.invokeDesktopCore(
+      entry.windowId,
+      channel,
+      args,
+      (terminalEvent) => {
+        if (windowRegistry.get(entry.windowId) === entry && !entry.window.isDestroyed()) {
+          entry.window.webContents.send(DESKTOP_IPC.terminalEvent, terminalEvent)
+        }
+      },
+      {
+        views: () => entry.binding.browserViews,
+        isCurrent: () =>
+          nodeSidecar === sidecar &&
+          nodeCoreDemoReady &&
+          windowRegistry.get(entry.windowId) === entry &&
+          !entry.window.isDestroyed(),
+        senderCurrent: () =>
+          windowRegistry.get(entry.windowId) === entry && !entry.window.isDestroyed(),
+        shuttingDown: () => quitOrchestrator.isQuitStarted(),
+        emitDomainEvent: (event) => {
+          if (
+            nodeSidecar !== sidecar ||
+            !nodeCoreDemoReady ||
+            windowRegistry.get(entry.windowId) !== entry ||
+            entry.window.isDestroyed()
+          )
+            return
+          entry.window.webContents.send(DESKTOP_IPC.domainEvent, event)
+        },
+        automationActive: () => {
+          const automation = nodeAutomationProviders.get(entry.windowId)
+          return Boolean(
+            automation?.generation === entry.generation &&
+            automation.sidecar === sidecar &&
+            automation.manager.hasAttachedSessions()
+          )
+        },
+        attachedTerminalIds: () => [...entry.terminalAttachments],
+        reconcileRendererOwnership: (liveResourceIds) =>
+          windowRegistry.reconcileRendererOwnership(entry.windowId, liveResourceIds),
+        contentWidth: () => {
+          if (windowRegistry.get(entry.windowId) !== entry || entry.window.isDestroyed()) {
+            throw new Error('The Node sidebar window changed')
+          }
+          return entry.window.getContentBounds().width
+        },
+        chooseLayoutExportPath: async (layoutId) => {
+          if (
+            nodeSidecar !== sidecar ||
+            !nodeCoreDemoReady ||
+            windowRegistry.get(entry.windowId) !== entry ||
+            entry.window.isDestroyed()
+          ) {
+            throw new Error('The Node layout window changed')
+          }
+          const chosen = await dialog.showSaveDialog(entry.window, {
+            title: 'Export saved layout',
+            defaultPath: `${layoutId}.workspace-layout.json`,
+            filters: [{ name: 'Workspace layout', extensions: ['json'] }]
+          })
+          if (
+            nodeSidecar !== sidecar ||
+            !nodeCoreDemoReady ||
+            windowRegistry.get(entry.windowId) !== entry ||
+            entry.window.isDestroyed()
+          ) {
+            throw new Error('The Node layout window changed')
+          }
+          return chosen.canceled ? null : chosen.filePath || null
+        },
+        chooseLayoutImportPath: async () => {
+          if (
+            nodeSidecar !== sidecar ||
+            !nodeCoreDemoReady ||
+            windowRegistry.get(entry.windowId) !== entry ||
+            entry.window.isDestroyed()
+          ) {
+            throw new Error('The Node layout window changed')
+          }
+          const chosen = await dialog.showOpenDialog(entry.window, {
+            title: 'Import saved layout',
+            buttonLabel: 'Import layout',
+            properties: ['openFile'],
+            filters: [{ name: 'Workspace layout', extensions: ['json'] }]
+          })
+          if (
+            nodeSidecar !== sidecar ||
+            !nodeCoreDemoReady ||
+            windowRegistry.get(entry.windowId) !== entry ||
+            entry.window.isDestroyed()
+          ) {
+            throw new Error('The Node layout window changed')
+          }
+          return chosen.canceled || chosen.filePaths.length !== 1 ? null : chosen.filePaths[0]!
+        },
+        waitForOwnershipTransfer: (browserSessionId) =>
+          windowRegistry.waitForOwnershipTransfer(browserSessionId, entry.windowId),
+        ownershipAcquired: (browserSessionId) =>
+          windowRegistry.recordRendererOwnership(browserSessionId, entry.windowId),
+        browserDetached: (browserSessionId) =>
+          windowRegistry.forgetRendererOwnership(browserSessionId, entry.windowId),
+        terminalDetached: (terminalId) => entry.terminalAttachments.delete(terminalId)
+      },
+      {
+        confirm: async ({ title, message, detail, cancel, accept }) => {
+          const choice = await dialog.showMessageBox(entry.window, {
+            type: 'warning',
+            buttons: [cancel, accept],
+            defaultId: 0,
+            cancelId: 0,
+            noLink: true,
+            title,
+            message,
+            detail
+          })
+          return choice.response === 1
+        },
+        isCurrent: () =>
+          nodeSidecar === sidecar &&
+          nodeCoreDemoReady &&
+          windowRegistry.get(entry.windowId) === entry &&
+          !entry.window.isDestroyed(),
+        pickCredential: async () => {
+          const chosen = await dialog.showOpenDialog(entry.window, {
+            title: 'Choose an unencrypted Ed25519 OpenSSH private key',
+            buttonLabel: 'Use SSH key',
+            properties: ['openFile', 'dontAddToRecent']
+          })
+          if (chosen.canceled || chosen.filePaths.length !== 1 || !chosen.filePaths[0]) return null
+          if (
+            nodeSidecar !== sidecar ||
+            !nodeCoreDemoReady ||
+            windowRegistry.get(entry.windowId) !== entry ||
+            entry.window.isDestroyed()
+          ) {
+            throw new Error('The remote target window changed')
+          }
+          return open(chosen.filePaths[0], constants.O_RDONLY | constants.O_NOFOLLOW)
+        }
+      }
+    )
+  },
   serializeResource: (resourceId, operation) => windowRegistry.transfer(resourceId, operation),
   terminalAttached: (windowId, terminalId) =>
     windowRegistry.get(windowId)?.terminalAttachments.add(terminalId),
   terminalDetached: (windowId, terminalId) =>
     windowRegistry.get(windowId)?.terminalAttachments.delete(terminalId),
+  isTerminalCleanupDuringQuit: () => terminalCleanupDuringQuit,
   ownershipAcquired: (windowId, resourceId) =>
     windowRegistry.recordRendererOwnership(resourceId, windowId),
   waitForOwnershipTransfer: (windowId, resourceId) =>
     windowRegistry.waitForOwnershipTransfer(resourceId, windowId),
   waitForWindowActivation: (entry) => windowRegistry.waitForWindowActivation(entry),
   isWindowEntryCurrent: (entry) => windowRegistry.get(entry.windowId) === entry,
+  resolveNodeWorkspacePath: async (entry, workspaceId) => {
+    const sidecar = nodeSidecar
+    if (
+      !nodeCoreDemoReady ||
+      !sidecar ||
+      windowRegistry.get(entry.windowId) !== entry ||
+      entry.window.isDestroyed()
+    ) {
+      throw new Error('The Node workspace owner changed')
+    }
+    const { snapshot } = await sidecar.listWorkspacesForTrustedOwner(entry.windowId)
+    if (
+      !nodeCoreDemoReady ||
+      nodeSidecar !== sidecar ||
+      windowRegistry.get(entry.windowId) !== entry ||
+      entry.window.isDestroyed()
+    ) {
+      throw new Error('The Node workspace owner changed')
+    }
+    const workspace = snapshot.workspaces.find(({ id }) => id === workspaceId)
+    if (!workspace) throw new Error('The workspace is not hosted by this window')
+    return workspace.workingDirectory
+  },
+  isNodeTaskListSelected: () =>
+    nativeNodeDesktop || process.env.AGENT_WORKSPACE_DESKTOP_NODE_TASK_LIST === '1',
+  listTasksFromNodeSidecar: (entry, request) => {
+    const sidecar = nodeSidecar
+    // A sidecar probe may be backed by a different disposable state copy, whose
+    // window IDs do not belong to this renderer. Keep the Rust path until the
+    // test explicitly binds the same hosted window in both stores.
+    if (
+      !sidecar ||
+      !nodeCoreDemoReady ||
+      (!nativeNodeDesktop && process.env.AGENT_WORKSPACE_DESKTOP_NODE_TASK_LIST !== '1')
+    ) {
+      return undefined
+    }
+    if (windowRegistry.get(entry.windowId) !== entry || entry.window.isDestroyed()) {
+      throw new Error('The task list window changed')
+    }
+    return sidecar
+      .listTasksForTrustedOwner(entry.windowId, taskListParamsSchema.parse(request))
+      .then((result) => {
+        if (
+          nodeSidecar !== sidecar ||
+          windowRegistry.get(entry.windowId) !== entry ||
+          entry.window.isDestroyed()
+        ) {
+          throw new Error('The task list window changed')
+        }
+        return result
+      })
+  },
+  detachRemoteTaskFromNodeSidecar: (entry, request) => {
+    const sidecar = nodeSidecar
+    if (
+      !sidecar ||
+      !nodeCoreDemoReady ||
+      !sidecar.taskActionsEnabled ||
+      (!nativeNodeDesktop && process.env.AGENT_WORKSPACE_DESKTOP_NODE_TASK_LIST !== '1')
+    ) {
+      return undefined
+    }
+    if (windowRegistry.get(entry.windowId) !== entry || entry.window.isDestroyed()) {
+      throw new Error('The task action window changed')
+    }
+    return sidecar.detachRemoteTaskForTrustedOwner(entry.windowId, request).then((result) => {
+      if (
+        nodeSidecar !== sidecar ||
+        windowRegistry.get(entry.windowId) !== entry ||
+        entry.window.isDestroyed()
+      ) {
+        throw new Error('The task action window changed')
+      }
+      return result
+    })
+  },
+  actOnNodeTaskFromSidecar: (entry, request, confirm) => {
+    const sidecar = nodeSidecar
+    if (!nodeCoreDemoReady || !sidecar?.taskActionsEnabled) return undefined
+    if (windowRegistry.get(entry.windowId) !== entry || entry.window.isDestroyed()) {
+      throw new Error('The task action window changed')
+    }
+    return sidecar
+      .actOnTaskForTrustedOwner(entry.windowId, entry.generation, request, async () => {
+        if (
+          !nodeCoreDemoReady ||
+          nodeSidecar !== sidecar ||
+          windowRegistry.get(entry.windowId) !== entry ||
+          entry.window.isDestroyed()
+        ) {
+          throw new Error('The task action window changed')
+        }
+        return confirm()
+      })
+      .then((result) => {
+        if (
+          !nodeCoreDemoReady ||
+          nodeSidecar !== sidecar ||
+          windowRegistry.get(entry.windowId) !== entry ||
+          entry.window.isDestroyed()
+        ) {
+          throw new Error('The task action window changed')
+        }
+        return result
+      })
+  },
   isApplicationGlobalLayoutAvailable: () => windowRegistry.size <= 1,
   getDesktopProviderIdentity: () => desktopProviderIdentity,
+  getNodeAgentHibernationContext: (entry) => {
+    const sidecar = nodeSidecar
+    const automation = nodeAutomationProviders.get(entry.windowId)
+    const isCurrent = () =>
+      nodeCoreDemoReady &&
+      nodeSidecar === sidecar &&
+      windowRegistry.get(entry.windowId) === entry &&
+      !entry.window.isDestroyed() &&
+      nodeHostingClaims.get(entry.windowId)?.entry === entry &&
+      nodeHostingClaims.get(entry.windowId)?.sidecar === sidecar &&
+      nodeAutomationProviders.get(entry.windowId) === automation &&
+      automation?.generation === entry.generation &&
+      automation.sidecar === sidecar &&
+      !closingWindowIds.has(entry.windowId) &&
+      !quitOrchestrator.isQuitStarted()
+    if (!sidecar?.agentHibernationEnabled || !automation || !isCurrent()) return undefined
+    return {
+      client: sidecar.agentHibernationClientForTrustedOwner(entry.windowId),
+      provider: automation.identity,
+      isCurrent
+    }
+  },
   enrollRemoteCredential: async (targetId, expectedRevision, credentialFd) => {
     if (!supervisor) throw new Error('The local service is not ready')
     return supervisor.enrollRemoteCredential(targetId, expectedRevision, credentialFd)
@@ -172,7 +642,314 @@ registerDesktopHandlers(senderBoundIpc, {
     await supervisor.removeRemoteCredential(enrollmentId, targetId)
   }
 })
-registerMultiWindowDesktopHandlers(senderBoundIpc)
+registerMultiWindowDesktopHandlers(
+  senderBoundIpc,
+  () => nodeCoreDemoReady,
+  async (entry) => {
+    const sidecar = nodeSidecar
+    if (
+      !nodeCoreDemoReady ||
+      !sidecar ||
+      windowRegistry.get(entry.windowId) !== entry ||
+      entry.window.isDestroyed()
+    ) {
+      throw new Error('The Node window owner changed')
+    }
+    const topology = await sidecar.listWindowsForTrustedOwner(entry.windowId)
+    if (
+      !nodeCoreDemoReady ||
+      nodeSidecar !== sidecar ||
+      windowRegistry.get(entry.windowId) !== entry ||
+      entry.window.isDestroyed()
+    ) {
+      throw new Error('The Node window owner changed')
+    }
+    return topology
+  },
+  {
+    create: async (entry, params) => {
+      const sidecar = nodeSidecar
+      const rustClient = lifecycle?.getClient()
+      if (
+        !nodeCoreDemoReady ||
+        !sidecar ||
+        (!rustClient && !nativeNodeDesktop) ||
+        windowRegistry.get(entry.windowId) !== entry ||
+        entry.window.isDestroyed()
+      )
+        throw new Error('The Node window owner changed')
+      const projection = await sidecar.client.listWorkspaces()
+      const moved = projection.snapshot.workspaces.find(({ id }) => id === params.workspaceId)
+      if (!moved) throw new Error('The Node workspace is unavailable')
+      const current = (): void => {
+        if (
+          !nodeCoreDemoReady ||
+          nodeSidecar !== sidecar ||
+          windowRegistry.get(entry.windowId) !== entry ||
+          entry.window.isDestroyed()
+        )
+          throw new Error('The Node window owner changed during creation')
+      }
+      current()
+      const terminalIds = moved.tabs.flatMap((tab) =>
+        tab.content.kind === 'terminal' &&
+        tab.content.runtimeSessionId &&
+        entry.terminalAttachments.has(tab.content.runtimeSessionId)
+          ? [tab.content.runtimeSessionId]
+          : []
+      )
+      const remoteIds = moved.tabs.flatMap((tab) =>
+        tab.content.kind === 'terminal' &&
+        tab.content.runtimeSessionId &&
+        sidecar.isRemoteTerminalBinding(tab.content.runtimeSessionId)
+          ? [tab.content.runtimeSessionId]
+          : []
+      )
+      for (const tab of moved.tabs) {
+        if (tab.content.kind !== 'terminal' || !tab.content.runtimeSessionId) continue
+        const id = tab.content.runtimeSessionId
+        if (
+          !sidecar.isRemoteTerminalBinding(id) &&
+          sidecar.localTerminalSocketOwner(id) !==
+            (entry.terminalAttachments.has(id) ? entry.windowId : undefined)
+        )
+          throw new Error('The Node terminal socket owner changed')
+      }
+      const movedBrowsers = new Map(
+        moved.tabs.flatMap((tab) =>
+          tab.content.kind === 'browser' ? [[tab.content.state.browserSessionId, tab] as const] : []
+        )
+      )
+      const browserDescriptors = entry.binding.browserViews
+        .ownedTransferDescriptors()
+        .filter((descriptor) => descriptor.workspaceId === moved.id)
+      for (const id of movedBrowsers.keys()) {
+        if (
+          windowRegistry
+            .list()
+            .some((owner) => owner !== entry && owner.binding.browserViews.ownsSession(id))
+        )
+          throw new Error('The Node browser native owner changed')
+      }
+      for (const descriptor of browserDescriptors) {
+        const tab = movedBrowsers.get(descriptor.browserSessionId)
+        if (!tab || tab.id !== descriptor.tabId || tab.paneId !== descriptor.paneId)
+          throw new Error('The Node browser native placement changed')
+      }
+      const terminalTransfer = sidecar.suspendLocalTerminalEvents(
+        entry.windowId,
+        terminalIds.filter((id) => !sidecar.isRemoteTerminalBinding(id))
+      )
+      const remoteTransfers: ReturnType<NodeSidecar['suspendRemoteTerminalEvents']>[] = []
+      const browserSuspensions: { id: string; resume: () => void }[] = []
+      try {
+        for (const id of remoteIds)
+          remoteTransfers.push(sidecar.suspendRemoteTerminalEvents(entry.windowId, id))
+        for (const descriptor of browserDescriptors) {
+          current()
+          browserSuspensions.push({
+            id: descriptor.browserSessionId,
+            resume: entry.binding.browserViews.suspendOwnedSession(descriptor.browserSessionId)
+          })
+        }
+      } catch (error) {
+        for (const { resume } of browserSuspensions.reverse()) resume()
+        for (const transfer of remoteTransfers.reverse()) transfer.rollback()
+        terminalTransfer.rollback()
+        throw error
+      }
+      const rollback = (): void => {
+        for (const { resume } of browserSuspensions.reverse()) resume()
+        for (const transfer of remoteTransfers.reverse()) transfer.rollback()
+        terminalTransfer.rollback()
+      }
+      let result: ReturnType<typeof windowMutationResultSchema.parse> | undefined
+      try {
+        result = windowMutationResultSchema.parse(
+          await sidecar.createWindowForTrustedOwner(entry.windowId, params)
+        )
+      } catch (error) {
+        // A lost response can be recovered with the same idempotency key.
+        result = await sidecar
+          .createWindowForTrustedOwner(entry.windowId, params)
+          .then((value) => windowMutationResultSchema.parse(value))
+          .catch(() => undefined)
+        if (!result) {
+          const topology = await sidecar.client.listWindows().catch(() => undefined)
+          const destination = topology?.windows.find((window) =>
+            window.workspaceIds.includes(params.workspaceId)
+          )
+          if (topology && destination && destination.windowId !== entry.windowId) {
+            result = windowMutationResultSchema.parse({
+              revision: topology.revision,
+              idempotencyEpoch: topology.idempotencyEpoch,
+              window: destination,
+              replayed: true
+            })
+          } else if (destination?.windowId === entry.windowId) {
+            rollback()
+            throw error
+          } else {
+            throw new Error('Node window creation outcome is unknown; resources are quarantined', {
+              cause: error
+            })
+          }
+        }
+      }
+      current()
+      nodeOnlyWindowIds.add(result.window.windowId)
+      if (!windowRegistry.get(result.window.windowId)) {
+        const created = rustClient
+          ? await createServicePlacementWindow(rustClient, result.window.windowId)
+          : await createNativeNodePlacementWindow(sidecar, result.window.windowId)
+        if (nodeSidecar !== sidecar || !nodeCoreDemoReady || created.isDestroyed())
+          throw new Error('The Node window owner changed after creation')
+      }
+      current()
+      const target = windowRegistry.get(result.window.windowId)
+      if (!target || target.window.isDestroyed())
+        throw new Error('The new Node window is unavailable after creation')
+      const trustedSnapshot = {
+        revision: projection.snapshot.revision,
+        workspace: moved
+      } as unknown as WorkspaceSnapshotResult
+      for (const descriptor of browserDescriptors) {
+        await target.binding.browserViews.mountTransferred(descriptor, trustedSnapshot)
+      }
+      for (const descriptor of browserDescriptors) {
+        target.binding.browserViews.activateTransferredSession(descriptor.browserSessionId)
+        entry.binding.browserViews.destroyOwnedSession(descriptor.browserSessionId)
+        windowRegistry.forgetRendererOwnership(descriptor.browserSessionId, entry.windowId)
+        windowRegistry.recordRendererOwnership(descriptor.browserSessionId, target.windowId)
+      }
+      terminalTransfer.finalize()
+      for (const transfer of remoteTransfers) transfer.finalize(target.windowId)
+      for (const id of terminalIds) {
+        entry.terminalAttachments.delete(id)
+        windowRegistry.forgetRendererOwnership(id, entry.windowId)
+      }
+      entry.window.webContents.send(DESKTOP_IPC.desktopBindingRebind)
+      entry.window.webContents.send(DESKTOP_IPC.browserViewsRebind)
+      target.window.webContents.send(DESKTOP_IPC.desktopBindingRebind)
+      target.window.webContents.send(DESKTOP_IPC.browserViewsRebind)
+      target.window.focus()
+      return result
+    },
+    focus: async (entry, params) => {
+      const sidecar = nodeSidecar
+      if (
+        !nodeCoreDemoReady ||
+        !sidecar ||
+        windowRegistry.get(entry.windowId) !== entry ||
+        entry.window.isDestroyed()
+      )
+        throw new Error('The Node window owner changed')
+      const target = windowRegistry.get(params.window.windowId)
+      if (!target || target.window.isDestroyed())
+        throw new Error('The Node focus target is unhosted')
+      const result = await sidecar.focusWindowForTrustedOwner(entry.windowId, params)
+      if (target.window.isMinimized()) target.window.restore()
+      target.window.focus()
+      if (!result.replayed) {
+        target.window.webContents.send(DESKTOP_IPC.desktopBindingRebind)
+        if (target !== entry) entry.window.webContents.send(DESKTOP_IPC.desktopBindingRebind)
+      }
+      return result
+    },
+    close: async (entry, params) => {
+      const sidecar = nodeSidecar
+      if (
+        !nodeCoreDemoReady ||
+        !sidecar ||
+        windowRegistry.get(entry.windowId) !== entry ||
+        entry.window.isDestroyed()
+      )
+        throw new Error('The Node window owner changed')
+      if (params.policy === 'closeWorkspaces') {
+        if (!nodeOnlyWindowIds.has(entry.windowId))
+          throw new Error('Rust base window deletion requires reconciliation')
+        return closeNodeWindowWorkspaces(sidecar, entry, params)
+      }
+      if (!params.rehomeTarget) throw new Error('Node window close policy is invalid')
+      const target = windowRegistry.get(params.rehomeTarget.windowId)
+      if (!target || target.window.isDestroyed())
+        throw new Error('The Node rehome target is unhosted')
+      return closeNodeWindowPlacement(sidecar, entry, target, params)
+    },
+    closeTab: async (entry, params) => {
+      const sidecar = nodeSidecar
+      if (
+        !nodeCoreDemoReady ||
+        !sidecar ||
+        windowRegistry.get(entry.windowId) !== entry ||
+        entry.window.isDestroyed()
+      )
+        throw new Error('The Node window owner changed')
+      return sidecar.closeTabForTrustedOwner(
+        entry.windowId,
+        params,
+        entry.binding.browserViews,
+        (browserSessionId) =>
+          windowRegistry.forgetRendererOwnership(browserSessionId, entry.windowId),
+        (terminalId) => entry.terminalAttachments.delete(terminalId)
+      )
+    },
+    listClosedItems: async (entry) => {
+      const sidecar = nodeSidecar
+      if (!nodeCoreDemoReady || !sidecar || windowRegistry.get(entry.windowId) !== entry)
+        throw new Error('The Node window owner changed')
+      return sidecar.listClosedItemsForTrustedOwner(entry.windowId)
+    },
+    getClosedItem: async (entry, params) => {
+      const sidecar = nodeSidecar
+      if (!nodeCoreDemoReady || !sidecar || windowRegistry.get(entry.windowId) !== entry)
+        throw new Error('The Node window owner changed')
+      return sidecar.getClosedItemForTrustedOwner(entry.windowId, params.closedItemId)
+    },
+    reopenTab: async (entry, params) => {
+      const sidecar = nodeSidecar
+      if (!nodeCoreDemoReady || !sidecar || windowRegistry.get(entry.windowId) !== entry)
+        throw new Error('The Node window owner changed')
+      return sidecar.reopenTabForTrustedOwner(entry.windowId, params)
+    },
+    duplicateTab: async (entry, params) => {
+      const sidecar = nodeSidecar
+      if (!nodeCoreDemoReady || !sidecar || windowRegistry.get(entry.windowId) !== entry)
+        throw new Error('The Node window owner changed')
+      const destination = windowRegistry.get(params.target.windowId)
+      if (!destination || destination.window.isDestroyed())
+        throw new Error('The Node tab target window is unavailable')
+      const result = advancedTabMutationResultSchema.parse(
+        await sidecar.duplicateTabForTrustedOwner(entry.windowId, params)
+      )
+      if (!result.replayed) {
+        destination.window.webContents.send(DESKTOP_IPC.desktopBindingRebind)
+        if (destination !== entry) entry.window.webContents.send(DESKTOP_IPC.desktopBindingRebind)
+      }
+      return result
+    },
+    moveTabExact: async (entry, params) => moveNodeTabExact(entry, params),
+    detachTab: async (entry, params) => detachNodeTab(entry, params),
+    navigateFocusHistory: async (entry, params) => {
+      const sidecar = nodeSidecar
+      if (!nodeCoreDemoReady || !sidecar || windowRegistry.get(entry.windowId) !== entry)
+        throw new Error('The Node window owner changed')
+      const result = focusHistoryNavigateResultSchema.parse(
+        await sidecar.navigateFocusHistoryForTrustedOwner(entry.windowId, params)
+      )
+      const target = windowRegistry.get(result.target.windowId)
+      if (!target || target.window.isDestroyed())
+        throw new Error('The Node focus target is unavailable')
+      if (target.window.isMinimized()) target.window.restore()
+      target.window.focus()
+      if (!result.replayed) {
+        target.window.webContents.send(DESKTOP_IPC.desktopBindingRebind)
+        if (target !== entry) entry.window.webContents.send(DESKTOP_IPC.desktopBindingRebind)
+      }
+      return result
+    }
+  }
+)
 registerSenderBoundApplicationMenuHandlers(senderBoundIpc, applicationMenu)
 
 protocol.registerSchemesAsPrivileged([
@@ -198,6 +975,90 @@ function createTokenCipher(): TokenCipher {
       )
     }
   }
+}
+
+async function closeNodeWindowWorkspaces(
+  sidecar: NodeSidecar,
+  source: WindowRegistryEntry,
+  params: WindowCloseParams
+) {
+  const current = () => {
+    if (
+      !nodeCoreDemoReady ||
+      nodeSidecar !== sidecar ||
+      windowRegistry.get(source.windowId) !== source ||
+      source.window.isDestroyed()
+    )
+      throw new Error('The Node window owner changed during close')
+  }
+  current()
+  const topology = await sidecar.listWindowsForTrustedOwner(source.windowId)
+  current()
+  const placement = topology.windows.find(({ windowId }) => windowId === source.windowId)
+  if (
+    !placement ||
+    placement.revision !== params.window.expectedRevision ||
+    topology.revision !== params.mutation.expectedRevision ||
+    topology.idempotencyEpoch !== params.mutation.idempotencyEpoch
+  )
+    throw new Error('The Node window close projection changed')
+  const { snapshot } = await sidecar.client.listWorkspaces()
+  current()
+  if (snapshot.revision !== topology.revision)
+    throw new Error('The Node workspace projection changed')
+  const workspaces = new Map(snapshot.workspaces.map((workspace) => [workspace.id, workspace]))
+  const browserIds = placement.workspaceIds.flatMap((id) =>
+    (workspaces.get(id)?.tabs ?? []).flatMap((tab) =>
+      tab.content.kind === 'browser' ? [tab.content.state.browserSessionId] : []
+    )
+  )
+  const terminalIds = placement.workspaceIds.flatMap((id) =>
+    (workspaces.get(id)?.tabs ?? []).flatMap((tab) =>
+      tab.content.kind === 'terminal' && tab.content.runtimeSessionId
+        ? [tab.content.runtimeSessionId]
+        : []
+    )
+  )
+  if ([...source.terminalAttachments].some((id) => !terminalIds.includes(id)))
+    throw new Error('The Node terminal attachments changed during close')
+  let result: Awaited<ReturnType<NodeSidecar['closeWindowForTrustedOwner']>>
+  try {
+    result = await sidecar.closeWindowForTrustedOwner(source.windowId, params)
+  } catch (error) {
+    const [latest, state] = await Promise.all([
+      sidecar.client.listWindows().catch(() => undefined),
+      sidecar.client.stateSnapshot().catch(() => undefined)
+    ])
+    if (
+      !latest ||
+      !state ||
+      latest.revision !== state.snapshot.revision ||
+      latest.windows.some(({ windowId }) => windowId === source.windowId) ||
+      placement.workspaceIds.some((id) =>
+        state.snapshot.workspaces.some((workspace) => workspace.id === id)
+      )
+    ) {
+      throw error
+    }
+    result = {
+      revision: latest.revision,
+      idempotencyEpoch: latest.idempotencyEpoch,
+      closedWindowId: source.windowId,
+      replayed: false
+    }
+  }
+  for (const id of browserIds) {
+    source.binding.browserViews.destroySession({ browserSessionId: id })
+    windowRegistry.forgetRendererOwnership(id, source.windowId)
+  }
+  for (const id of terminalIds) {
+    source.terminalAttachments.delete(id)
+    windowRegistry.forgetRendererOwnership(id, source.windowId)
+  }
+  sidecar.releaseWindowResources(source.windowId)
+  nodeOnlyWindowIds.delete(source.windowId)
+  if (windowRegistry.get(source.windowId) === source) source.window.destroy()
+  return result
 }
 
 async function bindReadyClient(client: ControlClient): Promise<void> {
@@ -242,27 +1103,28 @@ async function bindReadyClientNow(
   )
     return
   const initialEntry = entry
-  let scopedWindow: boolean
-  try {
-    const topology = await providerClient.listWindows()
-    if (!topology.windows.some(({ windowId }) => windowId === initialEntry.windowId)) {
-      const projection = await providerClient.listWorkspaces()
-      const selectedWorkspaceId = projection.snapshot.selectedWorkspaceId
-      const candidates = topology.windows.filter(
-        ({ windowId, workspaceIds }) =>
-          !windowRegistry.get(windowId) &&
-          selectedWorkspaceId !== null &&
-          workspaceIds.includes(selectedWorkspaceId)
-      )
-      if (candidates.length !== 1) {
-        throw new Error('The renderer placement could not be bound unambiguously')
+  let scopedWindow = false
+  if (!nodeCoreDemoReady && !nodeOnlyWindowIds.has(initialEntry.windowId))
+    try {
+      const topology = await providerClient.listWindows()
+      if (!topology.windows.some(({ windowId }) => windowId === initialEntry.windowId)) {
+        const projection = await providerClient.listWorkspaces()
+        const selectedWorkspaceId = projection.snapshot.selectedWorkspaceId
+        const candidates = topology.windows.filter(
+          ({ windowId, workspaceIds }) =>
+            !windowRegistry.get(windowId) &&
+            selectedWorkspaceId !== null &&
+            workspaceIds.includes(selectedWorkspaceId)
+        )
+        if (candidates.length !== 1) {
+          throw new Error('The renderer placement could not be bound unambiguously')
+        }
+        entry = windowRegistry.rekey(initialEntry.windowId, candidates[0]!.windowId)
       }
-      entry = windowRegistry.rekey(initialEntry.windowId, candidates[0]!.windowId)
+      scopedWindow = true
+    } catch {
+      scopedWindow = false
     }
-    scopedWindow = true
-  } catch {
-    scopedWindow = false
-  }
 
   let client = providerClient
   let ownsClient = false
@@ -280,33 +1142,45 @@ async function bindReadyClientNow(
     entry = current
   }
 
-  const browserViews = new BrowserViewManager(window, client, {
-    reconcileResources: (snapshot) => {
-      const current = windowRegistry.findByWindow(window)
-      if (current) {
-        windowRegistry.reconcileRendererOwnership(current.windowId, runtimeResourceIds(snapshot))
+  const browserViews = new BrowserViewManager(
+    window,
+    nodeCoreDemoReady && nodeSidecar ? nodeSidecar.createBrowserControl(entry.windowId) : client,
+    {
+      reconcileResources: (snapshot) => {
+        const current = windowRegistry.findByWindow(window)
+        if (current) {
+          windowRegistry.reconcileRendererOwnership(current.windowId, runtimeResourceIds(snapshot))
+        }
       }
     }
-  })
+  )
   let stopEvents: (() => void) | undefined
   let stopNotifications: (() => void) | undefined
+  let nodeAutomationProfile: string | undefined
   try {
-    stopEvents = forwardDesktopEvents(window, client, (resourceId, epoch, source, target) =>
-      windowRegistry.observeOwnershipTransfer(resourceId, epoch, source, target)
-    )
-    stopNotifications = await forwardSystemNotifications(client, (payload) => {
-      if (window.isDestroyed()) return
-      if (shouldShowSystemNotification(Notification.isSupported(), window.isFocused())) {
-        new Notification(payload).show()
-      }
-    })
-    const configuration = await client
+    stopEvents = nodeCoreDemoReady
+      ? () => undefined
+      : forwardDesktopEvents(window, client, (resourceId, epoch, source, target) =>
+          windowRegistry.observeOwnershipTransfer(resourceId, epoch, source, target)
+        )
+    stopNotifications = nodeCoreDemoReady
+      ? () => undefined
+      : await forwardSystemNotifications(client, (payload) => {
+          if (window.isDestroyed()) return
+          if (shouldShowSystemNotification(Notification.isSupported(), window.isFocused())) {
+            new Notification(payload).show()
+          }
+        })
+    const configurationClient =
+      nodeCoreDemoReady && nodeSidecar?.configurationWritable ? nodeSidecar.client : client
+    const configuration = await configurationClient
       .getConfiguration()
       .then((result) => configurationGetResultSchema.parse(result))
       .catch(() => undefined)
     if (configuration) {
       browserViews.configureBrowserProfile(configuration.config.browser)
       updateController?.applyChannel(configuration.config.updates.channel)
+      if (nodeCoreDemoReady) nodeAutomationProfile = configuration.config.browser.partition
     }
     if (
       windowRegistry.findByWindow(window) !== entry ||
@@ -328,15 +1202,27 @@ async function bindReadyClientNow(
   }
   let disposed = false
   const binding = entry.binding as DesktopWindowBinding
-  binding.replaceReady(client, browserViews, () => {
+  const disposeReady = () => {
     if (disposed) return Promise.resolve()
     disposed = true
+    if (nodeBrowserViews.get(entry.windowId) === browserViews) {
+      nodeBrowserViews.delete(entry.windowId)
+    }
     stopEvents?.()
     stopNotifications?.()
     browserViews.dispose()
     if (ownsClient) client.close()
     return Promise.resolve()
-  })
+  }
+  if (nodeCoreDemoReady) binding.replaceNodeExclusive(browserViews, disposeReady)
+  else binding.replaceReady(client, browserViews, disposeReady)
+  if (nodeCoreDemoReady) nodeBrowserViews.set(entry.windowId, browserViews)
+  if (nodeCoreDemoReady && nodeSidecar) {
+    await startNodeHostingForWindow(entry, nodeSidecar)
+  }
+  if (nodeCoreDemoReady && nodeSidecar && nodeAutomationProfile) {
+    startNodeAutomationForWindow(entry, nodeSidecar, nodeAutomationProfile)
+  }
   if (
     options.notifyRenderer !== false &&
     windowRegistry.findByWindow(window) === entry &&
@@ -344,8 +1230,17 @@ async function bindReadyClientNow(
   ) {
     window.webContents.send(DESKTOP_IPC.desktopBindingRebind)
   }
-  const boundsClient = scopedWindow ? scopedWindowStateClient(client, window) : client
-  await binding.stateController.rebase(boundsClient).catch(() => undefined)
+  if (nodeCoreDemoReady && nodeSidecar) {
+    await binding.stateController
+      .rebase(scopedNodeWindowStateClient(nodeSidecar, window))
+      .catch((error) => {
+        binding.stateController.clearClient()
+        console.error('[node-sidecar] window state binding failed', error)
+      })
+  } else {
+    const boundsClient = scopedWindow ? scopedWindowStateClient(client, window) : client
+    await binding.stateController.rebase(boundsClient).catch(() => undefined)
+  }
   if (
     options.notifyRenderer !== false &&
     windowRegistry.findByWindow(window) === entry &&
@@ -355,17 +1250,53 @@ async function bindReadyClientNow(
   }
 }
 
+async function bindNativeNodeWindow(window: BrowserWindow): Promise<void> {
+  const entry = windowRegistry.findByWindow(window)
+  const sidecar = nodeSidecar
+  if (!entry || !sidecar || !nodeCoreDemoReady || window.isDestroyed()) {
+    throw new Error('Native Node window owner is unavailable')
+  }
+  const browserViews = new BrowserViewManager(
+    window,
+    sidecar.createBrowserControl(entry.windowId),
+    {
+      reconcileResources: (snapshot) => {
+        const current = windowRegistry.findByWindow(window)
+        if (current)
+          windowRegistry.reconcileRendererOwnership(current.windowId, runtimeResourceIds(snapshot))
+      }
+    }
+  )
+  try {
+    const configuration = configurationGetResultSchema.parse(
+      await sidecar.client.getConfiguration()
+    )
+    browserViews.configureBrowserProfile(configuration.config.browser)
+    updateController?.applyChannel(configuration.config.updates.channel)
+    if (windowRegistry.findByWindow(window) !== entry || window.isDestroyed()) {
+      throw new Error('Native Node window changed before binding')
+    }
+    const binding = entry.binding as DesktopWindowBinding
+    binding.replaceNodeExclusive(browserViews, async () => {
+      if (nodeBrowserViews.get(entry.windowId) === browserViews)
+        nodeBrowserViews.delete(entry.windowId)
+      browserViews.dispose()
+    })
+    nodeBrowserViews.set(entry.windowId, browserViews)
+    await startNodeHostingForWindow(entry, sidecar)
+    startNodeAutomationForWindow(entry, sidecar, configuration.config.browser.partition)
+    await binding.stateController.rebase(scopedNodeWindowStateClient(sidecar, window))
+  } catch (error) {
+    browserViews.dispose()
+    await (entry.binding as DesktopWindowBinding).clearReady().catch(() => undefined)
+    throw error
+  }
+}
+
 function unbindReadyClient(): Promise<void> {
   desktopProviderRecovery.cancel()
   return serializeReadyBindingOperation(async () => {
-    // Keep the shared lease registered until an in-flight start claim has either
-    // been declined or acknowledged as stopped before its native effect.
-    await Promise.all([
-      desktopActionProvider?.stop(),
-      browserAutomationProvider?.stop(),
-      projectActionConfirmationProvider?.stop()
-    ])
-    await desktopProvider?.stop()
+    await stopNativeProviders()
     desktopActionProvider = undefined
     browserAutomationProvider = undefined
     browserAutomationManager = undefined
@@ -381,6 +1312,17 @@ function unbindReadyClient(): Promise<void> {
     suspendedTerminalTransfers.clear()
     await Promise.all(windowRegistry.list().map(({ window }) => unbindReadyClientNow(window)))
   })
+}
+
+async function stopNativeProviders(): Promise<void> {
+  // Keep the shared lease registered until an in-flight start claim has either
+  // been declined or acknowledged as stopped before its native effect.
+  await Promise.all([
+    desktopActionProvider?.stop(),
+    browserAutomationProvider?.stop(),
+    projectActionConfirmationProvider?.stop()
+  ])
+  await desktopProvider?.stop()
 }
 
 async function invalidateProviderBindings(owner?: ActiveDesktopProvider): Promise<void> {
@@ -534,6 +1476,180 @@ function createBrowserAutomationManager(approvedProfileKey: string): BrowserAuto
   })
 }
 
+function startNodeAutomationForWindow(
+  entry: WindowRegistryEntry,
+  sidecar: NodeSidecar,
+  approvedProfileKey: string
+): void {
+  cancelNodeAutomationRecovery(entry.windowId)
+  const context: NodeAutomationRecoveryContext = {
+    entry,
+    sidecar,
+    profileKey: approvedProfileKey,
+    browserViews: entry.binding.browserViews
+  }
+  void startNodeAutomationAttempt(context).catch((error) => {
+    console.error('[node-browser-automation] provider startup failed', error)
+    requestNodeAutomationRecovery(context)
+  })
+}
+
+function nodeAutomationContextCurrent(context: NodeAutomationRecoveryContext): boolean {
+  const { entry, sidecar, browserViews } = context
+  const hosting = nodeHostingClaims.get(entry.windowId)
+  return (
+    nodeCoreDemoReady &&
+    nodeSidecar === sidecar &&
+    windowRegistry.get(entry.windowId) === entry &&
+    nodeBrowserViews.get(entry.windowId) === browserViews &&
+    hosting?.entry === entry &&
+    hosting.sidecar === sidecar &&
+    !entry.window.isDestroyed() &&
+    !closingWindowIds.has(entry.windowId) &&
+    !quitOrchestrator.isQuitStarted()
+  )
+}
+
+function cancelNodeAutomationRecovery(windowId: string): void {
+  const recovery = nodeAutomationRecovery.get(windowId)
+  if (!recovery) return
+  nodeAutomationRecovery.delete(windowId)
+  recovery.cancel()
+}
+
+function requestNodeAutomationRecovery(context: NodeAutomationRecoveryContext): void {
+  if (!nodeAutomationContextCurrent(context)) return
+  const windowId = context.entry.windowId
+  let recovery = nodeAutomationRecovery.get(windowId)
+  if (!recovery) {
+    recovery = new ProviderRecoveryCoordinator<NodeAutomationRecoveryContext>({
+      delaysMs: [100, 500, 1_000, 2_000, 5_000],
+      recover: async (candidate) => {
+        if (!nodeAutomationContextCurrent(candidate)) return true
+        try {
+          await startNodeAutomationAttempt(candidate)
+          if (!nodeAutomationContextCurrent(candidate)) return true
+          const active = nodeAutomationProviders.get(windowId)
+          return (
+            active?.sidecar === candidate.sidecar &&
+            active.generation === candidate.entry.generation &&
+            active.profileKey === candidate.profileKey &&
+            active.browserViews === candidate.browserViews
+          )
+        } catch (error) {
+          console.error('[node-browser-automation] provider recovery attempt failed', error)
+          return false
+        }
+      },
+      sameContext: (left, right) =>
+        left.entry === right.entry &&
+        left.sidecar === right.sidecar &&
+        left.profileKey === right.profileKey &&
+        left.browserViews === right.browserViews,
+      schedule: (callback, delayMs) => setTimeout(callback, delayMs),
+      cancelSchedule: (handle) => clearTimeout(handle)
+    })
+    nodeAutomationRecovery.set(windowId, recovery)
+  }
+  recovery.request(context)
+}
+
+function startNodeAutomationAttempt(context: NodeAutomationRecoveryContext): Promise<void> {
+  const { entry } = context
+  const previous = nodeAutomationStarts.get(entry.windowId) ?? Promise.resolve()
+  const startup = previous
+    .catch(() => undefined)
+    .then(() => {
+      if (!nodeAutomationContextCurrent(context)) return
+      return ensureNodeAutomationForWindow(context)
+    })
+  nodeAutomationStarts.set(entry.windowId, startup)
+  void startup
+    .finally(() => {
+      if (nodeAutomationStarts.get(entry.windowId) === startup)
+        nodeAutomationStarts.delete(entry.windowId)
+    })
+    .catch(() => undefined)
+  return startup
+}
+
+async function ensureNodeAutomationForWindow(
+  context: NodeAutomationRecoveryContext
+): Promise<void> {
+  const { entry, sidecar, profileKey: approvedProfileKey } = context
+  const current = nodeAutomationProviders.get(entry.windowId)
+  if (
+    current?.generation === entry.generation &&
+    current.sidecar === sidecar &&
+    current.profileKey === approvedProfileKey &&
+    current.browserViews === context.browserViews
+  )
+    return
+  if (current) {
+    nodeAutomationProviders.delete(entry.windowId)
+    await current.provider.stop('window generation changed')
+  }
+  if (!nodeAutomationContextCurrent(context)) return
+  const identity = await sidecar.registerAutomationProviderForTrustedOwner(
+    entry.windowId,
+    entry.generation
+  )
+  if (!nodeAutomationContextCurrent(context)) {
+    await sidecar
+      .revokeAutomationProviderForTrustedOwner(entry.windowId, entry.generation, identity)
+      .catch(() => undefined)
+    return
+  }
+  const manager = createBrowserAutomationManager(approvedProfileKey)
+  const provider = new BrowserAutomationProvider({
+    identity,
+    transport: {
+      poll: (params, signal) => sidecar.pollBrowserAutomation(params, signal),
+      acknowledge: (params) => sidecar.acknowledgeBrowserAutomation(params),
+      respondTransfer: (params) => sidecar.respondBrowserAutomationTransfer(params)
+    },
+    resolveManager: (windowId, generation) =>
+      windowId === entry.windowId &&
+      generation === entry.generation &&
+      windowRegistry.get(windowId) === entry &&
+      nodeHostingClaims.get(windowId)?.entry === entry &&
+      !entry.window.isDestroyed()
+        ? manager
+        : undefined,
+    managers: () => [manager],
+    logError: (message, error) => console.error(`[node-browser-automation] ${message}`, error),
+    onProviderLost: () => {
+      const active = nodeAutomationProviders.get(entry.windowId)
+      if (active?.provider !== provider) return
+      nodeAutomationProviders.delete(entry.windowId)
+      void Promise.allSettled([
+        provider.stop('Node provider lost'),
+        sidecar.revokeAutomationProviderForTrustedOwner(entry.windowId, entry.generation, identity)
+      ]).then(() => requestNodeAutomationRecovery(context))
+    }
+  })
+  nodeAutomationProviders.set(entry.windowId, {
+    generation: entry.generation,
+    sidecar,
+    profileKey: approvedProfileKey,
+    browserViews: context.browserViews,
+    provider,
+    manager,
+    identity
+  })
+  try {
+    provider.start()
+  } catch (error) {
+    if (nodeAutomationProviders.get(entry.windowId)?.provider === provider)
+      nodeAutomationProviders.delete(entry.windowId)
+    await Promise.allSettled([
+      provider.stop('Node provider startup failed'),
+      sidecar.revokeAutomationProviderForTrustedOwner(entry.windowId, entry.generation, identity)
+    ])
+    throw error
+  }
+}
+
 function serializeReadyBindingOperation<T>(operation: () => Promise<T>): Promise<T> {
   const result = readyBindingOperation.catch(() => undefined).then(operation)
   readyBindingOperation = result.then(
@@ -554,6 +1670,7 @@ async function createMainWindow(
   let registryRemoval: Promise<unknown> | undefined
   return acquireMainWindow({
     clear: (window) => {
+      nodeSidecar?.releaseWindowResources(windowRegistry.findByWindow(window)?.windowId)
       registryRemoval ??= windowRegistry.removeWindow(window, 'closed')
     },
     create: () =>
@@ -580,7 +1697,9 @@ async function createMainWindow(
           )
         ) {
           event.preventDefault()
-          void requestServiceWindowClose(window)
+          void (nodeOnlyWindowIds.has(windowRegistry.findByWindow(window)?.windowId ?? '')
+            ? requestNodeWindowClose(window)
+            : requestServiceWindowClose(window))
           return
         }
         if (process.platform !== 'darwin') quitOrchestrator.windowClose(event)
@@ -590,29 +1709,37 @@ async function createMainWindow(
       acquisition.addCleanup(removeWindowApplicationMenu)
 
       const currentLifecycle = lifecycle
-      if (!currentLifecycle || !supervisor) {
+      if ((!currentLifecycle || !supervisor) && !nativeNodeDesktop) {
         throw new Error('Desktop lifecycle is unavailable')
       }
       acquiredLifecycle = currentLifecycle
 
-      const stopLifecycleForwarding = forwardLifecycleState(window, (listener) =>
-        currentLifecycle.onStateChanged(listener)
-      )
-      acquisition.addCleanup(stopLifecycleForwarding)
+      if (currentLifecycle) {
+        const stopLifecycleForwarding = forwardLifecycleState(window, (listener) =>
+          currentLifecycle.onStateChanged(listener)
+        )
+        acquisition.addCleanup(stopLifecycleForwarding)
+      }
 
       const stateController = new WindowStateController(window, {
         getDisplayMatching: (bounds) => toDisplaySnapshot(screen.getDisplayMatching(bounds))
       })
-      const client = currentLifecycle.getClient()
-      if (client) stateController.setClient(client, savedState)
+      const client = currentLifecycle?.getClient()
+      if (
+        client &&
+        !nodeCoreDemoReady &&
+        !(serviceWindowId && nodeOnlyWindowIds.has(serviceWindowId))
+      )
+        stateController.setClient(client, savedState)
 
       provisionalWindowId = serviceWindowId ?? randomUUID()
       acquiredRegistryBinding = new DesktopWindowBinding(stateController)
       acquisition.addCleanup(async () => {
+        nodeSidecar?.releaseWindowResources(windowRegistry.findByWindow(window)?.windowId)
         registryRemoval ??= windowRegistry.removeWindow(window, 'closed')
         await registryRemoval
       })
-      installRendererCrashRecovery(window, currentLifecycle)
+      if (currentLifecycle) installRendererCrashRecovery(window, currentLifecycle)
       window.once('closed', () => {
         void acquisition.release().catch((error) => {
           console.error('[window] failed to release main-window bindings', error)
@@ -622,6 +1749,13 @@ async function createMainWindow(
     isDestroyed: (window) => window.isDestroyed(),
     load: (window) => {
       const currentLifecycle = acquiredLifecycle
+      if (!currentLifecycle && nativeNodeDesktop) {
+        const bind =
+          nodeCoreDemoReady && nodeSidecar ? bindNativeNodeWindow(window) : Promise.resolve()
+        return bind.then(() =>
+          window.loadURL(resolveRendererTarget(app.isPackaged, process.env.ELECTRON_RENDERER_URL))
+        )
+      }
       if (!currentLifecycle) return Promise.reject(new Error('Desktop lifecycle is unavailable'))
       return loadRendererForCurrentLifecycle({
         getReadyClient: () => getReadyClient(currentLifecycle),
@@ -655,7 +1789,13 @@ function createServicePlacementWindow(
   if (generation !== undefined) placementGenerations.set(windowId, generation)
   const pending = placementCreations.get(windowId)
   if (pending) return pending
-  const creation = resolveSavedWindowStateFor(client, windowId).then((savedState) =>
+  const creation = (
+    nodeCoreDemoReady && nodeSidecar
+      ? resolveSavedNodeWindowStateFor(nodeSidecar, windowId)
+      : nodeOnlyWindowIds.has(windowId)
+        ? Promise.resolve(undefined)
+        : resolveSavedWindowStateFor(client, windowId)
+  ).then((savedState) =>
     createMainWindow(savedState, windowId, placementGenerations.get(windowId) ?? generation)
   )
   placementCreations.set(windowId, creation)
@@ -663,6 +1803,45 @@ function createServicePlacementWindow(
     if (placementCreations.get(windowId) === creation) placementCreations.delete(windowId)
     placementGenerations.delete(windowId)
   })
+}
+
+async function createNativeNodePlacementWindow(
+  sidecar: NodeSidecar,
+  windowId: string
+): Promise<BrowserWindow> {
+  const existing = windowRegistry.get(windowId)
+  if (existing) return existing.window
+  const pending = placementCreations.get(windowId)
+  if (pending) return pending
+  nodeOnlyWindowIds.add(windowId)
+  const creation = resolveSavedNodeWindowStateFor(sidecar, windowId).then((savedState) =>
+    createMainWindow(savedState, windowId)
+  )
+  placementCreations.set(windowId, creation)
+  try {
+    return await creation
+  } catch (error) {
+    nodeOnlyWindowIds.delete(windowId)
+    throw error
+  } finally {
+    if (placementCreations.get(windowId) === creation) placementCreations.delete(windowId)
+  }
+}
+
+async function createInitialNativeWindows(): Promise<BrowserWindow | undefined> {
+  const sidecar = nodeSidecar
+  if (!nativeNodeDesktop || !nodeCoreDemoReady || !sidecar) return undefined
+  const topology = await sidecar.client.listWindows()
+  const focused = topology.windows.find(({ windowId }) => windowId === topology.focusedWindowId)
+  const ordered = focused
+    ? [focused, ...topology.windows.filter((window) => window !== focused)]
+    : topology.windows
+  for (const placement of ordered) {
+    await createNativeNodePlacementWindow(sidecar, placement.windowId)
+  }
+  const target = focused ? windowRegistry.get(focused.windowId)?.window : currentWindow()
+  target?.focus()
+  return target
 }
 
 function discardMainWindow(window: BrowserWindow): void {
@@ -766,6 +1945,19 @@ async function resolveSavedWindowStateFor(
   }
 }
 
+async function resolveSavedNodeWindowStateFor(
+  sidecar: NodeSidecar,
+  windowId: string
+): Promise<WindowStateSnapshot | undefined> {
+  try {
+    const result = await sidecar.getWindowStateForTrustedPlacement(windowId)
+    return visibleSavedWindowState(result.state, screen.getAllDisplays().map(toDisplaySnapshot))
+  } catch (error) {
+    console.error('[node-sidecar] saved window state is unavailable', error)
+    return undefined
+  }
+}
+
 function toDisplaySnapshot(display: Electron.Display): DisplaySnapshot {
   return { id: display.id, workArea: display.workArea }
 }
@@ -788,6 +1980,9 @@ const windowCreationCoordinator = new WindowCreationCoordinator<
 })
 
 function createWindowForCurrentState(): Promise<BrowserWindow | undefined> {
+  if (nativeNodeDesktop) {
+    return currentWindow() ? Promise.resolve(currentWindow()) : createInitialNativeWindows()
+  }
   if (!lifecycle || !supervisor) return Promise.resolve(undefined)
   return windowCreationCoordinator.ensureWindow()
 }
@@ -841,9 +2036,36 @@ async function createInitialWindowForCurrentState(): Promise<BrowserWindow | und
     }
     if (windowRegistry.size === 0) throw new Error('No service placement could be restored')
     focusedWindow?.focus()
+    await restoreNodeOnlyWindows(client, new Set(topology.windows.map(({ windowId }) => windowId)))
     return focusedWindow ?? currentWindow()
   } catch {
     return windowRegistry.size > 0 ? currentWindow() : createWindowForCurrentState()
+  }
+}
+
+async function restoreNodeOnlyWindows(
+  rustClient: ControlClient,
+  rustWindowIds: ReadonlySet<string>
+): Promise<void> {
+  const sidecar = nodeCoreDemoReady ? nodeSidecar : undefined
+  if (!sidecar) return
+  const topology = await sidecar.client.listWindows()
+  const ordered = [
+    ...topology.windows.filter(({ windowId }) => windowId === topology.focusedWindowId),
+    ...topology.windows.filter(({ windowId }) => windowId !== topology.focusedWindowId)
+  ]
+  for (const { windowId } of ordered) {
+    if (rustWindowIds.has(windowId) || windowRegistry.get(windowId)) continue
+    nodeOnlyWindowIds.add(windowId)
+    try {
+      await createServicePlacementWindow(rustClient, windowId)
+    } catch (error) {
+      nodeOnlyWindowIds.delete(windowId)
+      console.error(`[window] failed to restore Node placement ${windowId}`, error)
+    }
+  }
+  if (!rustWindowIds.has(topology.focusedWindowId)) {
+    windowRegistry.get(topology.focusedWindowId)?.window.focus()
   }
 }
 
@@ -890,6 +2112,620 @@ async function requestServiceWindowClose(window: BrowserWindow): Promise<void> {
   }
 }
 
+async function requestNodeWindowClose(window: BrowserWindow): Promise<void> {
+  const entry = windowRegistry.findByWindow(window)
+  const sidecar = nodeSidecar
+  if (!entry || !sidecar || !nodeCoreDemoReady || closingWindowIds.has(entry.windowId)) return
+  closingWindowIds.add(entry.windowId)
+  try {
+    const topology = await sidecar.listWindowsForTrustedOwner(entry.windowId)
+    const current = topology.windows.find(({ windowId }) => windowId === entry.windowId)
+    const target = topology.windows.find(
+      ({ hostingState, windowId }) =>
+        windowId !== entry.windowId &&
+        hostingState === 'hosted' &&
+        windowRegistry.get(windowId)?.window.isDestroyed() === false
+    )
+    if (!current || !target) throw new Error('No eligible Node window rehome target is available')
+    await closeNodeWindowPlacement(sidecar, entry, windowRegistry.get(target.windowId)!, {
+      mutation: {
+        expectedRevision: topology.revision,
+        idempotencyEpoch: topology.idempotencyEpoch,
+        idempotencyKey: randomUUID()
+      },
+      window: { windowId: current.windowId, expectedRevision: current.revision },
+      policy: 'rehome',
+      rehomeTarget: { windowId: target.windowId, expectedRevision: target.revision }
+    })
+  } catch (error) {
+    console.error('[window] Node close request failed', error)
+  } finally {
+    closingWindowIds.delete(entry.windowId)
+  }
+}
+
+async function detachNodeTab(
+  source: WindowRegistryEntry,
+  input: ReturnType<typeof tabDetachParamsSchema.parse>
+) {
+  const params = tabDetachParamsSchema.parse(input)
+  const sidecar = nodeSidecar
+  const rustClient = lifecycle?.getClient()
+  const current = (): void => {
+    if (
+      !nodeCoreDemoReady ||
+      !sidecar ||
+      nodeSidecar !== sidecar ||
+      windowRegistry.get(source.windowId) !== source ||
+      source.window.isDestroyed()
+    )
+      throw new Error('The Node tab detach owner changed')
+  }
+  current()
+  if ((!rustClient && !nativeNodeDesktop) || params.source.windowId !== source.windowId)
+    throw new Error('The Node tab detach owner changed')
+  const [topology, { snapshot }] = await Promise.all([
+    sidecar!.listWindowsForTrustedOwner(source.windowId),
+    sidecar!.client.listWorkspaces()
+  ])
+  current()
+  const placement = topology.windows.find(({ windowId }) => windowId === source.windowId)
+  const workspace = snapshot.workspaces.find(({ id }) => id === params.source.workspaceId)
+  const tab = workspace?.tabs.find(({ id }) => id === params.source.tabId)
+  if (
+    topology.revision !== params.mutation.expectedRevision ||
+    topology.idempotencyEpoch !== params.mutation.idempotencyEpoch ||
+    snapshot.revision !== topology.revision ||
+    placement?.revision !== params.source.expectedWindowRevision ||
+    !placement.workspaceIds.includes(params.source.workspaceId) ||
+    !tab ||
+    tab.paneId !== params.source.paneId
+  )
+    throw new Error('The Node tab detach placement changed')
+  const terminalId = tab.content.kind === 'terminal' ? tab.content.runtimeSessionId : undefined
+  const remote = terminalId !== undefined && sidecar!.isRemoteTerminalBinding(terminalId)
+  const attached = terminalId !== undefined && source.terminalAttachments.has(terminalId)
+  if (
+    terminalId &&
+    !remote &&
+    sidecar!.localTerminalSocketOwner(terminalId) !== (attached ? source.windowId : undefined)
+  )
+    throw new Error('The Node terminal socket owner changed')
+  const browserSessionId =
+    tab.content.kind === 'browser' ? tab.content.state.browserSessionId : undefined
+  if (tab.content.kind === 'browser' && !browserSessionId)
+    throw new Error('The Node browser has no runtime identity')
+  if (
+    browserSessionId &&
+    windowRegistry
+      .list()
+      .some((entry) => entry !== source && entry.binding.browserViews.ownsSession(browserSessionId))
+  )
+    throw new Error('The Node browser native owner changed')
+  const descriptor = browserSessionId
+    ? source.binding.browserViews
+        .ownedTransferDescriptors()
+        .find((item) => item.browserSessionId === browserSessionId)
+    : undefined
+  if (
+    descriptor &&
+    (descriptor.workspaceId !== workspace!.id ||
+      descriptor.paneId !== tab.paneId ||
+      descriptor.tabId !== tab.id)
+  )
+    throw new Error('The Node browser native placement changed')
+  const terminalTransfer = sidecar!.suspendLocalTerminalEvents(
+    source.windowId,
+    attached && !remote ? [terminalId!] : []
+  )
+  const remoteTransfer = remote
+    ? sidecar!.suspendRemoteTerminalEvents(source.windowId, terminalId!)
+    : undefined
+  let resumeBrowser: (() => void) | undefined
+  try {
+    if (descriptor)
+      resumeBrowser = source.binding.browserViews.suspendOwnedSession(descriptor.browserSessionId)
+  } catch (error) {
+    remoteTransfer?.rollback()
+    terminalTransfer.rollback()
+    throw error
+  }
+  const rollback = (): void => {
+    resumeBrowser?.()
+    remoteTransfer?.rollback()
+    terminalTransfer.rollback()
+  }
+  let result: ReturnType<typeof advancedTabMutationResultSchema.parse> | undefined
+  try {
+    result = advancedTabMutationResultSchema.parse(
+      await sidecar!.detachTabForTrustedOwner(source.windowId, params)
+    )
+  } catch (error) {
+    result = await sidecar!
+      .detachTabForTrustedOwner(source.windowId, params)
+      .then((value) => advancedTabMutationResultSchema.parse(value))
+      .catch(() => undefined)
+    if (!result) {
+      const [latest, newTopology] = await Promise.all([
+        sidecar!.client.listWorkspaces().catch(() => undefined),
+        sidecar!.client.listWindows().catch(() => undefined)
+      ])
+      const stillSource = latest?.snapshot.workspaces
+        .find(({ id }) => id === params.source.workspaceId)
+        ?.tabs.some(({ id }) => id === tab.id)
+      const detachedWorkspace = latest?.snapshot.workspaces.find(
+        (item) => item.id !== params.source.workspaceId && item.tabs.some(({ id }) => id === tab.id)
+      )
+      const detachedWindow = newTopology?.windows.find(
+        (item) => detachedWorkspace && item.workspaceIds.includes(detachedWorkspace.id)
+      )
+      if (detachedWorkspace && detachedWindow) {
+        result = advancedTabMutationResultSchema.parse({
+          revision: params.mutation.expectedRevision + 1,
+          idempotencyEpoch: params.mutation.idempotencyEpoch,
+          tabId: tab.id,
+          ownershipKind: tab.content.kind,
+          ...(browserSessionId ? { runtimeSessionId: browserSessionId } : {}),
+          placement: {
+            windowId: detachedWindow.windowId,
+            workspaceId: detachedWorkspace.id,
+            paneId: detachedWorkspace.tabs.find(({ id }) => id === tab.id)!.paneId,
+            index: 0,
+            windowRevision: 0
+          },
+          transferEpoch: params.mutation.expectedRevision + 1,
+          replayed: true
+        })
+      } else if (stillSource && latest && newTopology) {
+        rollback()
+        throw error
+      } else {
+        throw new Error('Node tab detach outcome is unknown; resources are quarantined', {
+          cause: error
+        })
+      }
+    }
+  }
+  current()
+  nodeOnlyWindowIds.add(result.placement.windowId)
+  if (!windowRegistry.get(result.placement.windowId)) {
+    const created = rustClient
+      ? await createServicePlacementWindow(rustClient, result.placement.windowId)
+      : await createNativeNodePlacementWindow(sidecar!, result.placement.windowId)
+    if (created.isDestroyed()) throw new Error('The detached Node window was destroyed')
+  }
+  current()
+  const target = windowRegistry.get(result.placement.windowId)
+  if (!target || target.window.isDestroyed())
+    throw new Error('The detached Node window is unavailable')
+  if (descriptor) {
+    const { snapshot: latest } = await sidecar!.client.listWorkspaces()
+    const detachedWorkspace = latest.workspaces.find(
+      ({ id }) => id === result!.placement.workspaceId
+    )
+    if (!detachedWorkspace) throw new Error('The detached browser workspace is unavailable')
+    await target.binding.browserViews.mountTransferred(
+      {
+        ...descriptor,
+        workspaceId: result.placement.workspaceId,
+        paneId: result.placement.paneId
+      },
+      {
+        revision: latest.revision,
+        workspace: detachedWorkspace
+      } as unknown as WorkspaceSnapshotResult
+    )
+    target.binding.browserViews.activateTransferredSession(descriptor.browserSessionId)
+    source.binding.browserViews.destroyOwnedSession(descriptor.browserSessionId)
+    windowRegistry.forgetRendererOwnership(descriptor.browserSessionId, source.windowId)
+    windowRegistry.recordRendererOwnership(descriptor.browserSessionId, target.windowId)
+  }
+  terminalTransfer.finalize()
+  remoteTransfer?.finalize(target.windowId)
+  if (terminalId) {
+    source.terminalAttachments.delete(terminalId)
+    windowRegistry.forgetRendererOwnership(terminalId, source.windowId)
+  }
+  source.window.webContents.send(DESKTOP_IPC.desktopBindingRebind)
+  source.window.webContents.send(DESKTOP_IPC.browserViewsRebind)
+  target.window.webContents.send(DESKTOP_IPC.desktopBindingRebind)
+  target.window.webContents.send(DESKTOP_IPC.browserViewsRebind)
+  target.window.focus()
+  return result
+}
+
+async function moveNodeTabExact(
+  source: WindowRegistryEntry,
+  input: ReturnType<typeof tabMoveExactParamsSchema.parse>
+) {
+  const params = tabMoveExactParamsSchema.parse(input)
+  const sidecar = nodeSidecar
+  const target = windowRegistry.get(params.target.windowId)
+  const current = (): void => {
+    if (
+      !nodeCoreDemoReady ||
+      nodeSidecar !== sidecar ||
+      windowRegistry.get(source.windowId) !== source ||
+      windowRegistry.get(params.target.windowId) !== target ||
+      source.window.isDestroyed() ||
+      !target ||
+      target.window.isDestroyed()
+    )
+      throw new Error('The Node tab transfer owner changed')
+  }
+  current()
+  if (!sidecar || !target || params.source.windowId !== source.windowId)
+    throw new Error('The Node tab transfer owner changed')
+  if (target === source) throw new Error('Move tab to another window requires another window')
+  if (params.source.workspaceId === params.target.workspaceId)
+    throw new Error('A workspace cannot belong to two windows')
+  const [topology, { snapshot }] = await Promise.all([
+    sidecar.listWindowsForTrustedOwner(source.windowId),
+    sidecar.client.listWorkspaces()
+  ])
+  current()
+  const sourcePlacement = topology.windows.find(({ windowId }) => windowId === source.windowId)
+  const targetPlacement = topology.windows.find(({ windowId }) => windowId === target.windowId)
+  const sourceWorkspace = snapshot.workspaces.find(({ id }) => id === params.source.workspaceId)
+  const targetWorkspace = snapshot.workspaces.find(({ id }) => id === params.target.workspaceId)
+  const tab = sourceWorkspace?.tabs.find(({ id }) => id === params.source.tabId)
+  if (
+    topology.revision !== params.mutation.expectedRevision ||
+    topology.idempotencyEpoch !== params.mutation.idempotencyEpoch ||
+    snapshot.revision !== topology.revision ||
+    sourcePlacement?.revision !== params.source.expectedWindowRevision ||
+    targetPlacement?.revision !== params.target.expectedWindowRevision ||
+    !sourcePlacement?.workspaceIds.includes(params.source.workspaceId) ||
+    !targetPlacement?.workspaceIds.includes(params.target.workspaceId) ||
+    !tab ||
+    tab.paneId !== params.source.paneId ||
+    !targetWorkspace?.panes.some(({ id }) => id === params.target.paneId)
+  )
+    throw new Error('The Node tab placement changed')
+  if (tab.content.kind === 'browser') {
+    const browserTab = { ...tab, content: tab.content }
+    const browserSessionId = tab.content.state.browserSessionId
+    if (!browserSessionId) throw new Error('The Node browser has no runtime identity')
+    const owners = windowRegistry
+      .list()
+      .filter((entry) => entry.binding.browserViews.ownsSession(browserSessionId))
+    if (owners.some((entry) => entry !== source))
+      throw new Error('The Node browser native owner changed')
+    const descriptor = source.binding.browserViews
+      .ownedTransferDescriptors()
+      .find((item) => item.browserSessionId === browserSessionId)
+    if (
+      descriptor &&
+      (descriptor.workspaceId !== params.source.workspaceId ||
+        descriptor.paneId !== params.source.paneId ||
+        descriptor.tabId !== params.source.tabId)
+    )
+      throw new Error('The Node browser native placement changed')
+    const finishCommitted = (): void => {
+      if (windowRegistry.get(source.windowId) === source && !source.window.isDestroyed()) {
+        source.window.webContents.send(DESKTOP_IPC.desktopBindingRebind)
+        source.window.webContents.send(DESKTOP_IPC.browserViewsRebind)
+      }
+      if (windowRegistry.get(target.windowId) === target && !target.window.isDestroyed()) {
+        if (target.window.isMinimized()) target.window.restore()
+        target.window.focus()
+        target.window.webContents.send(DESKTOP_IPC.desktopBindingRebind)
+        target.window.webContents.send(DESKTOP_IPC.browserViewsRebind)
+      }
+    }
+    let result: ReturnType<typeof advancedTabMutationResultSchema.parse> | undefined
+    if (descriptor) {
+      const targetPane = targetWorkspace.panes.find(({ id }) => id === params.target.paneId)!
+      const targetSnapshot = {
+        revision: snapshot.revision,
+        workspace: {
+          ...targetWorkspace,
+          selectedPaneId: targetPane.id,
+          panes: targetWorkspace.panes.map((pane) =>
+            pane.id === targetPane.id
+              ? { ...pane, tabIds: [...pane.tabIds, tab.id], selectedTabId: tab.id }
+              : pane
+          ),
+          tabs: [...targetWorkspace.tabs, { ...browserTab, paneId: targetPane.id }]
+        }
+      } as unknown as WorkspaceSnapshotResult
+      await moveNodeBrowserTab({
+        source: source.binding.browserViews,
+        target: target.binding.browserViews,
+        descriptor,
+        destination: { workspaceId: targetWorkspace.id, paneId: targetPane.id },
+        targetSnapshot,
+        assertCurrent: current,
+        commit: async () => {
+          result = advancedTabMutationResultSchema.parse(
+            await sidecar.moveTabExactForTrustedOwner(source.windowId, params)
+          )
+        },
+        resolveCommit: async () => {
+          const { snapshot: latest } = await sidecar.client.listWorkspaces()
+          const inSource = latest.workspaces
+            .find(({ id }) => id === params.source.workspaceId)
+            ?.tabs.some(({ id }) => id === params.source.tabId)
+          const inTarget = latest.workspaces
+            .find(({ id }) => id === params.target.workspaceId)
+            ?.tabs.some(
+              ({ id, paneId }) => id === params.source.tabId && paneId === params.target.paneId
+            )
+          return inTarget && !inSource
+            ? 'committed'
+            : inSource && !inTarget
+              ? 'not-committed'
+              : 'unknown'
+        },
+        transferred: (id) => {
+          windowRegistry.forgetRendererOwnership(id, source.windowId)
+          windowRegistry.recordRendererOwnership(id, target.windowId)
+          finishCommitted()
+        }
+      })
+    } else {
+      result = advancedTabMutationResultSchema.parse(
+        await sidecar.moveTabExactForTrustedOwner(source.windowId, params)
+      )
+      finishCommitted()
+    }
+    if (
+      !result ||
+      result.tabId !== tab.id ||
+      result.ownershipKind !== 'browser' ||
+      result.runtimeSessionId !== browserSessionId ||
+      result.placement.windowId !== target.windowId ||
+      result.placement.workspaceId !== targetWorkspace.id ||
+      result.placement.paneId !== params.target.paneId
+    )
+      throw new Error('The Node browser move returned a different placement')
+    return result
+  }
+  const terminalId = tab.content.runtimeSessionId
+  const remote = terminalId !== undefined && sidecar.isRemoteTerminalBinding(terminalId)
+  if (terminalId && target.terminalAttachments.has(terminalId))
+    throw new Error('The target already owns the terminal')
+  if (
+    terminalId &&
+    !remote &&
+    sidecar.localTerminalSocketOwner(terminalId) !==
+      (source.terminalAttachments.has(terminalId) ? source.windowId : undefined)
+  )
+    throw new Error('The Node terminal socket owner changed')
+  const attached = terminalId !== undefined && source.terminalAttachments.has(terminalId)
+  const transfer =
+    attached && !remote
+      ? sidecar.suspendLocalTerminalEvents(source.windowId, [terminalId])
+      : undefined
+  const remoteTransfer = remote
+    ? sidecar.suspendRemoteTerminalEvents(source.windowId, terminalId!)
+    : undefined
+  const resolveCommit = async (): Promise<'committed' | 'not-committed' | 'unknown'> => {
+    const { snapshot: latest } = await sidecar.client.listWorkspaces()
+    const inSource = latest.workspaces
+      .find(({ id }) => id === params.source.workspaceId)
+      ?.tabs.find(({ id }) => id === params.source.tabId)
+    const inTarget = latest.workspaces
+      .find(({ id }) => id === params.target.workspaceId)
+      ?.tabs.find(({ id }) => id === params.source.tabId)
+    if (inTarget?.paneId === params.target.paneId && !inSource) return 'committed'
+    if (inSource?.paneId === params.source.paneId && !inTarget) return 'not-committed'
+    return 'unknown'
+  }
+  const finishCommitted = (): void => {
+    let transferError: unknown
+    if (transfer) {
+      if (transfer.isCurrent()) {
+        try {
+          transfer.finalize()
+        } catch (error) {
+          transferError = error
+        }
+      } else {
+        transferError = new Error(
+          'The committed terminal socket changed; renderer resync is required'
+        )
+      }
+    }
+    if (remoteTransfer) {
+      if (remoteTransfer.isCurrent()) {
+        try {
+          remoteTransfer.finalize(target.windowId)
+        } catch (error) {
+          transferError = error
+        }
+      } else {
+        transferError = new Error('The committed remote terminal owner changed')
+      }
+    }
+    if (terminalId) {
+      source.terminalAttachments.delete(terminalId)
+      windowRegistry.forgetRendererOwnership(terminalId, source.windowId)
+    }
+    if (windowRegistry.get(source.windowId) === source && !source.window.isDestroyed())
+      source.window.webContents.send(DESKTOP_IPC.desktopBindingRebind)
+    if (windowRegistry.get(target.windowId) === target && !target.window.isDestroyed()) {
+      if (target.window.isMinimized()) target.window.restore()
+      target.window.focus()
+      target.window.webContents.send(DESKTOP_IPC.desktopBindingRebind)
+    }
+    if (transferError) throw transferError
+  }
+  let result: ReturnType<typeof advancedTabMutationResultSchema.parse>
+  try {
+    result = advancedTabMutationResultSchema.parse(
+      await sidecar.moveTabExactForTrustedOwner(source.windowId, params)
+    )
+    if (
+      result.tabId !== params.source.tabId ||
+      result.placement.windowId !== target.windowId ||
+      result.placement.workspaceId !== params.target.workspaceId ||
+      result.placement.paneId !== params.target.paneId
+    )
+      throw new Error('The Node tab move returned a different placement')
+  } catch (error) {
+    const outcome = await resolveCommit().catch(() => 'unknown' as const)
+    if (outcome === 'not-committed') {
+      transfer?.rollback()
+      remoteTransfer?.rollback()
+    }
+    if (outcome === 'committed') finishCommitted()
+    throw error
+  }
+  finishCommitted()
+  return result
+}
+
+async function closeNodeWindowPlacement(
+  sidecar: NodeSidecar,
+  source: WindowRegistryEntry,
+  target: WindowRegistryEntry,
+  params: WindowCloseParams
+) {
+  let terminalTransfer: ReturnType<NodeSidecar['suspendLocalTerminalEvents']> | undefined
+  const remoteTransfers: ReturnType<NodeSidecar['suspendRemoteTerminalEvents']>[] = []
+  const current = (): void => {
+    if (
+      !nodeCoreDemoReady ||
+      nodeSidecar !== sidecar ||
+      windowRegistry.get(source.windowId) !== source ||
+      windowRegistry.get(target.windowId) !== target ||
+      source.window.isDestroyed() ||
+      target.window.isDestroyed() ||
+      (terminalTransfer && !terminalTransfer.isCurrent()) ||
+      remoteTransfers.some((transfer) => !transfer.isCurrent())
+    ) {
+      throw new Error('The Node window owner changed during rehome')
+    }
+  }
+  current()
+  const topology = await sidecar.listWindowsForTrustedOwner(source.windowId)
+  current()
+  const placement = topology.windows.find(({ windowId }) => windowId === source.windowId)
+  if (!placement || !topology.windows.some(({ windowId }) => windowId === target.windowId)) {
+    throw new Error('The Node rehome placement is unavailable')
+  }
+  const { snapshot } = await sidecar.client.listWorkspaces()
+  current()
+  if (
+    snapshot.revision !== params.mutation.expectedRevision ||
+    topology.revision !== snapshot.revision ||
+    placement.revision !== params.window.expectedRevision
+  ) {
+    throw new Error('The Node rehome projection changed')
+  }
+  const workspaces = new Map(snapshot.workspaces.map((workspace) => [workspace.id, workspace]))
+  const terminalIds = [...source.terminalAttachments]
+  const placedTerminalIds = new Set(
+    placement.workspaceIds.flatMap((workspaceId) =>
+      (workspaces.get(workspaceId)?.tabs ?? []).flatMap((tab) =>
+        tab.content.kind === 'terminal' && tab.content.runtimeSessionId
+          ? [tab.content.runtimeSessionId]
+          : []
+      )
+    )
+  )
+  for (const id of terminalIds) {
+    if (!placedTerminalIds.has(id) || target.terminalAttachments.has(id))
+      throw new Error('The Node terminal is outside the closing window placement')
+  }
+  terminalTransfer = sidecar.suspendLocalTerminalEvents(
+    source.windowId,
+    terminalIds.filter((id) => !sidecar.isRemoteTerminalBinding(id))
+  )
+  try {
+    for (const id of placedTerminalIds) {
+      if (sidecar.isRemoteTerminalBinding(id))
+        remoteTransfers.push(sidecar.suspendRemoteTerminalEvents(source.windowId, id))
+    }
+  } catch (error) {
+    for (const transfer of remoteTransfers.reverse()) transfer.rollback()
+    terminalTransfer.rollback()
+    throw error
+  }
+  let result: Awaited<ReturnType<NodeSidecar['closeWindowForTrustedOwner']>> | undefined
+  let committedTopology: Awaited<ReturnType<typeof sidecar.client.listWindows>> | undefined
+  const resolveCommit = async (): Promise<'committed' | 'not-committed' | 'unknown'> => {
+    const latest = await sidecar.client.listWindows()
+    const destination = latest.windows.find(({ windowId }) => windowId === target.windowId)
+    if (!destination) return 'unknown'
+    if (
+      !latest.windows.some(({ windowId }) => windowId === source.windowId) &&
+      placement.workspaceIds.every((id) => destination.workspaceIds.includes(id))
+    ) {
+      committedTopology = latest
+      return 'committed'
+    }
+    return latest.windows.some(({ windowId }) => windowId === source.windowId)
+      ? 'not-committed'
+      : 'unknown'
+  }
+  try {
+    await rehomeNodeBrowsers({
+      source: source.binding.browserViews,
+      target: {
+        ownsSession: (id) => target.binding.browserViews.ownsSession(id),
+        destroyOwnedSession: (id) => target.binding.browserViews.destroyOwnedSession(id),
+        activateTransferredSession: (id) =>
+          target.binding.browserViews.activateTransferredSession(id),
+        mountTransferred: async (descriptor) => {
+          const workspace = workspaces.get(descriptor.workspaceId)
+          if (!workspace) throw new Error('The Node browser workspace is unavailable')
+          await target.binding.browserViews.mountTransferred(descriptor, {
+            revision: snapshot.revision,
+            workspace
+          } as unknown as WorkspaceSnapshotResult)
+        }
+      },
+      sourceWorkspaceIds: new Set(placement.workspaceIds),
+      assertCurrent: current,
+      commit: async () => {
+        result = await sidecar.closeWindowForTrustedOwner(source.windowId, params)
+      },
+      resolveCommit,
+      transferred: (browserSessionId) =>
+        windowRegistry.recordRendererOwnership(browserSessionId, target.windowId)
+    })
+  } catch (error) {
+    const outcome = await resolveCommit().catch(() => 'unknown' as const)
+    if (outcome === 'not-committed') {
+      for (const transfer of remoteTransfers.reverse()) transfer.rollback()
+      terminalTransfer.rollback()
+    }
+    // An unknown or committed outcome keeps source delivery quiesced. A later
+    // renderer attach or process restart must reconcile the durable placement.
+    throw error
+  }
+  // An uncertain response can still be proven committed by the topology read.
+  if (!result) {
+    if (!committedTopology) throw new Error('The committed Node rehome topology is unavailable')
+    const destination = committedTopology.windows.find(
+      ({ windowId }) => windowId === target.windowId
+    )
+    if (!destination) throw new Error('The committed Node rehome target is unavailable')
+    result = {
+      revision: committedTopology.revision,
+      idempotencyEpoch: committedTopology.idempotencyEpoch,
+      closedWindowId: source.windowId,
+      rehomeTarget: destination,
+      replayed: false
+    }
+  }
+  terminalTransfer.finalize()
+  for (const transfer of remoteTransfers) transfer.finalize(target.windowId)
+  for (const id of terminalIds) {
+    source.terminalAttachments.delete(id)
+    windowRegistry.forgetRendererOwnership(id, source.windowId)
+  }
+  nodeOnlyWindowIds.delete(source.windowId)
+  if (windowRegistry.get(source.windowId) === source) source.window.destroy()
+  if (windowRegistry.get(target.windowId) === target && !target.window.isDestroyed()) {
+    target.window.webContents.send(DESKTOP_IPC.desktopBindingRebind)
+    target.window.webContents.send(DESKTOP_IPC.browserViewsRebind)
+  }
+  return result
+}
+
 function scopedWindowStateClient(
   client: ControlClient,
   window: BrowserWindow
@@ -909,6 +2745,32 @@ function scopedWindowStateClient(
     },
     updateWindowState: async ({ state }) => {
       const result = await client.updateWindowStateFor({ windowId: windowId(), state })
+      return { state: result.state }
+    }
+  }
+}
+
+function scopedNodeWindowStateClient(
+  sidecar: NodeSidecar,
+  window: BrowserWindow
+): {
+  getWindowState(): Promise<unknown>
+  updateWindowState(params: { state: WindowStateSnapshot }): Promise<unknown>
+} {
+  const windowId = (): string => {
+    const entry = windowRegistry.findByWindow(window)
+    if (!entry || nodeSidecar !== sidecar || !nodeCoreDemoReady) {
+      throw new Error('Node window-state owner is unavailable')
+    }
+    return entry.windowId
+  }
+  return {
+    getWindowState: async () => {
+      const result = await sidecar.getWindowStateForTrustedOwner(windowId())
+      return { state: result.state }
+    },
+    updateWindowState: async ({ state }) => {
+      const result = await sidecar.updateWindowStateForTrustedOwner(windowId(), state)
       return { state: result.state }
     }
   }
@@ -941,7 +2803,10 @@ async function startDesktopProvider(client: ControlClient): Promise<void> {
   const requests = new Map<string, DesktopProviderRequest>()
   const claims = () =>
     providerClaims.snapshot(
-      windowRegistry.list().map(({ generation, windowId }) => ({ windowId, generation }))
+      windowRegistry
+        .list()
+        .filter(({ windowId }) => !nodeOnlyWindowIds.has(windowId))
+        .map(({ generation, windowId }) => ({ windowId, generation }))
     )
   let controllerIdentity: DesktopProviderIdentityParams | undefined
   const requireIdentity = (): DesktopProviderIdentityParams => {
@@ -1375,6 +3240,243 @@ async function executeDesktopProviderRequest(
   }
 }
 
+function setNativeLifecycleState(state: DesktopLifecycleState): void {
+  nativeLifecycleState = state
+  for (const { window } of windowRegistry.list()) {
+    if (!window.isDestroyed()) window.webContents.send(DESKTOP_IPC.lifecycleChanged, state)
+  }
+}
+
+function requireNativeSidecar(): NodeSidecar {
+  if (!nodeCoreDemoReady || !nodeSidecar) throw new Error('The local Node service is unavailable')
+  return nodeSidecar
+}
+
+async function nativeFailureState(
+  databasePath: string,
+  message: string
+): Promise<DesktopLifecycleState> {
+  const source = await lstat(databasePath).catch(() => undefined)
+  const recoveryExport =
+    process.platform === 'linux' &&
+    typeof process.getuid === 'function' &&
+    source?.isFile() === true &&
+    !source.isSymbolicLink() &&
+    source.nlink === 1 &&
+    source.uid === process.getuid() &&
+    (source.mode & 0o777) === 0o600
+  return {
+    status: 'failed',
+    message,
+    availableActions: { recoveryExport, diagnostics: false }
+  }
+}
+
+async function exportNativeRecovery(
+  options: Parameters<typeof NodeSidecar.startNative>[0],
+  destination: string,
+  format: 'sqlite' | 'archive' = 'sqlite'
+): Promise<unknown> {
+  const executable = options.executable ?? process.execPath
+  const helper = join(dirname(options.serverPath), 'recovery-export.mjs')
+  const environment: NodeJS.ProcessEnv = { ...process.env, ELECTRON_RUN_AS_NODE: '1' }
+  delete environment.NODE_OPTIONS
+  delete environment.NODE_PATH
+  const { stdout } = await execFileAsync(
+    executable,
+    [helper, ...(format === 'archive' ? ['--raw'] : []), options.liveDatabasePath, destination],
+    { env: environment, timeout: 30_000, maxBuffer: 16 * 1024 }
+  )
+  return recoveryExportResultSchema.parse(JSON.parse(stdout))
+}
+
+async function restartNativeDesktop(
+  options: Parameters<typeof NodeSidecar.startNative>[0]
+): Promise<void> {
+  if (nativeRestartOperation) return nativeRestartOperation
+  const operation = (async () => {
+    if (quitOrchestrator.isQuitStarted()) throw new Error('Application shutdown is in progress')
+    await Promise.all(windowRegistry.list().map(({ binding }) => binding.stateController.flush()))
+    setNativeLifecycleState({ status: 'starting' })
+    nodeCoreDemoReady = false
+    const previous = nodeSidecar
+    let replacement: NodeSidecar | undefined
+    try {
+      for (const windowId of nodeHostingClaims.keys()) stopNodeHostingForWindow(windowId)
+      await Promise.allSettled([...nodeAutomationStarts.values()])
+      await Promise.all(
+        windowRegistry
+          .list()
+          .map(({ binding }) =>
+            binding instanceof DesktopWindowBinding ? binding.clearReady() : Promise.resolve()
+          )
+      )
+      nodeSidecar = undefined
+      await previous?.stop()
+      replacement = await NodeSidecar.startNative(options)
+      nodeSidecar = replacement
+      nodeCoreDemoReady = true
+      await connectNativeNodeEvents(replacement)
+      for (const { windowId, window } of windowRegistry.list()) {
+        if (!window.isDestroyed() && !nativeRecoveryWindowIds.has(windowId)) {
+          await bindNativeNodeWindow(window)
+        }
+      }
+      await createInitialNativeWindows()
+      for (const windowId of nativeRecoveryWindowIds) {
+        nativeRecoveryWindowIds.delete(windowId)
+        const fallback = windowRegistry.get(windowId)?.window
+        if (fallback && !fallback.isDestroyed()) fallback.destroy()
+      }
+      setNativeLifecycleState({ status: 'ready' })
+    } catch (error) {
+      nodeCoreDemoReady = false
+      nodeSidecar = undefined
+      await Promise.allSettled(
+        windowRegistry
+          .list()
+          .map(({ binding }) =>
+            binding instanceof DesktopWindowBinding ? binding.clearReady() : Promise.resolve()
+          )
+      )
+      await Promise.allSettled([previous?.stop(), replacement?.stop()])
+      console.error('[node] native service restart failed', error)
+      setNativeLifecycleState(
+        await nativeFailureState(options.liveDatabasePath, 'The local service could not restart')
+      )
+      throw error
+    }
+  })()
+  nativeRestartOperation = operation
+  try {
+    await operation
+  } finally {
+    if (nativeRestartOperation === operation) nativeRestartOperation = undefined
+  }
+}
+
+async function startNativeDesktop(userData: string): Promise<void> {
+  const stateDirectory = join(userData, 'state')
+  const runtimeDirectory = join(userData, 'runtime')
+  await mkdir(stateDirectory, { recursive: true, mode: 0o700 })
+  await mkdir(runtimeDirectory, { recursive: true, mode: 0o700 })
+  const stagedRuntime = join(process.resourcesPath, 'node-linux')
+  const serverPath = app.isPackaged
+    ? join(stagedRuntime, 'server', 'dist', 'bin.mjs')
+    : (process.env.AGENT_WORKSPACE_DESKTOP_NODE_SERVER_PATH ??
+      join(import.meta.dirname, '../../../server/dist/bin.mjs'))
+  const options: Parameters<typeof NodeSidecar.startNative>[0] = {
+    serverPath,
+    ...(app.isPackaged ? { executable: join(stagedRuntime, 'bin', 'node') } : {}),
+    liveDatabasePath: join(stateDirectory, 'workspace.sqlite'),
+    backupPath: join(stateDirectory, 'pre-node-migration.sqlite'),
+    native: true,
+    sessionFilePath: join(runtimeDirectory, 'node-cli-session.json'),
+    defaultWorkingDirectory: app.getPath('home'),
+    encryptedSearch: true,
+    remoteTransport: true
+  }
+  nativeNodeDesktop = true
+  registerDesktopLifecycleHandlers(
+    senderBoundIpc,
+    {
+      getState: () => nativeLifecycleState,
+      getClient: () => undefined,
+      restart: () => restartNativeDesktop(options)
+    },
+    {
+      exportRecovery: (destination, format) => exportNativeRecovery(options, destination, format),
+      previewDiagnostics: async () =>
+        diagnosticBundlePreviewSchema.parse(
+          await requireNativeSidecar().client.previewDiagnostics()
+        ),
+      exportDiagnostics: (destination, approvedPreview) =>
+        requireNativeSidecar().client.exportDiagnostics({
+          destination,
+          approvedPreview: diagnosticBundlePreviewSchema.parse(approvedPreview)
+        })
+    },
+    {
+      downloadsDirectory: app.getPath('downloads'),
+      quit: () => app.quit(),
+      isNodeLifecycleEnabled: () => nativeNodeDesktop,
+      isNodeCoreEnabled: () => nodeCoreDemoReady,
+      isNodeConfigurationEnabled: () => nodeSidecar?.configurationWritable === true,
+      isNodeDiagnosticsMode: () => true,
+      isNodeDiagnosticsEnabled: () => nodeSidecar?.diagnosticsEnabled === true,
+      previewNodeDiagnostics: async () =>
+        diagnosticBundlePreviewSchema.parse(
+          await requireNativeSidecar().client.previewDiagnostics()
+        ),
+      exportNodeDiagnostics: (destination, approvedPreview) =>
+        requireNativeSidecar().client.exportDiagnostics({
+          destination,
+          approvedPreview: diagnosticBundlePreviewSchema.parse(approvedPreview)
+        }),
+      getNodeConfiguration: () => requireNativeSidecar().client.getConfiguration(),
+      updateNodeConfiguration: (params) =>
+        requireNativeSidecar().client.updateConfiguration(params),
+      configurationChanged: (channel) => updateController?.applyChannel(channel)
+    }
+  )
+  try {
+    const sidecar = await NodeSidecar.startNative(options)
+    nodeSidecar = sidecar
+    nodeCoreDemoReady = true
+    await connectNativeNodeEvents(sidecar)
+    await createInitialNativeWindows()
+    setNativeLifecycleState({ status: 'ready' })
+    console.info('[node] native desktop ownership is ready')
+  } catch (error) {
+    nodeCoreDemoReady = false
+    await nodeSidecar?.stop().catch(() => undefined)
+    nodeSidecar = undefined
+    console.error('[node] native desktop startup failed', error)
+    setNativeLifecycleState(
+      await nativeFailureState(options.liveDatabasePath, 'The local service could not start')
+    )
+    if (windowRegistry.size === 0) {
+      const fallbackId = randomUUID()
+      nativeRecoveryWindowIds.add(fallbackId)
+      try {
+        await createMainWindow(undefined, fallbackId)
+      } catch (windowError) {
+        nativeRecoveryWindowIds.delete(fallbackId)
+        throw windowError
+      }
+    }
+  }
+}
+
+async function connectNativeNodeEvents(sidecar: NodeSidecar): Promise<void> {
+  sidecar.setBrowserEventSink(async (workspaceId, event) => {
+    if (!nodeCoreDemoReady || nodeSidecar !== sidecar) return
+    const { snapshot } = await sidecar.client.stateSnapshot()
+    for (const placement of snapshot.windowPlacements) {
+      if (!placement.workspaceIds.includes(workspaceId)) continue
+      const owner = windowRegistry.get(placement.id)
+      if (owner && !owner.window.isDestroyed()) {
+        owner.window.webContents.send(DESKTOP_IPC.domainEvent, event)
+      }
+    }
+  })
+  await sidecar.startWorkspaceEvents((channel, event, workspaceId) => {
+    if (!nodeCoreDemoReady || nodeSidecar !== sidecar) return
+    void Promise.all([sidecar.client.stateSnapshot(), sidecar.client.listWorkspaces()])
+      .then(([{ snapshot }, projection]) => {
+        for (const browserViews of nodeBrowserViews.values()) {
+          browserViews.reconcileAuthoritativeSnapshot(projection, false)
+        }
+        for (const placement of snapshot.windowPlacements) {
+          if (!placement.workspaceIds.includes(workspaceId)) continue
+          const entry = windowRegistry.get(placement.id)
+          if (entry && !entry.window.isDestroyed()) entry.window.webContents.send(channel, event)
+        }
+      })
+      .catch((error) => console.error('[node] event delivery failed', error))
+  })
+}
+
 async function start(): Promise<void> {
   const rendererRoot = join(import.meta.dirname, '../renderer')
   protocol.handle(RENDERER_SCHEME, async (request) => {
@@ -1416,43 +3518,7 @@ async function start(): Promise<void> {
     windowRegistry,
     updateController
   )
-  const tokenPath = join(userData, 'secrets', 'control-token.enc')
-  const tokenCipher = createTokenCipher()
-  if (!tokenCipher.isSecure()) {
-    console.warn(
-      'Secure credential storage is unavailable; the control token will remain session-only'
-    )
-  }
-  const token = await new ControlTokenStore(tokenPath, tokenCipher).loadOrCreate()
-  const endpoint = resolveControlEndpoint(app.isPackaged)
-  const cliSessionFilePath =
-    process.platform === 'win32'
-      ? join(userData, 'runtime', CLI_SESSION_FILE_NAME)
-      : join(dirname(endpoint), CLI_SESSION_FILE_NAME)
-  const servicePath = resolveServicePath({
-    isPackaged: app.isPackaged,
-    resourcesPath: process.resourcesPath,
-    workingDirectory: process.cwd()
-  })
-
-  supervisor = new ServiceSupervisor(endpoint, token, servicePath, {
-    stateDatabasePath: join(userData, 'state', 'workspace.sqlite'),
-    configurationPath: join(userData, 'configuration', 'desktop.json'),
-    logDirectoryPath: join(userData, 'logs'),
-    defaultWorkingDirectory: app.getPath('home'),
-    cliSessionFilePath
-  })
-  lifecycle = new LifecycleController(supervisor, {
-    bind: bindReadyClient,
-    unbind: unbindReadyClient
-  })
-  registerDesktopLifecycleHandlers(senderBoundIpc, lifecycle, supervisor, {
-    downloadsDirectory: app.getPath('downloads'),
-    quit: () => app.quit(),
-    configurationChanged: (channel) => updateController?.applyChannel(channel)
-  })
-  await lifecycle.initialize()
-  await createInitialWindowForCurrentState()
+  await startNativeDesktop(userData)
 }
 
 async function performExitCleanup(): Promise<void> {
@@ -1462,7 +3528,29 @@ async function performExitCleanup(): Promise<void> {
         () => undefined
       ),
     logStage: (stage) => console.info(`[shutdown] stage=${stage}`),
-    stopService: () => supervisor?.stop(),
+    stopService: async () => {
+      desktopProviderRecovery.cancel()
+      for (const windowId of nodeAutomationRecovery.keys()) cancelNodeAutomationRecovery(windowId)
+      for (const windowId of nodeHostingClaims.keys()) stopNodeHostingForWindow(windowId)
+      await serializeReadyBindingOperation(stopNativeProviders)
+      await Promise.allSettled([...nodeAutomationStarts.values()])
+      await Promise.all(
+        [...nodeAutomationProviders.values()].map(({ provider }) =>
+          provider.stop('application exit').catch(() => undefined)
+        )
+      )
+      nodeAutomationProviders.clear()
+      await nodeSidecar?.stop()
+      nodeSidecar = undefined
+      // Final renderer cleanup cannot reach the in-memory terminal runtime once shutdown starts.
+      terminalCleanupDuringQuit = true
+      try {
+        await supervisor?.stop()
+      } catch (error) {
+        terminalCleanupDuringQuit = false
+        throw error
+      }
+    },
     reconcileShutdownFailure: () => lifecycle?.reconcileShutdownFailure(),
     commitTeardown: async () => {
       // Keep the live bindings usable until the service has been confirmed stopped. If a later
@@ -1511,10 +3599,11 @@ if (!app.requestSingleInstanceLock()) {
   void app
     .whenReady()
     .then(start)
-    .catch((error: unknown) =>
-      windowCreationEntrypoints.recoverStartup(
+    .catch((error: unknown) => {
+      console.error('[startup] native Node desktop failed', error)
+      return windowCreationEntrypoints.recoverStartup(
         error,
         lifecycle !== undefined && supervisor !== undefined
       )
-    )
+    })
 }

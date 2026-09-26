@@ -1,4 +1,5 @@
 /* eslint-disable @typescript-eslint/require-await */
+import { randomUUID } from 'node:crypto'
 import { mkdtemp, readFile, rm, stat } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
@@ -28,9 +29,9 @@ vi.mock('electron', () => ({
   shell: { openExternal: electron.openExternal, openPath: electron.openPath }
 }))
 
-import { DESKTOP_IPC } from '../shared/desktop-bridge'
-import { desktopMessages } from '../shared/desktop-messages'
-import projection from '../../../../crates/protocol/fixtures/milestone2-projection.json'
+import { DESKTOP_IPC } from '@agent-workspace/contracts/desktop/desktop-bridge'
+import { desktopMessages } from '@agent-workspace/contracts/desktop/desktop-messages'
+import projection from '../../../../packages/protocol-client/fixtures/milestone2-projection.json'
 import type { BrowserViewManager } from './browser-view-manager'
 import { ControlRequestError, type ControlClient } from './control-client'
 import {
@@ -121,6 +122,227 @@ describe('desktop IPC boundary', () => {
 
     expect(() => handler?.({ sender: webContents, senderFrame: {} })).toThrow(/Unauthorized/)
     expect(identify).not.toHaveBeenCalled()
+  })
+
+  it('uses an optional sender-bound Node task read and keeps the Rust fallback', async () => {
+    const request = { limit: 10, cancellationId: '10000000-0000-4000-8000-000000000001' }
+    const result = { tasks: [], nextCursor: null }
+    const listTasks = vi.fn().mockResolvedValue(result)
+    const listTasksFromNodeSidecar = vi.fn().mockResolvedValue(result)
+    registerDesktopHandlers(window, { listTasks } as unknown as ControlClient, browserViews, {
+      isNodeTaskListSelected: () => true,
+      listTasksFromNodeSidecar
+    })
+    const handler = electron.handlers.get(DESKTOP_IPC.taskList)
+
+    await expect(
+      handler?.({ sender: webContents, senderFrame: mainFrame }, request)
+    ).resolves.toEqual(result)
+    expect(listTasksFromNodeSidecar).toHaveBeenCalledWith(
+      expect.objectContaining({ windowId: 'window-a' }),
+      request
+    )
+    expect(listTasks).not.toHaveBeenCalled()
+
+    expect(() => handler?.({ sender: webContents, senderFrame: {} }, request)).toThrow()
+    expect(listTasksFromNodeSidecar).toHaveBeenCalledOnce()
+
+    listTasksFromNodeSidecar.mockReturnValueOnce(undefined)
+    await expect(
+      handler?.({ sender: webContents, senderFrame: mainFrame }, request)
+    ).rejects.toThrow('Node task list is unavailable')
+    expect(listTasks).not.toHaveBeenCalled()
+  })
+
+  it('routes only opt-in remote detach to Node and fails closed for unsupported actions', async () => {
+    const target = {
+      sessionId: '20000000-0000-4000-8000-000000000010',
+      generation: 2,
+      revision: 7
+    }
+    const result = {
+      target: { ...target, revision: 8 },
+      lifecycle: 'detached',
+      observation: 'lastVerified',
+      outcome: 'accepted',
+      revision: 8
+    }
+    const actOnTask = vi.fn()
+    const detachRemoteTaskFromNodeSidecar = vi.fn().mockResolvedValue(result)
+    registerDesktopHandlers(window, { actOnTask } as unknown as ControlClient, browserViews, {
+      isNodeTaskListSelected: () => true,
+      detachRemoteTaskFromNodeSidecar
+    })
+    const event = { sender: webContents, senderFrame: mainFrame }
+    const handler = electron.handlers.get(DESKTOP_IPC.taskAction)
+
+    await expect(handler?.(event, { action: 'detach', target })).resolves.toEqual(result)
+    expect(detachRemoteTaskFromNodeSidecar).toHaveBeenCalledWith(
+      expect.objectContaining({ windowId: 'window-a' }),
+      expect.objectContaining({
+        action: 'detach',
+        target
+      })
+    )
+    const submitted = detachRemoteTaskFromNodeSidecar.mock.calls[0]?.[1] as {
+      mutation: { expectedRevision: number }
+    }
+    expect(submitted.mutation.expectedRevision).toBe(target.revision)
+    expect(actOnTask).not.toHaveBeenCalled()
+    expect(() =>
+      handler?.({ sender: webContents, senderFrame: {} }, { action: 'detach', target })
+    ).toThrow()
+    await expect(handler?.(event, { action: 'terminate', target })).rejects.toThrow(
+      'Node task confirmation is unavailable'
+    )
+    expect(actOnTask).not.toHaveBeenCalled()
+  })
+
+  it('does not fall back to Rust when the selected Node task action hook is missing', async () => {
+    const target = {
+      sessionId: '20000000-0000-4000-8000-000000000010',
+      generation: 2,
+      revision: 7
+    }
+    const actOnTask = vi.fn()
+    registerDesktopHandlers(window, { actOnTask } as unknown as ControlClient, browserViews, {
+      isNodeTaskListSelected: () => true
+    })
+    await expect(
+      electron.handlers.get(DESKTOP_IPC.taskAction)?.(
+        { sender: webContents, senderFrame: mainFrame },
+        { action: 'detach', target }
+      )
+    ).rejects.toThrow('Node task action is unavailable')
+    expect(actOnTask).not.toHaveBeenCalled()
+  })
+
+  it('routes the opt-in Node workspace read only for the current main-frame sender', async () => {
+    const nodeResult = { snapshot: { revision: 1 } }
+    const invokeNodeCore = vi.fn().mockResolvedValue({ handled: true, value: nodeResult })
+    const listWorkspaces = vi.fn()
+    registerDesktopHandlers(window, { listWorkspaces } as unknown as ControlClient, browserViews, {
+      invokeNodeCore
+    })
+    const handler = electron.handlers.get(DESKTOP_IPC.workspaceList)
+
+    await expect(handler?.({ sender: webContents, senderFrame: mainFrame })).resolves.toBe(
+      nodeResult
+    )
+    expect(invokeNodeCore).toHaveBeenCalledWith(
+      expect.objectContaining({ windowId: 'window-a' }),
+      DESKTOP_IPC.workspaceList,
+      []
+    )
+    expect(listWorkspaces).not.toHaveBeenCalled()
+    expect(() => handler?.({ sender: webContents, senderFrame: {} })).toThrow()
+    expect(invokeNodeCore).toHaveBeenCalledOnce()
+  })
+
+  it('never falls through to a sealed Rust binding while Node exclusively owns state', async () => {
+    const listWorkspaces = vi.fn()
+    registerDesktopHandlers(window, { listWorkspaces } as unknown as ControlClient, browserViews, {
+      isNodeCoreEnabled: () => true,
+      isNodeExclusive: () => true,
+      invokeNodeCore: vi.fn().mockResolvedValue({ handled: false })
+    })
+
+    await expect(
+      electron.handlers.get(DESKTOP_IPC.workspaceList)?.({
+        sender: webContents,
+        senderFrame: mainFrame
+      })
+    ).rejects.toThrow('Node owner cannot handle desktop channel')
+    expect(listWorkspaces).not.toHaveBeenCalled()
+  })
+
+  it('routes a Node-exclusive binding without a Rust client and rejects unhandled operations', async () => {
+    const registry = new WindowRegistry()
+    const binding = new DesktopWindowBinding({ clearClient: vi.fn() } as never)
+    binding.replaceNodeExclusive(browserViews, vi.fn().mockResolvedValue(undefined))
+    registry.register('window-a', window, binding)
+    const router = new SenderBoundIpcRouter(registry)
+    const invokeNodeCore = vi
+      .fn()
+      .mockResolvedValueOnce({ handled: true, value: { revision: 3 } })
+      .mockResolvedValue({ handled: false })
+    registerGlobalDesktopHandlers(router, { invokeNodeCore })
+    const event = { sender: webContents, senderFrame: mainFrame }
+
+    await expect(electron.handlers.get(DESKTOP_IPC.workspaceList)?.(event)).resolves.toEqual({
+      revision: 3
+    })
+    await expect(electron.handlers.get(DESKTOP_IPC.workspaceList)?.(event)).rejects.toThrow(
+      `Node owner cannot handle desktop channel ${DESKTOP_IPC.workspaceList}`
+    )
+    expect(invokeNodeCore).toHaveBeenCalledTimes(2)
+
+    registerGlobalDesktopHandlers(router)
+    await expect(electron.handlers.get(DESKTOP_IPC.workspaceList)?.(event)).rejects.toThrow(
+      `Node owner cannot handle desktop channel ${DESKTOP_IPC.workspaceList}`
+    )
+    expect(() =>
+      electron.handlers.get(DESKTOP_IPC.workspaceList)?.({
+        sender: webContents,
+        senderFrame: {}
+      })
+    ).toThrow('Unauthorized')
+  })
+
+  it('opens only a Node-bound workspace path from a current exclusive window', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'node-workspace-path-'))
+    try {
+      const registry = new WindowRegistry()
+      const binding = new DesktopWindowBinding({ clearClient: vi.fn() } as never)
+      binding.replaceNodeExclusive(browserViews, vi.fn().mockResolvedValue(undefined))
+      registry.register('window-a', window, binding)
+      const router = new SenderBoundIpcRouter(registry)
+      const workspaceId = randomUUID()
+      const invokeNodeCore = vi.fn()
+      const resolveNodeWorkspacePath = vi.fn().mockResolvedValue(directory)
+      const openWorkspacePath = vi.fn().mockResolvedValue(undefined)
+      let current = true
+      electron.showOpenDialog.mockResolvedValue({ canceled: false, filePaths: [directory] })
+      registerGlobalDesktopHandlers(router, {
+        isNodeCoreEnabled: () => true,
+        invokeNodeCore,
+        isWindowEntryCurrent: () => current,
+        resolveNodeWorkspacePath,
+        openWorkspacePath,
+        detectWorkspacePathOpeners: async () => [
+          { id: 'fileManager', label: 'File Explorer', kind: 'fileManager' }
+        ]
+      })
+      const event = { sender: webContents, senderFrame: mainFrame }
+      await expect(
+        electron.handlers.get(DESKTOP_IPC.workspacePickDirectory)?.(event)
+      ).resolves.toBe(directory)
+      await expect(
+        electron.handlers.get(DESKTOP_IPC.workspacePathOpeners)?.(event)
+      ).resolves.toEqual([{ id: 'fileManager', label: 'File Explorer', kind: 'fileManager' }])
+      await expect(
+        electron.handlers.get(DESKTOP_IPC.workspacePathOpen)?.(event, {
+          workspaceId,
+          openerId: 'fileManager'
+        })
+      ).resolves.toBeUndefined()
+      expect(resolveNodeWorkspacePath).toHaveBeenCalledWith(
+        expect.objectContaining({ windowId: 'window-a' }),
+        workspaceId
+      )
+      expect(openWorkspacePath).toHaveBeenCalledWith('fileManager', directory)
+      current = false
+      await expect(
+        electron.handlers.get(DESKTOP_IPC.workspacePathOpen)?.(event, {
+          workspaceId,
+          openerId: 'fileManager'
+        })
+      ).rejects.toThrow('Node workspace window changed')
+      expect(openWorkspacePath).toHaveBeenCalledOnce()
+      expect(invokeNodeCore).not.toHaveBeenCalled()
+    } finally {
+      await rm(directory, { recursive: true, force: true })
+    }
   })
 
   it('holds privileged renderer initialization until provider window acknowledgement', async () => {
@@ -372,6 +594,45 @@ describe('desktop IPC boundary', () => {
     expect(exportSearchSource).toHaveBeenCalledWith({ sourceAuthorizationId, confirmationId })
     await expect(readFile(destination, 'utf8')).resolves.toBe(artifactText)
 
+    const nodeDestination = join(directory, 'vault-node.json')
+    const issueNodeSearchExportConfirmation = vi.fn().mockResolvedValue({
+      confirmation: { confirmationId, sourceAuthorizationId, expiresAtMs: 10 }
+    })
+    const exportNodeSearchSource = vi.fn().mockResolvedValue({
+      sourceAuthorizationId,
+      artifact: {
+        document: { documentId: '20000000-0000-4000-8000-000000000022', identityVersion: 1 },
+        offset: 0,
+        text: artifactText,
+        eof: true,
+        contentRevision: 1,
+        displayName: 'search-export.json'
+      }
+    })
+    registerDesktopHandlers(
+      window,
+      { issueSearchExportConfirmation, exportSearchSource } as unknown as ControlClient,
+      browserViews,
+      {
+        showMessageBox: electron.showMessageBox,
+        showSaveDialog: electron.showSaveDialog,
+        isNodeCoreEnabled: () => true,
+        isNodeEncryptedSearchEnabled: () => true,
+        issueNodeSearchExportConfirmation,
+        exportNodeSearchSource
+      }
+    )
+    electron.showMessageBox.mockResolvedValueOnce({ response: 1 })
+    electron.showSaveDialog.mockResolvedValueOnce({ canceled: false, filePath: nodeDestination })
+    await expect(
+      electron.handlers.get(DESKTOP_IPC.searchExport)?.(event, { sourceAuthorizationId })
+    ).resolves.toBe(true)
+    expect(issueNodeSearchExportConfirmation).toHaveBeenCalledWith({ sourceAuthorizationId })
+    expect(exportNodeSearchSource).toHaveBeenCalledWith({ sourceAuthorizationId, confirmationId })
+    expect(issueSearchExportConfirmation).toHaveBeenCalledTimes(1)
+    expect(exportSearchSource).toHaveBeenCalledTimes(1)
+    await expect(readFile(nodeDestination, 'utf8')).resolves.toBe(artifactText)
+
     await rm(directory, { recursive: true, force: true })
   })
 
@@ -486,6 +747,261 @@ describe('desktop IPC boundary', () => {
       )
     ).rejects.toThrow('Unauthorized window authority')
     expect(duplicateTab).not.toHaveBeenCalled()
+  })
+
+  it('blocks Rust multi-window writes while the isolated Node demo is active', async () => {
+    const registry = new WindowRegistry()
+    const client = { createWindow: vi.fn() }
+    const binding = new DesktopWindowBinding({ clearClient: vi.fn() } as never)
+    binding.replaceReady(
+      client as unknown as ControlClient,
+      browserViews,
+      vi.fn().mockResolvedValue(undefined)
+    )
+    registry.register('window-a', window, binding)
+    registerMultiWindowDesktopHandlers(new SenderBoundIpcRouter(registry), () => true)
+
+    await expect(
+      electron.handlers.get(DESKTOP_IPC.windowList)?.({
+        sender: webContents,
+        senderFrame: mainFrame
+      })
+    ).rejects.toThrow('Node window topology is unavailable')
+
+    await expect(
+      electron.handlers.get(DESKTOP_IPC.windowCreate)?.(
+        { sender: webContents, senderFrame: mainFrame },
+        {}
+      )
+    ).rejects.toThrow('unavailable in the isolated Node demo')
+    expect(client.createWindow).not.toHaveBeenCalled()
+  })
+
+  it('routes Node window creation only from the sender placement', async () => {
+    const registry = new WindowRegistry()
+    const windowId = randomUUID()
+    const workspaceId = randomUUID()
+    const paneId = randomUUID()
+    const createdWindowId = randomUUID()
+    const epoch = randomUUID()
+    const binding = new DesktopWindowBinding({ clearClient: vi.fn() } as never)
+    const rustCreate = vi.fn()
+    binding.replaceReady(
+      { createWindow: rustCreate } as unknown as ControlClient,
+      browserViews,
+      vi.fn().mockResolvedValue(undefined)
+    )
+    const entry = registry.register(windowId, window, binding)
+    const create = vi.fn().mockResolvedValue({
+      revision: 3,
+      idempotencyEpoch: epoch,
+      replayed: false,
+      window: {
+        windowId: createdWindowId,
+        label: 'Second',
+        workspaceIds: [workspaceId],
+        focusedWorkspaceId: workspaceId,
+        hostingState: 'unhosted',
+        revision: 0,
+        defaultTabDestination: { workspaceId, paneId, destinationIndex: 1 }
+      }
+    })
+    registerMultiWindowDesktopHandlers(new SenderBoundIpcRouter(registry), () => true, vi.fn(), {
+      create,
+      focus: vi.fn(),
+      close: vi.fn()
+    })
+    const request = {
+      mutation: { expectedRevision: 2, idempotencyEpoch: epoch, idempotencyKey: randomUUID() },
+      label: 'Second',
+      workspaceId,
+      sourceWindow: { windowId, expectedRevision: 1 }
+    }
+    await expect(
+      electron.handlers.get(DESKTOP_IPC.windowCreate)?.(
+        { sender: webContents, senderFrame: mainFrame },
+        { ...request, sourceWindow: { ...request.sourceWindow, windowId: randomUUID() } }
+      )
+    ).rejects.toThrow('Unauthorized window authority')
+    expect(create).not.toHaveBeenCalled()
+    await expect(
+      electron.handlers.get(DESKTOP_IPC.windowCreate)?.(
+        { sender: webContents, senderFrame: mainFrame },
+        request
+      )
+    ).resolves.toMatchObject({ revision: 3, window: { windowId: createdWindowId } })
+    expect(create).toHaveBeenCalledWith(entry, request)
+    expect(rustCreate).not.toHaveBeenCalled()
+  })
+
+  it('routes Node tab close only from the exact sender window', async () => {
+    const registry = new WindowRegistry()
+    const windowId = randomUUID()
+    const workspaceId = randomUUID()
+    const paneId = randomUUID()
+    const tabId = randomUUID()
+    const epoch = randomUUID()
+    const entry = registry.register(
+      windowId,
+      window,
+      new DesktopWindowBinding({ clearClient: vi.fn() } as never)
+    )
+    const closeTab = vi.fn().mockResolvedValue({
+      revision: 4,
+      idempotencyEpoch: epoch,
+      closedTabId: tabId,
+      closedItemId: randomUUID(),
+      replayed: false
+    })
+    registerMultiWindowDesktopHandlers(new SenderBoundIpcRouter(registry), () => true, vi.fn(), {
+      create: vi.fn(),
+      focus: vi.fn(),
+      close: vi.fn(),
+      closeTab
+    })
+    const request = {
+      mutation: { expectedRevision: 3, idempotencyEpoch: epoch, idempotencyKey: randomUUID() },
+      source: { windowId, workspaceId, paneId, tabId, expectedWindowRevision: 2 }
+    }
+    const handler = electron.handlers.get(DESKTOP_IPC.tabCloseAdvanced)!
+    await expect(
+      handler(
+        { sender: webContents, senderFrame: mainFrame },
+        {
+          ...request,
+          source: { ...request.source, windowId: randomUUID() }
+        }
+      )
+    ).rejects.toThrow('Unauthorized window authority')
+    expect(closeTab).not.toHaveBeenCalled()
+    await expect(
+      handler({ sender: webContents, senderFrame: mainFrame }, request)
+    ).resolves.toMatchObject({ closedTabId: tabId, revision: 4 })
+    expect(closeTab).toHaveBeenCalledWith(entry, request)
+  })
+
+  it('routes Node closed tabs, duplicate, and focus history from a Node-exclusive window', async () => {
+    const registry = new WindowRegistry()
+    const windowId = randomUUID()
+    const workspaceId = randomUUID()
+    const paneId = randomUUID()
+    const tabId = randomUUID()
+    const closedItemId = randomUUID()
+    const epoch = randomUUID()
+    const binding = new DesktopWindowBinding({ clearClient: vi.fn() } as never)
+    binding.replaceNodeExclusive(browserViews, vi.fn().mockResolvedValue(undefined))
+    const entry = registry.register(windowId, window, binding)
+    const listClosedItems = vi.fn().mockResolvedValue({ revision: 3, items: [] })
+    const getClosedItem = vi.fn().mockResolvedValue({
+      revision: 3,
+      item: {
+        closedItemId,
+        itemKind: 'tab',
+        priorItemId: tabId,
+        contentKind: 'terminal',
+        title: 'Shell',
+        closedAtMs: 1,
+        restored: false
+      }
+    })
+    const tabResult = {
+      revision: 4,
+      idempotencyEpoch: epoch,
+      tabId,
+      runtimeSessionId: randomUUID(),
+      ownershipKind: 'terminal',
+      placement: { windowId, workspaceId, paneId, index: 0, windowRevision: 2 },
+      transferEpoch: 4,
+      replayed: false
+    }
+    const duplicateTab = vi.fn().mockResolvedValue(tabResult)
+    const reopenTab = vi.fn().mockResolvedValue(tabResult)
+    const navigateFocusHistory = vi.fn().mockResolvedValue({
+      revision: 4,
+      idempotencyEpoch: epoch,
+      target: { windowId, workspaceId, paneId, tabId },
+      replayed: false
+    })
+    registerMultiWindowDesktopHandlers(new SenderBoundIpcRouter(registry), () => true, vi.fn(), {
+      create: vi.fn(),
+      focus: vi.fn(),
+      close: vi.fn(),
+      listClosedItems,
+      getClosedItem,
+      duplicateTab,
+      reopenTab,
+      navigateFocusHistory
+    })
+    const event = { sender: webContents, senderFrame: mainFrame }
+    const mutation = { expectedRevision: 3, idempotencyEpoch: epoch, idempotencyKey: randomUUID() }
+    const target = { windowId, workspaceId, paneId, destinationIndex: 0, expectedWindowRevision: 1 }
+    const source = { windowId, workspaceId, paneId, tabId, expectedWindowRevision: 1 }
+    await expect(electron.handlers.get(DESKTOP_IPC.closedList)?.(event)).resolves.toEqual({
+      revision: 3,
+      items: []
+    })
+    await expect(
+      electron.handlers.get(DESKTOP_IPC.closedGet)?.(event, { closedItemId })
+    ).resolves.toMatchObject({ item: { closedItemId } })
+    await expect(
+      electron.handlers.get(DESKTOP_IPC.tabDuplicate)?.(event, { mutation, source, target })
+    ).resolves.toMatchObject({ tabId })
+    await expect(
+      electron.handlers.get(DESKTOP_IPC.tabReopen)?.(event, { mutation, closedItemId, target })
+    ).resolves.toMatchObject({ tabId })
+    await expect(
+      electron.handlers.get(DESKTOP_IPC.focusHistoryNavigate)?.(event, {
+        mutation,
+        direction: 'back'
+      })
+    ).resolves.toMatchObject({ target: { windowId } })
+    expect(listClosedItems).toHaveBeenCalledWith(entry)
+    expect(getClosedItem).toHaveBeenCalledWith(entry, { closedItemId })
+    expect(duplicateTab).toHaveBeenCalledWith(entry, { mutation, source, target })
+    expect(reopenTab).toHaveBeenCalledWith(entry, { mutation, closedItemId, target })
+    expect(navigateFocusHistory).toHaveBeenCalledWith(entry, { mutation, direction: 'back' })
+  })
+
+  it('routes the Node demo window list through the exact sender entry', async () => {
+    const registry = new WindowRegistry()
+    const windowId = randomUUID()
+    const workspaceId = randomUUID()
+    const paneId = randomUUID()
+    const rustList = vi.fn()
+    const binding = new DesktopWindowBinding({ clearClient: vi.fn() } as never)
+    binding.replaceReady(
+      { listWindows: rustList } as unknown as ControlClient,
+      browserViews,
+      vi.fn().mockResolvedValue(undefined)
+    )
+    registry.register(windowId, window, binding)
+    const listNode = vi.fn().mockResolvedValue({
+      revision: 2,
+      idempotencyEpoch: randomUUID(),
+      focusedWindowId: windowId,
+      windows: [
+        {
+          windowId,
+          label: 'Node window',
+          workspaceIds: [workspaceId],
+          focusedWorkspaceId: workspaceId,
+          hostingState: 'hosted',
+          revision: 1,
+          defaultTabDestination: { workspaceId, paneId, destinationIndex: 1 }
+        }
+      ]
+    })
+    registerMultiWindowDesktopHandlers(new SenderBoundIpcRouter(registry), () => true, listNode)
+    const handler = electron.handlers.get(DESKTOP_IPC.windowList)!
+    await expect(handler({ sender: webContents, senderFrame: mainFrame })).resolves.toMatchObject({
+      windows: [{ windowId }]
+    })
+    expect(listNode).toHaveBeenCalledWith(expect.objectContaining({ windowId }))
+    expect(rustList).not.toHaveBeenCalled()
+    expect(() => handler({ sender: webContents, senderFrame: {} })).toThrow(
+      'Unauthorized desktop IPC sender'
+    )
+    expect(listNode).toHaveBeenCalledTimes(1)
   })
 
   it('returns one directory selected through the trusted native picker', async () => {
@@ -1651,6 +2167,173 @@ describe('desktop IPC boundary', () => {
     expect(electron.handlers.size).toBe(0)
   })
 
+  it('blocks Rust lifecycle fallback for a Node-exclusive binding while allowing Node diagnostics and quit', async () => {
+    const registry = new WindowRegistry()
+    const binding = new DesktopWindowBinding({ clearClient: vi.fn() } as never)
+    binding.replaceNodeExclusive(browserViews, vi.fn().mockResolvedValue(undefined))
+    registry.register('window-a', window, binding)
+    const router = new SenderBoundIpcRouter(registry)
+    const controller = {
+      getState: () => ({ status: 'failed' as const, message: 'Rust is sealed' }),
+      getClient: vi.fn(),
+      restart: vi.fn()
+    }
+    const supervisor = {
+      exportRecovery: vi.fn(),
+      previewDiagnostics: vi.fn(),
+      exportDiagnostics: vi.fn()
+    }
+    const quit = vi.fn()
+    const preview = { entries: [], totalBytes: 0, redactionCount: 0, createdAt: 123 }
+    const previewNodeDiagnostics = vi.fn().mockResolvedValue(preview)
+    const exportNodeDiagnostics = vi.fn().mockResolvedValue(undefined)
+    let nodeDiagnosticsMode = false
+    const dependencies = {
+      downloadsDirectory: '/downloads',
+      quit,
+      showSaveDialog: electron.showSaveDialog,
+      pathExists: vi.fn().mockResolvedValue(false),
+      scheduleQuit: (callback: () => void) => callback(),
+      isNodeDiagnosticsMode: () => nodeDiagnosticsMode,
+      isNodeDiagnosticsEnabled: () => true,
+      previewNodeDiagnostics,
+      exportNodeDiagnostics
+    }
+    registerGlobalDesktopLifecycleHandlers(router, controller, supervisor, dependencies)
+    const event = { sender: webContents, senderFrame: mainFrame }
+
+    for (const channel of [
+      DESKTOP_IPC.serviceRestart,
+      DESKTOP_IPC.recoveryExportDatabase,
+      DESKTOP_IPC.diagnosticsPreview,
+      DESKTOP_IPC.diagnosticsExport,
+      DESKTOP_IPC.configurationGet
+    ]) {
+      await expect(electron.handlers.get(channel)?.(event, preview)).rejects.toThrow(
+        `Node owner cannot handle desktop channel ${channel}`
+      )
+    }
+    expect(controller.restart).not.toHaveBeenCalled()
+    expect(supervisor.exportRecovery).not.toHaveBeenCalled()
+    expect(supervisor.previewDiagnostics).not.toHaveBeenCalled()
+    expect(supervisor.exportDiagnostics).not.toHaveBeenCalled()
+    expect(electron.showSaveDialog).not.toHaveBeenCalled()
+
+    electron.showSaveDialog.mockResolvedValueOnce({
+      canceled: false,
+      filePath: '/downloads/node-diagnostics.json'
+    })
+    nodeDiagnosticsMode = true
+    await expect(electron.handlers.get(DESKTOP_IPC.diagnosticsPreview)?.(event)).resolves.toEqual(
+      preview
+    )
+    await expect(
+      electron.handlers.get(DESKTOP_IPC.diagnosticsExport)?.(event, preview)
+    ).resolves.toBeUndefined()
+    expect(previewNodeDiagnostics).toHaveBeenCalledOnce()
+    expect(exportNodeDiagnostics).toHaveBeenCalledWith('/downloads/node-diagnostics.json', preview)
+    expect(electron.handlers.get(DESKTOP_IPC.lifecycleGet)?.(event)).toEqual({
+      status: 'failed',
+      message: 'Rust is sealed'
+    })
+    electron.handlers.get(DESKTOP_IPC.applicationQuit)?.(event)
+    expect(quit).toHaveBeenCalledOnce()
+  })
+
+  it('restarts and exports recovery for a Node-owned lifecycle', async () => {
+    const registry = new WindowRegistry()
+    const binding = new DesktopWindowBinding({ clearClient: vi.fn() } as never)
+    binding.replaceNodeExclusive(browserViews, vi.fn().mockResolvedValue(undefined))
+    registry.register('window-a', window, binding)
+    const router = new SenderBoundIpcRouter(registry)
+    const restart = vi.fn().mockResolvedValue(undefined)
+    const exportRecovery = vi.fn().mockResolvedValue({
+      path: '/downloads/recovery.sqlite',
+      bytes: 128
+    })
+    registerGlobalDesktopLifecycleHandlers(
+      router,
+      { getState: () => ({ status: 'ready' }), getClient: vi.fn(), restart },
+      { exportRecovery, previewDiagnostics: vi.fn(), exportDiagnostics: vi.fn() },
+      {
+        downloadsDirectory: '/downloads',
+        quit: vi.fn(),
+        isNodeLifecycleEnabled: () => true,
+        showSaveDialog: electron.showSaveDialog,
+        pathExists: vi.fn().mockResolvedValue(false)
+      }
+    )
+    const event = { sender: webContents, senderFrame: mainFrame }
+    electron.showSaveDialog.mockResolvedValueOnce({
+      canceled: false,
+      filePath: '/downloads/recovery.sqlite'
+    })
+
+    await expect(
+      electron.handlers.get(DESKTOP_IPC.serviceRestart)?.(event)
+    ).resolves.toBeUndefined()
+    await expect(
+      electron.handlers.get(DESKTOP_IPC.recoveryExportDatabase)?.(event)
+    ).resolves.toEqual({
+      path: '/downloads/recovery.sqlite',
+      bytes: 128
+    })
+    expect(restart).toHaveBeenCalledOnce()
+    expect(exportRecovery).toHaveBeenCalledWith('/downloads/recovery.sqlite', 'sqlite')
+  })
+
+  it('offers a TAR archive for failed native state and refuses export without a source', async () => {
+    const registry = new WindowRegistry()
+    const binding = new DesktopWindowBinding({ clearClient: vi.fn() } as never)
+    registry.register('window-a', window, binding)
+    const router = new SenderBoundIpcRouter(registry)
+    let available = true
+    const exportRecovery = vi.fn().mockResolvedValue({
+      path: '/downloads/recovery.tar',
+      bytes: 128
+    })
+    registerGlobalDesktopLifecycleHandlers(
+      router,
+      {
+        getState: () => ({
+          status: 'failed',
+          message: 'Node failed',
+          availableActions: { recoveryExport: available, diagnostics: false }
+        }),
+        getClient: vi.fn(),
+        restart: vi.fn()
+      },
+      { exportRecovery, previewDiagnostics: vi.fn(), exportDiagnostics: vi.fn() },
+      {
+        downloadsDirectory: '/downloads',
+        quit: vi.fn(),
+        isNodeLifecycleEnabled: () => true,
+        showSaveDialog: electron.showSaveDialog,
+        pathExists: vi.fn().mockResolvedValue(false)
+      }
+    )
+    const event = { sender: webContents, senderFrame: mainFrame }
+    electron.showSaveDialog.mockResolvedValueOnce({
+      canceled: false,
+      filePath: '/downloads/recovery.tar'
+    })
+
+    await expect(
+      electron.handlers.get(DESKTOP_IPC.recoveryExportDatabase)?.(event)
+    ).resolves.toEqual({ path: '/downloads/recovery.tar', bytes: 128 })
+    expect(electron.showSaveDialog).toHaveBeenCalledWith(
+      window,
+      expect.objectContaining({ filters: [{ name: 'TAR recovery archive', extensions: ['tar'] }] })
+    )
+    expect(exportRecovery).toHaveBeenCalledWith('/downloads/recovery.tar', 'archive')
+
+    available = false
+    await expect(
+      electron.handlers.get(DESKTOP_IPC.recoveryExportDatabase)?.(event)
+    ).rejects.toThrow('No private database')
+    expect(electron.showSaveDialog).toHaveBeenCalledOnce()
+  })
+
   it('cancels utility exports without dispatch and forwards only the exact parsed preview', async () => {
     const preview = {
       entries: [{ name: 'service.log', bytes: 12 }],
@@ -1727,6 +2410,56 @@ describe('desktop IPC boundary', () => {
     expect(supervisor.exportDiagnostics).toHaveBeenCalledTimes(1)
   })
 
+  it('keeps Node diagnostics on the isolated copy when the Node service is down', async () => {
+    const preview = {
+      entries: [{ name: 'logs/service.json', bytes: 12 }],
+      totalBytes: 12,
+      redactionCount: 1,
+      createdAt: 123
+    }
+    const supervisor = {
+      exportRecovery: vi.fn(),
+      previewDiagnostics: vi.fn(),
+      exportDiagnostics: vi.fn()
+    }
+    const previewNodeDiagnostics = vi.fn().mockResolvedValue(preview)
+    const exportNodeDiagnostics = vi.fn().mockResolvedValue({
+      path: '/downloads/node-diagnostics.json',
+      bytes: 12
+    })
+    const controller = {
+      getState: () => ({ status: 'failed' as const, message: 'Node service stopped' }),
+      getClient: vi.fn(),
+      restart: vi.fn()
+    }
+    electron.showSaveDialog.mockResolvedValue({
+      canceled: false,
+      filePath: '/downloads/node-diagnostics.json'
+    })
+    registerDesktopLifecycleHandlers(window, controller, supervisor, {
+      downloadsDirectory: '/downloads',
+      quit: vi.fn(),
+      isNodeCoreEnabled: () => false,
+      isNodeDiagnosticsMode: () => true,
+      isNodeDiagnosticsEnabled: () => true,
+      previewNodeDiagnostics,
+      exportNodeDiagnostics,
+      showSaveDialog: electron.showSaveDialog,
+      pathExists: vi.fn().mockResolvedValue(false)
+    })
+    const event = { sender: webContents, senderFrame: mainFrame }
+    await expect(electron.handlers.get(DESKTOP_IPC.diagnosticsPreview)?.(event)).resolves.toEqual(
+      preview
+    )
+    await expect(
+      electron.handlers.get(DESKTOP_IPC.diagnosticsExport)?.(event, preview)
+    ).resolves.toBeUndefined()
+    expect(previewNodeDiagnostics).toHaveBeenCalledOnce()
+    expect(exportNodeDiagnostics).toHaveBeenCalledWith('/downloads/node-diagnostics.json', preview)
+    expect(supervisor.previewDiagnostics).not.toHaveBeenCalled()
+    expect(supervisor.exportDiagnostics).not.toHaveBeenCalled()
+  })
+
   it('uses catalog rejection copy when utility export destinations already exist', async () => {
     const preview = {
       entries: [{ name: 'service.log', bytes: 12 }],
@@ -1799,11 +2532,23 @@ describe('desktop IPC boundary', () => {
       restart: vi.fn()
     }
     const configurationChanged = vi.fn()
+    let nodeCoreEnabled = false
+    let nodeConfigurationEnabled = false
+    const getNodeConfiguration = vi
+      .fn()
+      .mockResolvedValue({ config: { ...config, schemaVersion: 2 } })
+    const updateNodeConfiguration = vi.fn().mockResolvedValue({
+      config: { ...config, schemaVersion: 2, revision: 8 }
+    })
     registerDesktopLifecycleHandlers(window, controller, {} as never, {
       downloadsDirectory: '/downloads',
       quit: vi.fn(),
       showSaveDialog: electron.showSaveDialog,
       pathExists: vi.fn(),
+      isNodeCoreEnabled: () => nodeCoreEnabled,
+      isNodeConfigurationEnabled: () => nodeConfigurationEnabled,
+      getNodeConfiguration,
+      updateNodeConfiguration,
       configurationChanged
     })
     const event = { sender: webContents, senderFrame: mainFrame }
@@ -1829,6 +2574,151 @@ describe('desktop IPC boundary', () => {
       })
     ).rejects.toThrow()
     expect(configurationChanged).toHaveBeenCalledOnce()
+    nodeCoreEnabled = true
+    await expect(electron.handlers.get(DESKTOP_IPC.configurationGet)?.(event)).resolves.toEqual({
+      config
+    })
+    await expect(
+      electron.handlers.get(DESKTOP_IPC.configurationUpdate)?.(event, params)
+    ).rejects.toThrow('Configuration is unavailable in the isolated Node demo')
+    expect(client.getConfiguration).toHaveBeenCalledTimes(2)
+    expect(client.updateConfiguration).toHaveBeenCalledOnce()
+    nodeConfigurationEnabled = true
+    await expect(
+      electron.handlers.get(DESKTOP_IPC.configurationGet)?.(event)
+    ).resolves.toMatchObject({
+      config: { schemaVersion: 2, revision: 7 }
+    })
+    await expect(
+      electron.handlers.get(DESKTOP_IPC.configurationUpdate)?.(event, params)
+    ).resolves.toMatchObject({ config: { schemaVersion: 2, revision: 8 } })
+    expect(getNodeConfiguration).toHaveBeenCalledOnce()
+    expect(updateNodeConfiguration).toHaveBeenCalledWith(params)
+    expect(client.getConfiguration).toHaveBeenCalledTimes(2)
+    expect(client.updateConfiguration).toHaveBeenCalledOnce()
+  })
+
+  it('advertises only enabled configuration and remote capabilities in the Node demo', async () => {
+    const identify = vi.fn().mockResolvedValue({
+      application: 'agent-workspace',
+      version: '0.1.0',
+      protocolVersion: 1,
+      capabilities: [
+        'configuration-v2',
+        'remote.target.enroll',
+        'remote.target.replaceCredential',
+        'remote.target.delete',
+        'remote-sessions-v1',
+        'multi-window-v1',
+        'agent-sessions-v1',
+        'browser-automation-v1',
+        'saved-layouts-v1',
+        'sidebar-surfaces-v1',
+        'task.list',
+        'task.confirmation.issue',
+        'task.action',
+        'search.query',
+        'search.cancel',
+        'search.source.policy',
+        'actions-v1'
+      ]
+    })
+    registerDesktopHandlers(window, { identify } as unknown as ControlClient, browserViews, {
+      isNodeCoreEnabled: () => true
+    })
+    await expect(
+      electron.handlers.get(DESKTOP_IPC.identify)?.({ sender: webContents, senderFrame: mainFrame })
+    ).resolves.toMatchObject({ capabilities: ['actions-v1', 'node-core-demo'] })
+    registerDesktopHandlers(window, { identify } as unknown as ControlClient, browserViews, {
+      isNodeCoreEnabled: () => true,
+      isNodeTaskListEnabled: () => true
+    })
+    await expect(
+      electron.handlers.get(DESKTOP_IPC.identify)?.({ sender: webContents, senderFrame: mainFrame })
+    ).resolves.toMatchObject({ capabilities: ['actions-v1', 'task.list', 'node-core-demo'] })
+    registerDesktopHandlers(window, { identify } as unknown as ControlClient, browserViews, {
+      isNodeCoreEnabled: () => true,
+      isNodeTaskListEnabled: () => true,
+      isNodeTaskDetachEnabled: () => true
+    })
+    await expect(
+      electron.handlers.get(DESKTOP_IPC.identify)?.({ sender: webContents, senderFrame: mainFrame })
+    ).resolves.toMatchObject({
+      capabilities: ['actions-v1', 'task.list', 'task.detach', 'node-core-demo']
+    })
+    registerDesktopHandlers(window, { identify } as unknown as ControlClient, browserViews, {
+      isNodeCoreEnabled: () => true,
+      isNodeRecentlyClosedEnabled: () => true
+    })
+    await expect(
+      electron.handlers.get(DESKTOP_IPC.identify)?.({ sender: webContents, senderFrame: mainFrame })
+    ).resolves.toMatchObject({
+      capabilities: ['actions-v1', 'recentlyClosed.list', 'recentlyClosed.reopen', 'node-core-demo']
+    })
+    registerDesktopHandlers(window, { identify } as unknown as ControlClient, browserViews, {
+      isNodeCoreEnabled: () => true,
+      isNodeConfigurationEnabled: () => true
+    })
+    await expect(
+      electron.handlers.get(DESKTOP_IPC.identify)?.({ sender: webContents, senderFrame: mainFrame })
+    ).resolves.toMatchObject({
+      capabilities: ['actions-v1', 'configuration-v2', 'node-core-demo']
+    })
+    registerDesktopHandlers(window, { identify } as unknown as ControlClient, browserViews, {
+      isNodeCoreEnabled: () => true,
+      isNodeRemoteEnabled: () => true,
+      isNodeRemoteEnrollmentEnabled: () => false
+    })
+    await expect(
+      electron.handlers.get(DESKTOP_IPC.identify)?.({ sender: webContents, senderFrame: mainFrame })
+    ).resolves.toMatchObject({
+      capabilities: ['remote-sessions-v1', 'actions-v1', 'node-core-demo']
+    })
+    registerDesktopHandlers(window, { identify } as unknown as ControlClient, browserViews, {
+      isNodeCoreEnabled: () => true,
+      isNodeRemoteEnabled: () => true,
+      isNodeRemoteEnrollmentEnabled: () => true,
+      isNodeRemoteReplacementEnabled: () => true,
+      isNodeRemoteDeletionEnabled: () => true
+    })
+    await expect(
+      electron.handlers.get(DESKTOP_IPC.identify)?.({ sender: webContents, senderFrame: mainFrame })
+    ).resolves.toMatchObject({
+      capabilities: [
+        'remote-sessions-v1',
+        'actions-v1',
+        'remote.target.enroll',
+        'remote.target.replaceCredential',
+        'remote.target.delete',
+        'node-core-demo'
+      ]
+    })
+    registerDesktopHandlers(window, { identify } as unknown as ControlClient, browserViews, {
+      isNodeCoreEnabled: () => true,
+      isNodeAgentAssessmentEnabled: () => true
+    })
+    await expect(
+      electron.handlers.get(DESKTOP_IPC.identify)?.({ sender: webContents, senderFrame: mainFrame })
+    ).resolves.toMatchObject({
+      capabilities: [
+        'actions-v1',
+        'agent.catalog.list',
+        'agent.catalog.get',
+        'agent.restore.assess',
+        'node-core-demo'
+      ]
+    })
+    registerDesktopHandlers(window, { identify } as unknown as ControlClient, browserViews, {
+      isNodeCoreEnabled: () => true,
+      isNodeEncryptedSearchEnabled: () => true
+    })
+    const encryptedIdentity = (await electron.handlers.get(DESKTOP_IPC.identify)?.({
+      sender: webContents,
+      senderFrame: mainFrame
+    })) as { capabilities: string[] } | undefined
+    expect(encryptedIdentity?.capabilities).toContain('search.encrypted-v1')
+    expect(encryptedIdentity?.capabilities).toContain('search.query')
+    expect(encryptedIdentity?.capabilities).not.toContain('search.cancel')
   })
 
   it('uses current agent epochs and routes exact team member update and move mutations', async () => {
@@ -1912,5 +2802,196 @@ describe('desktop IPC boundary', () => {
     expect(moveAgentTeamMember).toHaveBeenCalledWith(
       expect.objectContaining({ target: binding, teamId: team.teamId, memberId: member.memberId })
     )
+  })
+
+  it.each([false, true])(
+    'confirms the exact Node session with verified checkpoint=%s',
+    async (hasCheckpoint) => {
+      const agentSessionId = '40000000-0000-4000-8000-000000000001'
+      const provider = {
+        providerId: '40000000-0000-4000-8000-000000000002',
+        providerEpoch: 1,
+        leaseId: '40000000-0000-4000-8000-000000000003'
+      }
+      const session = {
+        catalogVersion: 1,
+        binding: {
+          workspaceId: '40000000-0000-4000-8000-000000000004',
+          paneId: '40000000-0000-4000-8000-000000000005',
+          tabId: '40000000-0000-4000-8000-000000000006',
+          agentSessionId
+        },
+        adapterId: 'codex',
+        adapterVersion: '0.142.4',
+        title: 'agent',
+        lifecycle: 'running',
+        restore: { level: 'toolResume', assessedAtMs: 1, evidenceEpoch: 1 },
+        revision: 7,
+        attemptEpoch: 3,
+        lastVerifiedAtMs: 1
+      }
+      const outcome = hasCheckpoint ? 'hibernated' : 'terminatedAfterWarning'
+      const nodeClient = {
+        getAgentSession: vi.fn().mockResolvedValue({ session }),
+        preflightAgentHibernation: vi
+          .fn()
+          .mockImplementation(
+            async ({ challenge }: Parameters<ControlClient['preflightAgentHibernation']>[0]) => ({
+              state: 'confirmationRequired',
+              ...(hasCheckpoint
+                ? {
+                    checkpoint: {
+                      descriptorVersion: 1,
+                      kind: 'codex-thread-v1',
+                      digestSha256: 'a'.repeat(64),
+                      sizeBytes: 16,
+                      createdAtMs: 1,
+                      expiresAtMs: 30_001
+                    }
+                  }
+                : {}),
+              confirmationId: '40000000-0000-4000-8000-000000000007',
+              challenge: {
+                ...challenge,
+                provider: { ...challenge.provider },
+                confirmationId: '40000000-0000-4000-8000-000000000007',
+                nonce: 'node-lease-nonce',
+                expiresAtMs: 10_000
+              }
+            })
+          ),
+        cancelAgentHibernation: vi.fn().mockResolvedValue({ state: 'canceled' }),
+        confirmAgentHibernation: vi.fn().mockResolvedValue({ state: outcome })
+      }
+      const invokeNodeCore = vi.fn().mockResolvedValue({ handled: false })
+      const showMessageBox = vi.fn().mockResolvedValue({ response: 1 })
+      let contextCurrent = true
+      const windowId = '40000000-0000-4000-8000-000000000008'
+      const registry = new WindowRegistry()
+      const binding = new DesktopWindowBinding({ clearClient: vi.fn() } as never)
+      binding.replaceNodeExclusive(browserViews, vi.fn().mockResolvedValue(undefined))
+      registry.register(windowId, window, binding)
+      const router = new SenderBoundIpcRouter(registry)
+      registerGlobalDesktopHandlers(router, {
+        isNodeCoreEnabled: () => true,
+        invokeNodeCore,
+        getNodeAgentHibernationContext: () => ({
+          client: nodeClient as unknown as ControlClient,
+          provider,
+          isCurrent: () => contextCurrent
+        }),
+        showMessageBox,
+        isWindowEntryCurrent: () => true
+      })
+      await expect(
+        electron.handlers.get(DESKTOP_IPC.agentSessionHibernate)?.(
+          { sender: webContents, senderFrame: mainFrame },
+          { agentSessionId, expectedRevision: 7 }
+        )
+      ).resolves.toEqual({ state: outcome })
+      expect(invokeNodeCore).not.toHaveBeenCalled()
+      expect(binding.isNodeExclusive).toBe(true)
+      expect(nodeClient.preflightAgentHibernation).toHaveBeenCalledWith(
+        expect.objectContaining({
+          challenge: {
+            choice: 'terminateAfterWarning',
+            provider,
+            window: {
+              windowId,
+              windowGeneration: 1
+            }
+          }
+        })
+      )
+      expect(showMessageBox).toHaveBeenCalledWith(
+        window,
+        expect.objectContaining({
+          type: 'warning',
+          defaultId: 0,
+          cancelId: 0,
+          title: hasCheckpoint
+            ? 'Hibernate agent session?'
+            : 'Stop agent session without a checkpoint?',
+          buttons: [
+            'Leave running',
+            hasCheckpoint ? 'Hibernate session' : 'Stop without checkpoint'
+          ]
+        })
+      )
+      expect(nodeClient.confirmAgentHibernation).toHaveBeenCalledWith(
+        expect.objectContaining({ provider, nonce: 'node-lease-nonce' })
+      )
+      expect(nodeClient.cancelAgentHibernation).not.toHaveBeenCalled()
+
+      showMessageBox.mockImplementationOnce(async () => {
+        contextCurrent = false
+        return { response: 1 }
+      })
+      await expect(
+        electron.handlers.get(DESKTOP_IPC.agentSessionHibernate)?.(
+          { sender: webContents, senderFrame: mainFrame },
+          { agentSessionId, expectedRevision: 7 }
+        )
+      ).rejects.toThrow('desktop authority is stale')
+      expect(nodeClient.cancelAgentHibernation).toHaveBeenCalledOnce()
+      expect(nodeClient.confirmAgentHibernation).toHaveBeenCalledOnce()
+
+      contextCurrent = true
+      showMessageBox.mockResolvedValueOnce({ response: 0 })
+      await expect(
+        electron.handlers.get(DESKTOP_IPC.agentSessionHibernate)?.(
+          { sender: webContents, senderFrame: mainFrame },
+          { agentSessionId, expectedRevision: 7 }
+        )
+      ).resolves.toBeNull()
+      expect(nodeClient.cancelAgentHibernation).toHaveBeenCalledTimes(2)
+      expect(nodeClient.confirmAgentHibernation).toHaveBeenCalledOnce()
+      expect(() =>
+        electron.handlers.get(DESKTOP_IPC.agentSessionHibernate)?.(
+          { sender: webContents, senderFrame: {} },
+          { agentSessionId, expectedRevision: 7 }
+        )
+      ).toThrow('Unauthorized')
+      expect(nodeClient.preflightAgentHibernation).toHaveBeenCalledTimes(3)
+
+      showMessageBox.mockImplementationOnce(async () => {
+        provider.leaseId = '40000000-0000-4000-8000-000000000009'
+        return { response: 1 }
+      })
+      await expect(
+        electron.handlers.get(DESKTOP_IPC.agentSessionHibernate)?.(
+          { sender: webContents, senderFrame: mainFrame },
+          { agentSessionId, expectedRevision: 7 }
+        )
+      ).rejects.toThrow('desktop authority is stale')
+      expect(nodeClient.cancelAgentHibernation).toHaveBeenCalledTimes(3)
+      expect(nodeClient.confirmAgentHibernation).toHaveBeenCalledOnce()
+    }
+  )
+
+  it('fails closed when the Node-exclusive hibernation authority is unavailable', async () => {
+    const registry = new WindowRegistry()
+    const binding = new DesktopWindowBinding({ clearClient: vi.fn() } as never)
+    binding.replaceNodeExclusive(browserViews, vi.fn().mockResolvedValue(undefined))
+    registry.register('40000000-0000-4000-8000-000000000008', window, binding)
+    const invokeNodeCore = vi.fn().mockResolvedValue({ handled: false })
+    const showMessageBox = vi.fn()
+    registerGlobalDesktopHandlers(new SenderBoundIpcRouter(registry), {
+      isNodeCoreEnabled: () => true,
+      invokeNodeCore,
+      showMessageBox
+    })
+
+    await expect(
+      electron.handlers.get(DESKTOP_IPC.agentSessionHibernate)?.(
+        { sender: webContents, senderFrame: mainFrame },
+        {
+          agentSessionId: '40000000-0000-4000-8000-000000000001',
+          expectedRevision: 7
+        }
+      )
+    ).rejects.toThrow('Node hibernation authority is unavailable')
+    expect(invokeNodeCore).not.toHaveBeenCalled()
+    expect(showMessageBox).not.toHaveBeenCalled()
   })
 })

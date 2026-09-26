@@ -138,6 +138,19 @@ export const remoteTargetDeleteParamsSchema = z.strictObject({
   remoteTargetId: uuidSchema,
   mutation: remoteMutationIdentitySchema
 })
+export const remoteTargetEnrollmentBeginSchema = z.strictObject({
+  remoteTargetId: uuidSchema,
+  enrollmentId: uuidSchema
+})
+export const remoteTargetEnrollmentCommitSchema = z.strictObject({
+  enrollmentId: uuidSchema,
+  target: remoteTargetCreateParamsSchema
+})
+export const remoteTargetEnrollmentAbortSchema = remoteTargetEnrollmentBeginSchema
+export const remoteTargetEnrollmentAbortResultSchema = z.strictObject({ status: z.literal('aborted') })
+export const remoteCredentialReplacementSchema = remoteTargetEnrollmentBeginSchema.extend({
+  expectedRevision: z.number().int().min(1).max(Number.MAX_SAFE_INTEGER - 1)
+})
 export const remoteListParamsSchema = z.strictObject({
   limit: z.number().int().min(1).max(128),
   cursor: uuidSchema.nullish()
@@ -1475,7 +1488,7 @@ export const workspaceOrganizationChangedEventSchema = z
 export const layoutPaneTemplateSchema = z
   .strictObject({
     id: uuidSchema,
-    tabs: z.array(uuidSchema).min(1).max(256),
+    tabs: z.array(uuidSchema).min(1).max(128),
     selectedTabId: uuidSchema,
     title: titleSchema.nullable()
   })
@@ -1525,9 +1538,9 @@ export const layoutWorkspaceTemplateSchema = z
     const tabEntries = Object.entries(workspace.tabs)
     if (
       paneEntries.length === 0 ||
-      paneEntries.length > 128 ||
+      paneEntries.length > 64 ||
       tabEntries.length === 0 ||
-      tabEntries.length > 256 ||
+      tabEntries.length > 128 ||
       workspace.panes[workspace.selectedPaneId] === undefined
     ) {
       context.addIssue({ code: 'custom', message: 'saved-layout workspace content is invalid' })
@@ -3809,12 +3822,18 @@ export const contentDiffResultSchema = z.strictObject({
   lines: z.array(safeDiffLineSchema).max(4096),
   truncated: z.boolean()
 })
+const textBoxTitleSchema = z
+  .string()
+  .refine(
+    (value) => value.trim().length > 0 && [...value].length <= 120 && !/\p{Cc}/u.test(value),
+    { message: 'TextBox title is invalid' }
+  )
 export const textBoxDocumentSchema = z
   .strictObject({
     textBoxDocumentId: uuidSchema,
     workspaceId: uuidSchema,
     windowId: uuidSchema,
-    title: z.string().trim().min(1).max(120),
+    title: textBoxTitleSchema,
     text: utf8Bytes(256 * 1024),
     contentRevision: positiveRevisionSchema,
     createdAtMs: revisionSchema,
@@ -3826,14 +3845,14 @@ export const textBoxCreateParamsSchema = z.strictObject({
   textBoxDocumentId: uuidSchema,
   workspaceId: uuidSchema,
   windowId: uuidSchema,
-  title: z.string().trim().min(1).max(120),
+  title: textBoxTitleSchema,
   text: utf8Bytes(256 * 1024),
   mutation: remoteMutationIdentitySchema
 })
 export const textBoxSaveParamsSchema = z.strictObject({
   textBoxDocumentId: uuidSchema,
   expectedRevision: positiveRevisionSchema,
-  title: z.string().trim().min(1).max(120),
+  title: textBoxTitleSchema,
   text: utf8Bytes(256 * 1024),
   mutation: remoteMutationIdentitySchema
 })
@@ -3854,12 +3873,14 @@ export const searchSourceKindSchema = z.enum(['workspaceFile', 'agentTranscript'
 export const searchQueryParamsSchema = z.strictObject({
   query: z.string().trim().min(1).max(512),
   limit: z.number().int().min(1).max(100),
-  cancellationId: uuidSchema
+  cancellationId: uuidSchema,
+  sourceAuthorizationIds: z.array(uuidSchema).max(640).optional()
 })
 export const searchResultSchema = z.strictObject({
   document: opaqueDocumentRefSchema,
   snippet: z.string().max(512),
   sourceKind: searchSourceKindSchema,
+  sourceAuthorizationId: uuidSchema.optional(),
   indexedAtMs: revisionSchema
 })
 export const searchQueryResultSchema = z.strictObject({

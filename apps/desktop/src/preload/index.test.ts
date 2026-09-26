@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { DESKTOP_IPC, type DesktopBridge } from '../shared/desktop-bridge'
-import projection from '../../../../crates/protocol/fixtures/milestone2-projection.json'
+import { DESKTOP_IPC, type DesktopBridge } from '@agent-workspace/contracts/desktop/desktop-bridge'
+import projection from '../../../../packages/protocol-client/fixtures/milestone2-projection.json'
 
 const electron = vi.hoisted(() => ({
   exposed: undefined as DesktopBridge | undefined,

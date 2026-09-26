@@ -6,10 +6,8 @@ Before publication the project needs a final public identity, a real homepage/re
 maintainer-owned signing keys, a hosted update origin, and completed release gates. The current
 reserved `.invalid` homepage exists only to let local deb/rpm packaging proceed.
 
-macOS x64 DMG/zip and Windows x64 NSIS definitions are also present for Milestone 7 development.
-Native CI installs and launches those package formats, and a separate manual workflow requires
-signing and notarization credentials. Those workflows have not run in this repository state, so
-there is no qualified macOS or Windows download yet.
+macOS and Windows are outside the current Node package and release qualification. There is no
+qualified download for either platform.
 
 ## End-user prerequisites
 
@@ -113,25 +111,13 @@ cannot be undone.
 
 ## Building instead of installing
 
-Contributors need Node.js 22.20 or newer, pnpm 10.34.5, Rust 1.96.0, build tools, and Electron's
+Contributors need Node.js 22.22.3, pnpm 10.34.5, a native-addon build toolchain, and Electron's
 Linux development libraries. See [CONTRIBUTING.md](../CONTRIBUTING.md) for build and validation
 commands. Building from source is not equivalent to installing a qualified release.
 
-Build native x64 candidates only on the matching target OS:
-
-```sh
-pnpm package:mac       # macOS: DMG + zip
-pnpm package:windows   # Windows: NSIS installer
-```
-
-Use `package:mac:updates` or `package:windows:updates` with the two documented build environment
-variables to generate channel metadata. Feed-free local candidates are unsigned. Stable candidates
-must use the gated signed-native workflow and pass its signature, native install, and readiness
-probes; see [Releasing](RELEASING.md) and [Desktop updates](UPDATES.md).
-
 ### Install a local Linux build in the application launcher
 
-On an x86_64 Linux development host, build the release sidecars and an AppImage, then install it at
+On an x86_64 Linux development host, build the bundled Node runtime and an AppImage, then install it at
 a stable per-user path with one command:
 
 ```sh

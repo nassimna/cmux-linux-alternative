@@ -17,6 +17,24 @@ describe('ProviderRecoveryCoordinator', () => {
     vi.useRealTimers()
   })
 
+  it('can recover a later loss with the same context after a successful series', async () => {
+    vi.useFakeTimers()
+    const recover = vi.fn().mockResolvedValue(true)
+    const coordinator = createCoordinator(recover, [100, 500])
+
+    coordinator.request('same-window')
+    coordinator.request('same-window')
+    await vi.advanceTimersByTimeAsync(100)
+    expect(recover).toHaveBeenCalledTimes(1)
+    expect(coordinator.active).toBe(false)
+
+    coordinator.request('same-window')
+    await vi.advanceTimersByTimeAsync(100)
+    expect(recover).toHaveBeenCalledTimes(2)
+    expect(coordinator.active).toBe(false)
+    vi.useRealTimers()
+  })
+
   it('cancels shutdown retries and ignores a late recovery result', async () => {
     vi.useFakeTimers()
     let finish!: (recovered: boolean) => void

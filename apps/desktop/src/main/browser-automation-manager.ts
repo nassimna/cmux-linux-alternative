@@ -113,6 +113,15 @@ export class BrowserAutomationFailure extends Error {
 export class BrowserAutomationManager {
   readonly #dependencies: BrowserAutomationManagerDependencies
   readonly #sessions = new Map<string, LocalSession>()
+  readonly #pendingCreations = new Map<
+    string,
+    {
+      generation: number
+      mode: BrowserAutomationSessionSnapshot['mode']
+      target: BrowserAutomationTargetBinding
+      abort: AbortController
+    }
+  >()
   readonly #screenshots = new Map<string, ScreenshotRecord>()
   #disposed = false
 
@@ -229,6 +238,10 @@ export class BrowserAutomationManager {
   }
 
   public async destroySession(sessionId: string, generation?: number): Promise<void> {
+    const pending = this.#pendingCreations.get(sessionId)
+    if (pending && (generation === undefined || pending.generation === generation)) {
+      pending.abort.abort(new BrowserAutomationFailure('interrupted'))
+    }
     const session = this.#sessions.get(sessionId)
     if (!session || (generation !== undefined && generation !== session.generation)) return
     this.#sessions.delete(sessionId)
@@ -245,6 +258,14 @@ export class BrowserAutomationManager {
   }
 
   public async destroyTarget(windowId: string, windowGeneration: number): Promise<void> {
+    for (const { target, abort } of this.#pendingCreations.values()) {
+      if (
+        target.window.windowId === windowId &&
+        target.window.windowGeneration === windowGeneration
+      ) {
+        abort.abort(new BrowserAutomationFailure('interrupted'))
+      }
+    }
     const matching = [...this.#sessions.values()].filter(
       ({ target }) =>
         target.window.windowId === windowId && target.window.windowGeneration === windowGeneration
@@ -300,6 +321,9 @@ export class BrowserAutomationManager {
   public async dispose(): Promise<void> {
     if (this.#disposed) return
     this.#disposed = true
+    for (const { abort } of this.#pendingCreations.values()) {
+      abort.abort(new BrowserAutomationFailure('interrupted'))
+    }
     await Promise.all([...this.#sessions.keys()].map((sessionId) => this.destroySession(sessionId)))
     for (const record of this.#screenshots.values()) record.bytes.fill(0)
     this.#screenshots.clear()
@@ -317,7 +341,16 @@ export class BrowserAutomationManager {
     }
   }
 
+  /** Includes attach requests before their native page has finished opening. */
+  public hasAttachedSessions(): boolean {
+    return (
+      [...this.#sessions.values()].some((session) => session.mode === 'attach') ||
+      [...this.#pendingCreations.values()].some((pending) => pending.mode === 'attach')
+    )
+  }
+
   private async ensureSession(snapshot: BrowserAutomationSessionSnapshot): Promise<LocalSession> {
+    this.assertActive()
     const current = this.#sessions.get(snapshot.automationSessionId)
     if (current) {
       if (current.generation !== snapshot.generation) {
@@ -330,61 +363,80 @@ export class BrowserAutomationManager {
       this.scheduleSessionExpiry(current)
       return current
     }
-    if (this.#sessions.size >= 8) throw new BrowserAutomationFailure('session_limit')
+    if (this.#pendingCreations.has(snapshot.automationSessionId)) {
+      throw new BrowserAutomationFailure('automation_backpressure')
+    }
+    if (this.#sessions.size + this.#pendingCreations.size >= 8) {
+      throw new BrowserAutomationFailure('session_limit')
+    }
     if (snapshot.state !== 'ready' || snapshot.expiresAtMs <= this.#dependencies.now()) {
       throw new BrowserAutomationFailure('session_expired')
     }
 
     const abort = new AbortController()
-    let page: BrowserAutomationPage | undefined
-    if (snapshot.mode === 'attach') {
-      if (!(await this.#dependencies.confirmAttachment(snapshot.target, abort.signal))) {
-        throw new BrowserAutomationFailure('policy_denied')
-      }
-      page = await this.#dependencies.acquireAttachedPage(
-        snapshot.target,
-        snapshot.profileKey,
-        abort.signal
-      )
-      if (!page || page.owned) throw new BrowserAutomationFailure('target_not_found')
-    } else {
-      page = await this.#dependencies.createEphemeralPage(snapshot, abort.signal)
-      if (!page.owned) throw new BrowserAutomationFailure('policy_denied')
-    }
-    if (!sameTarget(page.target, snapshot.target) || !page.revalidate(snapshot.target)) {
-      if (page.owned) await page.destroy().catch(() => undefined)
-      throw new BrowserAutomationFailure('target_stale')
-    }
-
-    const session: LocalSession = {
-      id: snapshot.automationSessionId,
+    this.#pendingCreations.set(snapshot.automationSessionId, {
       generation: snapshot.generation,
-      profileKey: snapshot.profileKey,
       mode: snapshot.mode,
       target: snapshot.target,
-      page,
-      abort,
-      navigationEpoch: snapshot.navigationEpoch,
-      navigationCount: 0,
-      lastUsedAtMs: this.#dependencies.now(),
-      serverExpiresAtMs: snapshot.expiresAtMs,
-      destroyed: false,
-      removeNavigationListener: () => undefined
-    }
-    session.removeNavigationListener = page.onTopLevelNavigation(() => {
-      session.navigationEpoch += 1
-      session.navigationCount += 1
-      if (session.pending && !session.pending.allowsNavigation) {
-        session.pending.abort.abort(
-          new BrowserAutomationFailure(
-            session.navigationCount > MAX_NAVIGATIONS ? 'resource_limit' : 'stale_navigation'
-          )
-        )
-      }
+      abort
     })
-    this.#sessions.set(session.id, session)
-    this.scheduleSessionExpiry(session)
-    return session
+    let page: BrowserAutomationPage | undefined
+    try {
+      if (snapshot.mode === 'attach') {
+        if (!(await this.#dependencies.confirmAttachment(snapshot.target, abort.signal))) {
+          throw new BrowserAutomationFailure('policy_denied')
+        }
+        if (abort.signal.aborted || this.#disposed) throw abort.signal.reason
+        page = await this.#dependencies.acquireAttachedPage(
+          snapshot.target,
+          snapshot.profileKey,
+          abort.signal
+        )
+        if (!page || page.owned) throw new BrowserAutomationFailure('target_not_found')
+      } else {
+        page = await this.#dependencies.createEphemeralPage(snapshot, abort.signal)
+        if (!page.owned) throw new BrowserAutomationFailure('policy_denied')
+      }
+      if (abort.signal.aborted || this.#disposed) throw abort.signal.reason
+      if (!sameTarget(page.target, snapshot.target) || !page.revalidate(snapshot.target)) {
+        throw new BrowserAutomationFailure('target_stale')
+      }
+
+      const session: LocalSession = {
+        id: snapshot.automationSessionId,
+        generation: snapshot.generation,
+        profileKey: snapshot.profileKey,
+        mode: snapshot.mode,
+        target: snapshot.target,
+        page,
+        abort,
+        navigationEpoch: snapshot.navigationEpoch,
+        navigationCount: 0,
+        lastUsedAtMs: this.#dependencies.now(),
+        serverExpiresAtMs: snapshot.expiresAtMs,
+        destroyed: false,
+        removeNavigationListener: () => undefined
+      }
+      session.removeNavigationListener = page.onTopLevelNavigation(() => {
+        session.navigationEpoch += 1
+        session.navigationCount += 1
+        if (session.pending && !session.pending.allowsNavigation) {
+          session.pending.abort.abort(
+            new BrowserAutomationFailure(
+              session.navigationCount > MAX_NAVIGATIONS ? 'resource_limit' : 'stale_navigation'
+            )
+          )
+        }
+      })
+      this.#sessions.set(session.id, session)
+      this.scheduleSessionExpiry(session)
+      return session
+    } catch (error) {
+      if (page?.owned) await page.destroy().catch(() => undefined)
+      throw error
+    } finally {
+      this.#pendingCreations.delete(snapshot.automationSessionId)
+    }
   }
 
   private async runOperation(
@@ -753,6 +805,7 @@ export function createElectronAutomationPage(options: {
   revalidate: () => boolean
   destroyOwned?: () => Promise<void>
   prepareCapture?: (width: number, height: number) => void
+  captureOffscreen?: (width: number, height: number) => Promise<Buffer>
 }): BrowserAutomationPage {
   const token = {}
   return {
@@ -804,12 +857,14 @@ export function createElectronAutomationPage(options: {
     },
     capture: async (width, height) => {
       options.prepareCapture?.(width, height)
-      const image: NativeImage = await options.contents.capturePage({ x: 0, y: 0, width, height })
+      if (options.captureOffscreen) return options.captureOffscreen(width, height)
+      const image: NativeImage = await options.contents.capturePage(
+        { x: 0, y: 0, width, height },
+        { stayHidden: true }
+      )
       const captured = image.getSize()
-      if (captured.width !== width || captured.height !== height) {
-        throw new BrowserAutomationFailure('resource_limit')
-      }
-      return image.toPNG()
+      if (captured.width === width && captured.height === height) return image.toPNG()
+      throw new BrowserAutomationFailure('resource_limit')
     },
     onTopLevelNavigation: (listener) => {
       const handler = (event: Event): void => {

@@ -6,18 +6,17 @@ design and keep the temporary project identity replaceable.
 
 ## Prerequisites and setup
 
-Use Node.js 22.20 or newer, pnpm 10.34.5, Rust 1.96.0, a C/C++ build toolchain, and Electron's
+Use Node.js 22.22.3, pnpm 10.34.5, a C/C++ build toolchain, and Electron's
 Linux development libraries. Then run:
 
 ```sh
 corepack enable
 pnpm install --frozen-lockfile
-pnpm generate:protocol
 pnpm dev
 ```
 
-Generated TypeScript protocol declarations belong in `packages/protocol-client/src/generated`.
-Commit regenerated output with the Rust DTO change that caused it.
+The checked-in protocol declarations live in `packages/protocol-client/src/generated`.
+Update contracts and validation schemas together when the Node wire format changes.
 
 ## Validation commands
 
@@ -30,9 +29,8 @@ pnpm build
 pnpm validate
 ```
 
-`pnpm validate` is the complete local quality gate. Rust changes must pass rustfmt, Clippy with
-warnings denied, and workspace tests; TypeScript changes must pass Prettier, ESLint, strict type
-checking, and the relevant Vitest/Node suites. Run focused Electron E2E under a display with:
+`pnpm validate` is the complete local quality gate. TypeScript changes must pass Prettier,
+ESLint, strict type checking, and the relevant Vitest/Node suites. Run focused Electron E2E under a display with:
 
 ```sh
 pnpm --filter @agent-workspace/desktop test:e2e
@@ -73,7 +71,7 @@ Do not shorten or describe the smoke run as the soak. Follow [Performance](docs/
    documentation and accessible labels/states.
 3. Update [the dependency record](docs/DEPENDENCIES.md) with the purpose, license, owner boundary,
    and exact version policy for every new direct production dependency.
-4. Keep CLI examples derived from generated `--help`, settings defaults/bounds derived from Rust,
+4. Keep CLI examples derived from `--help`, settings defaults/bounds derived from Node contracts,
    and milestone/release claims tied to retained evidence. Distinguish implemented, locally
    validated, CI-defined, and unrun work.
 5. Describe security impact, test evidence, documentation changes, and follow-up gaps in the pull

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { z } from 'zod'
+import { randomUUID } from 'node:crypto'
 
 import {
   actionDefinitionSchema,
@@ -35,6 +36,7 @@ import {
   browserPlaceholderMetadataSchema,
   browserSessionStateSchema,
   responseEnvelopeSchema,
+  searchQueryParamsSchema,
   settingsGetResultSchema,
   settingsUpdateParamsSchema,
   serviceEventSchema,
@@ -87,30 +89,18 @@ import {
 } from './schemas'
 
 const milestone2Fixture: unknown = JSON.parse(
-  readFileSync(
-    new URL('../../../crates/protocol/fixtures/milestone2-projection.json', import.meta.url),
-    'utf8'
-  )
+  readFileSync(new URL('../fixtures/milestone2-projection.json', import.meta.url), 'utf8')
 )
 
 const milestone2SettingsFixture: unknown = JSON.parse(
-  readFileSync(
-    new URL('../../../crates/protocol/fixtures/milestone2-settings.json', import.meta.url),
-    'utf8'
-  )
+  readFileSync(new URL('../fixtures/milestone2-settings.json', import.meta.url), 'utf8')
 )
 
 type ProjectionOperation =
   { op: 'set'; path: string; value: unknown } | { op: 'copy'; from: string; path: string }
 
 const invalidProjectionFixture = JSON.parse(
-  readFileSync(
-    new URL(
-      '../../../crates/protocol/fixtures/milestone2-invalid-projections.json',
-      import.meta.url
-    ),
-    'utf8'
-  )
+  readFileSync(new URL('../fixtures/milestone2-invalid-projections.json', import.meta.url), 'utf8')
 ) as {
   cases: Array<{
     name: string
@@ -120,10 +110,7 @@ const invalidProjectionFixture = JSON.parse(
 }
 
 const boundaryFixture = JSON.parse(
-  readFileSync(
-    new URL('../../../crates/protocol/fixtures/boundary-parity.json', import.meta.url),
-    'utf8'
-  )
+  readFileSync(new URL('../fixtures/boundary-parity.json', import.meta.url), 'utf8')
 ) as {
   uint32: { minimum: number; maximum: number; aboveMaximum: number }
   safeInteger: { maximum: number; aboveMaximum: number }
@@ -140,10 +127,7 @@ const boundaryFixture = JSON.parse(
 }
 
 const attentionContractFixture = JSON.parse(
-  readFileSync(
-    new URL('../../../crates/protocol/fixtures/attention-contract-parity.json', import.meta.url),
-    'utf8'
-  )
+  readFileSync(new URL('../fixtures/attention-contract-parity.json', import.meta.url), 'utf8')
 ) as { cases: Array<{ name: string; valid: boolean; value: unknown }> }
 
 const MAX_TERMINAL_CHECKPOINT_DATA_LENGTH = 512 * 1024
@@ -151,6 +135,23 @@ const MAX_TERMINAL_CHECKPOINT_DATA_LENGTH = 512 * 1024
 const legacyV1DensityFixtureSchema = z.strictObject({
   schemaVersion: z.literal(1),
   density: z.enum(['compact', 'comfortable'])
+})
+
+it('accepts optional bounded search source scope for Node clients', () => {
+  const request = { query: 'needle', limit: 1, cancellationId: randomUUID() }
+  expect(searchQueryParamsSchema.safeParse(request).success).toBe(true)
+  expect(
+    searchQueryParamsSchema.safeParse({
+      ...request,
+      sourceAuthorizationIds: [randomUUID()]
+    }).success
+  ).toBe(true)
+  expect(
+    searchQueryParamsSchema.safeParse({
+      ...request,
+      sourceAuthorizationIds: Array.from({ length: 641 }, randomUUID)
+    }).success
+  ).toBe(false)
 })
 
 describe('actions-v1 strict contracts', () => {
@@ -557,6 +558,55 @@ describe('protocol schemas', () => {
         template
       }).success
     ).toBe(false)
+  })
+
+  it('rejects a portable layout that exceeds Rust workspace tab capacity', () => {
+    const paneId = '20000000-0000-4000-8000-000000000002'
+    const tabs = Array.from(
+      { length: 129 },
+      (_, index) => `30000000-0000-4000-8000-${index.toString(16).padStart(12, '0')}`
+    )
+    const tabMap = Object.fromEntries(
+      tabs.map((id) => [
+        id,
+        {
+          id,
+          paneId,
+          title: 'shell',
+          customTitle: null,
+          content: { kind: 'terminal', launch: { cwd: '/tmp', rows: 24, cols: 80 } },
+          createdAt: 1
+        }
+      ])
+    )
+    const envelope = {
+      formatVersion: 1,
+      name: 'too many tabs',
+      template: {
+        workspaces: [
+          {
+            id: '10000000-0000-4000-8000-000000000001',
+            name: 'workspace',
+            description: null,
+            color: null,
+            workingDirectory: '/tmp',
+            layout: { kind: 'leaf', paneId },
+            selectedPaneId: paneId,
+            panes: { [paneId]: { id: paneId, tabs, selectedTabId: tabs[0], title: null } },
+            tabs: tabMap,
+            createdAt: 1,
+            updatedAt: 1
+          }
+        ]
+      }
+    }
+    expect(JSON.stringify(envelope).length).toBeLessThan(256 * 1024)
+    expect(layoutExportEnvelopeSchema.safeParse(envelope).success).toBe(false)
+    const atLimit = structuredClone(envelope)
+    const workspace = atLimit.template.workspaces[0]!
+    workspace.panes[paneId].tabs.pop()
+    delete workspace.tabs[tabs.at(-1)!]
+    expect(layoutExportEnvelopeSchema.safeParse(atLimit).success).toBe(true)
   })
 
   it('rejects malformed and duplicate saved-layout summaries', () => {

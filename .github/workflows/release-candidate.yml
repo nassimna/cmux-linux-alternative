@@ -49,10 +49,8 @@ jobs:
       - name: Install Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: 22.20.0
+          node-version: 22.22.3
           cache: pnpm
-      - name: Install Rust toolchain
-        run: rustup toolchain install 1.96.0 --profile minimal --component clippy,rustfmt
       - name: Install frozen dependencies
         run: pnpm install --frozen-lockfile
       - name: Enforce version, channel, tag, and changelog
@@ -80,10 +78,6 @@ jobs:
           result=$(node scripts/release/validate-release.mjs "${args[@]}")
           prerelease=$(node -e 'process.stdout.write(String(JSON.parse(process.argv[1]).prerelease))' "$result")
           echo "prerelease=$prerelease" >> "$GITHUB_OUTPUT"
-      - name: Verify generated protocol bindings
-        run: |
-          pnpm generate:protocol
-          git diff --exit-code -- packages/protocol-client/src/generated
       - name: Run complete validation gate
         run: pnpm validate
       - name: Install virtual display prerequisite
@@ -184,6 +178,13 @@ jobs:
         run: exit 1
       - name: Build feed-free AppImage, deb, and rpm
         run: pnpm package:linux
+      - name: Verify the packaged Node runtime
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          for type in AppImage deb rpm; do
+            scripts/release/inspect-node-preview.sh "release/agent-workspace-${VERSION}-x86_64.${type}" "$type"
+          done
       - name: Verify the exact checksum set
         env:
           VERSION: ${{ inputs.version }}
@@ -379,7 +380,7 @@ jobs:
       - name: Install Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: 22.20.0
+          node-version: 22.22.3
           cache: pnpm
       - name: Install dependencies and run JavaScript audit
         run: |
@@ -387,10 +388,6 @@ jobs:
           pnpm audit --prod --audit-level high
           mkdir -p security-evidence
           pnpm licenses list --prod --json > security-evidence/pnpm-licenses.json
-      - name: Audit locked Rust dependencies without ignored advisories
-        uses: rustsec/audit-check@69366f33c96575abad1ee0dba8212993eecbe998 # v2.0.0
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
       - name: Download exact candidate bundle
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:

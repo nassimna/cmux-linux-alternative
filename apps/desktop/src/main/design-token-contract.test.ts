@@ -5,17 +5,17 @@ import { describe, expect, it } from 'vitest'
 import { terminalTheme } from '@agent-workspace/design-tokens/terminal-theme'
 
 const rendererFoundation = readFileSync(
-  new URL('../renderer/src/styles/foundation.css', import.meta.url),
+  new URL('../../../web/src/styles/foundation.css', import.meta.url),
   'utf8'
 )
-const productStyles = readFileSync(new URL('../renderer/src/styles.css', import.meta.url), 'utf8')
+const productStyles = readFileSync(new URL('../../../web/src/styles.css', import.meta.url), 'utf8')
 const rendererStyles = `${rendererFoundation}\n${productStyles}`
 const foundationTokens = readFileSync(
   new URL('../../../../packages/design-tokens/src/tokens.css', import.meta.url),
   'utf8'
 )
 const terminalPane = readFileSync(
-  new URL('../renderer/src/terminal/TerminalPane.tsx', import.meta.url),
+  new URL('../../../web/src/terminal/TerminalPane.tsx', import.meta.url),
   'utf8'
 )
 

@@ -120,6 +120,33 @@ function harness(page = new FakePage()): BrowserAutomationManager {
 }
 
 describe('BrowserAutomationManager', () => {
+  it('reports attached sessions, including creation in progress, without counting an idle provider', async () => {
+    let confirm!: (allowed: boolean) => void
+    const manager = new BrowserAutomationManager({
+      acquireAttachedPage: (target) => Promise.resolve(new FakePage(false, target)),
+      createEphemeralPage: (snapshot) => Promise.resolve(new FakePage(true, snapshot.target)),
+      confirmAttachment: () =>
+        new Promise((resolve) => {
+          confirm = resolve
+        }),
+      now: Date.now,
+      schedule: (callback, delayMs) => setTimeout(callback, delayMs),
+      cancelSchedule: (handle) => clearTimeout(handle)
+    })
+
+    expect(manager.hasAttachedSessions()).toBe(false)
+    const creating = manager.createSession(session('attach'))
+    expect(manager.hasAttachedSessions()).toBe(true)
+    confirm(true)
+    await creating
+    expect(manager.hasAttachedSessions()).toBe(true)
+    await manager.destroySession(SESSION)
+    expect(manager.hasAttachedSessions()).toBe(false)
+    await manager.createSession(session())
+    expect(manager.hasAttachedSessions()).toBe(false)
+    await manager.dispose()
+  })
+
   it('provisions new durable sessions at navigation epoch one', async () => {
     const manager = new BrowserAutomationManager({
       acquireAttachedPage: () => Promise.reject(new Error('not used')),
@@ -196,6 +223,30 @@ describe('BrowserAutomationManager', () => {
     expect(JSON.stringify(result)).not.toContain('hostile secret')
   })
 
+  it('runs the closed interaction set through the native page with bounded inputs', async () => {
+    const page = new FakePage()
+    const manager = harness(page)
+    for (const operation of [
+      { kind: 'focus' as const, selector: '#field' },
+      { kind: 'click' as const, selector: '#submit' },
+      { kind: 'typeText' as const, selector: '#field', text: 'private text' },
+      { kind: 'key' as const, key: 'enter' as const },
+      { kind: 'keyAt' as const, selector: '#field', key: 'tab' as const },
+      {
+        kind: 'wait' as const,
+        condition: { kind: 'lifecycle' as const, lifecycle: 'load' as const }
+      }
+    ]) {
+      expect((await manager.execute(request(operation))).state).toBe('succeeded')
+    }
+    expect(page.executeClosedScript).toHaveBeenCalledWith('focus', { selector: '#field' })
+    expect(page.executeClosedScript).toHaveBeenCalledWith('click', { selector: '#submit' })
+    expect(page.insertText).toHaveBeenCalledWith('private text')
+    expect(page.sendKey).toHaveBeenCalledWith('enter')
+    expect(page.sendKey).toHaveBeenCalledWith('tab')
+    expect(page.waitForLifecycle).toHaveBeenCalledWith('load', expect.any(AbortSignal))
+  })
+
   it('fences late callbacks after top-level navigation', async () => {
     let resolve!: (value: unknown) => void
     const page = new FakePage()
@@ -248,6 +299,52 @@ describe('BrowserAutomationManager', () => {
     await manager.destroySession(SESSION, 1)
     expect(page.destroy).toHaveBeenCalledTimes(1)
     expect(manager.diagnosticCounts).toEqual({ sessions: 0, pending: 0, screenshots: 0 })
+  })
+
+  it('destroys an owned page that finishes creation after provider disposal', async () => {
+    let finishCreation!: (page: BrowserAutomationPage) => void
+    const page = new FakePage()
+    const manager = new BrowserAutomationManager({
+      acquireAttachedPage: () => Promise.resolve(undefined),
+      createEphemeralPage: () =>
+        new Promise((resolve) => {
+          finishCreation = resolve
+        }),
+      confirmAttachment: () => Promise.resolve(false),
+      now: Date.now,
+      schedule: (callback, delayMs) => setTimeout(callback, delayMs),
+      cancelSchedule: (handle) => clearTimeout(handle)
+    })
+    const creating = manager.createSession(session())
+    await manager.dispose()
+    finishCreation(page)
+
+    await expect(creating).rejects.toThrow('interrupted')
+    expect(page.destroy).toHaveBeenCalledOnce()
+    expect(manager.diagnosticCounts.sessions).toBe(0)
+  })
+
+  it('cancels a pending page creation when its exact window is destroyed', async () => {
+    let finishCreation!: (page: BrowserAutomationPage) => void
+    const page = new FakePage()
+    const manager = new BrowserAutomationManager({
+      acquireAttachedPage: () => Promise.resolve(undefined),
+      createEphemeralPage: () =>
+        new Promise((resolve) => {
+          finishCreation = resolve
+        }),
+      confirmAttachment: () => Promise.resolve(false),
+      now: Date.now,
+      schedule: (callback, delayMs) => setTimeout(callback, delayMs),
+      cancelSchedule: (handle) => clearTimeout(handle)
+    })
+    const creating = manager.createSession(session())
+    await manager.destroyTarget(WINDOW, 1)
+    finishCreation(page)
+
+    await expect(creating).rejects.toThrow('interrupted')
+    expect(page.destroy).toHaveBeenCalledOnce()
+    expect(manager.diagnosticCounts.sessions).toBe(0)
   })
 
   it('requires trusted confirmation for exact attachment', async () => {

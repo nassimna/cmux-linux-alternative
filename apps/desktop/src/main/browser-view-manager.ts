@@ -30,8 +30,9 @@ import {
   type WorkspaceListResult,
   type WorkspaceSnapshotResult
 } from '@agent-workspace/protocol-client'
-import { browserMessages } from '../shared/browser-messages'
+import { browserMessages } from '@agent-workspace/contracts/desktop/browser-messages'
 import {
+  BrowserAutomationFailure,
   createElectronAutomationPage,
   type BrowserAutomationPage
 } from './browser-automation-manager'
@@ -40,6 +41,8 @@ const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3
 const PARTITION_PATTERN = /^persist:[A-Za-z0-9._-]+$/u
 const MAX_BROWSER_DIMENSION = 32_768
 const MAX_BROWSER_POSITION = 1_000_000
+const MAX_TRANSFER_HISTORY_ENTRIES = 100
+const MAX_TRANSFER_HISTORY_BYTES = 8 * 1024 * 1024
 const EXTERNAL_SCHEME_PATTERN = /^[a-z][a-z0-9+.-]{1,31}:$/u
 const BLOCKED_EXTERNAL_SCHEMES = new Set(['about:', 'blob:', 'data:', 'file:', 'javascript:'])
 
@@ -101,6 +104,27 @@ export interface BrowserControl {
   onDomainEvent(listener: (event: DomainEventMessage) => void): () => void
 }
 
+/** Uses a Node workspace projection as the mount authority for native browser views. */
+export function createNodeBrowserControl(source: {
+  listWorkspaces(): Promise<WorkspaceListResult>
+  focusPane(params: { workspaceId: string; paneId: string }): Promise<MutationResult>
+  observeBrowser(params: BrowserObserveParams): Promise<MutationResult>
+  onDomainEvent?: BrowserControl['onDomainEvent']
+}): BrowserControl {
+  return {
+    listWorkspaces: () => source.listWorkspaces(),
+    snapshotWorkspace: async ({ workspaceId }) => {
+      const { snapshot } = await source.listWorkspaces()
+      const workspace = snapshot.workspaces.find((candidate) => candidate.id === workspaceId)
+      if (!workspace) throw new Error('The Node workspace snapshot does not contain this workspace')
+      return { revision: snapshot.revision, workspace }
+    },
+    focusPane: (params) => source.focusPane(params),
+    observeBrowser: (params) => source.observeBrowser(params),
+    onDomainEvent: (listener) => source.onDomainEvent?.(listener) ?? (() => undefined)
+  }
+}
+
 export interface PermissionPromptRequest {
   browserSessionId: string
   origin: string
@@ -143,6 +167,7 @@ interface BrowserViewEntry {
   attached: boolean
   destroyed: boolean
   automationBlocked: boolean
+  transferPending: boolean
   boundsEpoch: number
   boundsRevision: number
   pendingBounds: BrowserBoundsParams | undefined
@@ -188,6 +213,53 @@ interface PaneFocusRequest {
   workspaceId: string
   paneId: string
   started: boolean
+}
+
+interface BrowserTransferHistory {
+  entries: Electron.NavigationEntry[]
+  index: number
+}
+
+function captureTransferHistory(contents: WebContents): BrowserTransferHistory {
+  const entries = contents.navigationHistory.getAllEntries()
+  const index = contents.navigationHistory.getActiveIndex()
+  if (
+    entries.length < 1 ||
+    entries.length > MAX_TRANSFER_HISTORY_ENTRIES ||
+    !Number.isSafeInteger(index) ||
+    index < 0 ||
+    index >= entries.length
+  ) {
+    throw new Error('The browser navigation history cannot be transferred')
+  }
+  let bytes = 0
+  const validated = entries.map((entry) => {
+    const pageState = entry?.pageState
+    if (
+      !entry ||
+      !isSafeRemoteUrl(entry.url) ||
+      typeof entry.title !== 'string' ||
+      entry.title.length > 1024 ||
+      (pageState !== undefined && typeof pageState !== 'string')
+    ) {
+      throw new Error('The browser navigation history cannot be transferred')
+    }
+    bytes +=
+      Buffer.byteLength(entry.url) +
+      Buffer.byteLength(entry.title) +
+      (pageState ? Buffer.byteLength(pageState) : 0)
+    if (bytes > MAX_TRANSFER_HISTORY_BYTES) {
+      throw new Error('The browser navigation history exceeds the transfer limit')
+    }
+    if (
+      pageState !== undefined &&
+      !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/u.test(pageState)
+    ) {
+      throw new Error('The browser navigation history cannot be transferred')
+    }
+    return { url: entry.url, title: entry.title, ...(pageState === undefined ? {} : { pageState }) }
+  })
+  return { entries: validated, index }
 }
 
 export function createSecureBrowserWebPreferences(remoteSession: Session): WebPreferences {
@@ -318,7 +390,11 @@ export class BrowserViewManager {
     this.removeDomainListener = this.control.onDomainEvent((event) => this.handleDomainEvent(event))
   }
 
-  public async mount(rawParams: unknown): Promise<void> {
+  public async mount(
+    rawParams: unknown,
+    trustedTransferSnapshot?: WorkspaceSnapshotResult,
+    restoringHistory = false
+  ): Promise<void> {
     this.assertActive()
     const params = parseBrowserMountParams(rawParams)
     const token = {}
@@ -326,7 +402,9 @@ export class BrowserViewManager {
 
     let snapshot: WorkspaceSnapshotResult
     try {
-      snapshot = await this.control.snapshotWorkspace({ workspaceId: params.workspaceId })
+      snapshot =
+        trustedTransferSnapshot ??
+        (await this.control.snapshotWorkspace({ workspaceId: params.workspaceId }))
     } catch (error) {
       const pending = this.pendingMounts.get(params.browserSessionId)
       if (pending?.token === token) this.pendingMounts.delete(params.browserSessionId)
@@ -362,7 +440,12 @@ export class BrowserViewManager {
       mountedEntry.paneId = located.paneId
       mountedEntry.tabId = params.tabId
       mountedEntry.lifecycleId = params.lifecycleId
-      this.reconcileState(mountedEntry, state, true)
+      if (trustedTransferSnapshot || restoringHistory) {
+        this.invalidateObservations(mountedEntry)
+        mountedEntry.transferPending = true
+        mountedEntry.automationBlocked = true
+      }
+      this.reconcileState(mountedEntry, state, !restoringHistory)
       this.reconcileWorkspaceSelections(snapshot)
       return
     }
@@ -381,7 +464,8 @@ export class BrowserViewManager {
       view,
       attached: false,
       destroyed: false,
-      automationBlocked: false,
+      automationBlocked: trustedTransferSnapshot !== undefined || restoringHistory,
+      transferPending: trustedTransferSnapshot !== undefined || restoringHistory,
       boundsEpoch: 0,
       boundsRevision: -1,
       pendingBounds: undefined,
@@ -395,7 +479,7 @@ export class BrowserViewManager {
     this.entries.set(entry.browserSessionId, entry)
     this.installSessionPolicies(remoteSession).entries.add(entry)
     this.installViewPolicies(entry)
-    this.reconcileState(entry, state, true)
+    this.reconcileState(entry, state, !restoringHistory)
     this.reconcileWorkspaceSelections(snapshot)
   }
 
@@ -415,23 +499,31 @@ export class BrowserViewManager {
   }
 
   /** Recreates a transferred browser from the target window's authoritative projection. */
-  public async mountTransferred(params: {
-    workspaceId: string
-    paneId: string
-    tabId: string
-    browserSessionId: string
-    lifecycleId: string
-    profilePartition: string
-    stateRevision: number
-    title: string
-    url: string
-  }): Promise<void> {
-    await this.mount({
-      workspaceId: params.workspaceId,
-      tabId: params.tabId,
-      browserSessionId: params.browserSessionId,
-      lifecycleId: params.lifecycleId
-    })
+  public async mountTransferred(
+    params: {
+      workspaceId: string
+      paneId: string
+      tabId: string
+      browserSessionId: string
+      lifecycleId: string
+      profilePartition: string
+      stateRevision: number
+      title: string
+      url: string
+      history?: BrowserTransferHistory
+    },
+    trustedTransferSnapshot?: WorkspaceSnapshotResult
+  ): Promise<void> {
+    await this.mount(
+      {
+        workspaceId: params.workspaceId,
+        tabId: params.tabId,
+        browserSessionId: params.browserSessionId,
+        lifecycleId: params.lifecycleId
+      },
+      trustedTransferSnapshot,
+      params.history !== undefined
+    )
     const entry = this.entries.get(params.browserSessionId)
     if (
       !entry ||
@@ -442,16 +534,39 @@ export class BrowserViewManager {
       if (entry) this.destroyEntry(entry)
       throw new Error('The target projection does not match the transferred browser placement')
     }
+    if (params.history) {
+      try {
+        await entry.view.webContents.navigationHistory.restore(params.history)
+      } catch {
+        this.destroyEntry(entry)
+        throw new Error('The browser navigation history could not be restored')
+      }
+    }
+  }
+
+  /** Enables native events only after the durable placement points at this window. */
+  public activateTransferredSession(browserSessionId: string): void {
+    const entry = this.entries.get(browserSessionId)
+    if (!entry || entry.destroyed || !entry.transferPending) {
+      throw new Error('The staged browser transfer is unavailable')
+    }
+    entry.transferPending = false
+    entry.automationBlocked = false
+    this.scheduleObservation(entry)
   }
 
   /** Provider-only transfer primitive; caller has already authenticated native ownership. */
   public suspendOwnedSession(browserSessionId: string): () => void {
     const entry = this.entries.get(browserSessionId)
-    if (!entry) throw new Error('The browser session is not owned by this window')
+    if (!entry || entry.transferPending) {
+      throw new Error('The browser session is unavailable for transfer')
+    }
     const wasAttached = entry.attached
     const wasVisible = entry.view.getVisible()
     const bounds = entry.view.getBounds()
     entry.automationBlocked = true
+    entry.transferPending = true
+    this.invalidateObservations(entry)
     this.cancelBoundsSchedule(entry)
     this.hideAndDetach(entry)
     let active = true
@@ -459,6 +574,8 @@ export class BrowserViewManager {
       if (!active || entry.destroyed || this.disposed) return
       active = false
       entry.automationBlocked = false
+      entry.transferPending = false
+      this.scheduleObservation(entry)
       if (!wasAttached) return
       if (!this.window.isDestroyed()) {
         this.window.contentView.addChildView(entry.view)
@@ -523,6 +640,7 @@ export class BrowserViewManager {
     }
     const entry = this.entries.get(params.browserSessionId)
     if (!entry || entry.lifecycleId !== params.lifecycleId) return
+    if (entry.transferPending) return
     if (params.revision <= entry.boundsRevision) throw new Error('Stale browser bounds revision')
     entry.boundsRevision = params.revision
     entry.pendingBounds = params
@@ -728,9 +846,9 @@ export class BrowserViewManager {
    * Creates an automation-owned view in a unique nonpersistent partition. The
    * public contract never accepts or returns this partition name.
    */
-  public createEphemeralAutomationPage(
+  public async createEphemeralAutomationPage(
     snapshot: BrowserAutomationSessionSnapshot
-  ): BrowserAutomationPage {
+  ): Promise<BrowserAutomationPage> {
     this.assertActive()
     const partition = `agent-workspace-automation-${snapshot.automationSessionId}-${snapshot.generation}-${randomUUID()}`
     const remoteSession = this.dependencies.getSession(partition)
@@ -753,8 +871,11 @@ export class BrowserViewManager {
     remoteSession.setPermissionRequestHandler(denyPermissionRequest)
     remoteSession.on('will-download', denyDownload)
     contents.setWindowOpenHandler(() => ({ action: 'deny' }))
+    let initializingBlank = true
     const blockUnsafeNavigation = (event: Event, url: string): void => {
-      if (!isSafeRemoteUrl(url)) event.preventDefault()
+      if (url !== 'about:blank' || !initializingBlank) {
+        if (!isSafeRemoteUrl(url)) event.preventDefault()
+      }
     }
     const willNavigate = (event: Event & { url: string }): void =>
       blockUnsafeNavigation(event, event.url)
@@ -771,6 +892,34 @@ export class BrowserViewManager {
       target: snapshot.target,
       revalidate: () => live && !this.disposed && !contents.isDestroyed(),
       prepareCapture: (width, height) => automationWindow.setContentSize(width, height, false),
+      captureOffscreen: (width, height) =>
+        new Promise<Buffer>((resolve, reject) => {
+          let settled = false
+          const finish = (bytes?: Buffer): void => {
+            if (settled) return
+            settled = true
+            clearTimeout(timeout)
+            contents.removeListener('paint', onPaint)
+            if (bytes) resolve(bytes)
+            else reject(new BrowserAutomationFailure('resource_limit'))
+          }
+          const onPaint = (
+            _event: Event,
+            _dirtyRect: Electron.Rectangle,
+            image: Electron.NativeImage
+          ): void => {
+            const size = image.getSize()
+            if (size.width === width && size.height === height) finish(image.toPNG())
+          }
+          const timeout = setTimeout(() => finish(), 3_000)
+          contents.on('paint', onPaint)
+          try {
+            contents.startPainting()
+            contents.invalidate()
+          } catch {
+            finish()
+          }
+        }),
       destroyOwned: async () => {
         if (!live) return
         live = false
@@ -790,6 +939,16 @@ export class BrowserViewManager {
       }
     })
     this.automationPages.add(page)
+    try {
+      // A new hidden offscreen window has no rendered document. Initialize its
+      // compositor before the provider reports the ephemeral session as ready.
+      await contents.loadURL('about:blank')
+    } catch (error) {
+      await page.destroy()
+      throw error
+    } finally {
+      initializingBlank = false
+    }
     return page
   }
 
@@ -820,6 +979,37 @@ export class BrowserViewManager {
   public ownsSession(browserSessionId: string): boolean {
     const entry = this.entries.get(browserSessionId)
     return entry !== undefined && !entry.destroyed
+  }
+
+  /** Native sessions only; an unmounted browser has no view to transfer. */
+  public ownedTransferDescriptors(): readonly {
+    workspaceId: string
+    paneId: string
+    tabId: string
+    browserSessionId: string
+    lifecycleId: string
+    profilePartition: string
+    stateRevision: number
+    title: string
+    url: string
+    history: BrowserTransferHistory
+  }[] {
+    return [...this.entries.values()]
+      .filter((entry) => !entry.destroyed)
+      .map((entry) => {
+        return {
+          workspaceId: entry.workspaceId,
+          paneId: entry.paneId,
+          tabId: entry.tabId,
+          browserSessionId: entry.browserSessionId,
+          lifecycleId: entry.lifecycleId ?? randomUUID(),
+          profilePartition: entry.partition,
+          stateRevision: entry.stateRevision,
+          title: entry.view.webContents.getTitle(),
+          url: entry.view.webContents.getURL(),
+          history: captureTransferHistory(entry.view.webContents)
+        }
+      })
   }
 
   public get diagnosticCounts(): Readonly<{
@@ -1080,7 +1270,8 @@ export class BrowserViewManager {
   }
 
   private scheduleObservation(entry: BrowserViewEntry): void {
-    if (!this.isCurrentEntry(entry) || this.disposed || !entry.lifecycleId) return
+    if (!this.isCurrentEntry(entry) || this.disposed || !entry.lifecycleId || entry.transferPending)
+      return
     if (entry.observationSchedule) return
     const epoch = entry.observationEpoch
     const lifecycleId = entry.lifecycleId
@@ -1161,7 +1352,8 @@ export class BrowserViewManager {
       this.isCurrentEntry(entry) &&
       lifecycleId !== undefined &&
       entry.lifecycleId === lifecycleId &&
-      entry.observationEpoch === epoch
+      entry.observationEpoch === epoch &&
+      !entry.transferPending
     )
   }
 
@@ -1493,11 +1685,11 @@ function defaultDependencies(window: BrowserWindow): BrowserViewManagerDependenc
       new BrowserWindow({
         focusable: false,
         frame: false,
-        height: 1,
+        height: 720,
         show: false,
         skipTaskbar: true,
         webPreferences,
-        width: 1
+        width: 1280
       }),
     getSession: (partition) => electronSession.fromPartition(partition),
     openExternal: (url) => shell.openExternal(url),

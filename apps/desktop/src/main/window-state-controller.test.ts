@@ -112,6 +112,25 @@ describe('window state', () => {
     expect(client.updateWindowState).not.toHaveBeenCalled()
   })
 
+  it('keeps compositor resize events below the saved-size minimum from crashing the app', async () => {
+    const fixture = windowFixture()
+    const client = {
+      getWindowState: vi.fn(),
+      updateWindowState: vi.fn(async ({ state: next }) => ({ state: next }))
+    } satisfies WindowStateClient
+    const controller = new WindowStateController(fixture.window, {
+      getDisplayMatching: () => ({ id: 1, workArea: { x: 0, y: 0, width: 1920, height: 1080 } })
+    })
+    controller.setClient(client, state)
+    fixture.setBounds({ x: 100, y: 120, width: 80, height: 120 })
+    expect(() => fixture.emit('resize')).not.toThrow()
+    await controller.flush()
+    expect(client.updateWindowState).toHaveBeenCalledWith({
+      state: expect.objectContaining({ width: 200, height: 200 })
+    })
+    await controller.dispose()
+  })
+
   it('persists an actual min-width normalization once at the next revision', async () => {
     const fixture = windowFixture()
     fixture.setBounds({ x: 100, y: 120, width: 900, height: 700 })

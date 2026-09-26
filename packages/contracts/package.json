@@ -1,0 +1,26 @@
+{
+  "name": "@agent-workspace/contracts",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./desktop/application-menu": "./src/desktop/application-menu.ts",
+    "./desktop/browser-messages": "./src/desktop/browser-messages.ts",
+    "./desktop/desktop-bridge": "./src/desktop/desktop-bridge.ts",
+    "./desktop/desktop-messages": "./src/desktop/desktop-messages.ts"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@agent-workspace/protocol-client": "workspace:*",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  }
+}

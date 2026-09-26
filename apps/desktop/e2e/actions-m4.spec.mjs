@@ -34,10 +34,7 @@ import { createPackagedElectronHarness } from './helpers/packaged-electron-harne
 const desktopDirectory = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const repositoryDirectory = resolve(desktopDirectory, '../..')
 const mainEntry = join(desktopDirectory, 'e2e/helpers/actions-m4-main.cjs')
-const executable = (name) =>
-  join(repositoryDirectory, 'target', 'debug', process.platform === 'win32' ? `${name}.exe` : name)
-const serviceBinary = executable('agent-workspace-service')
-const cliBinary = executable('agent-workspace-cli')
+const cliBinary = join(repositoryDirectory, 'target/node-linux/bin/agent-workspace-node.mjs')
 const rendererUrl = 'agent-workspace://renderer/index.html'
 const evidenceRoot =
   process.env.AGENT_WORKSPACE_EVIDENCE_DIR ?? join(tmpdir(), 'agent-workspace-m4-validation')
@@ -49,10 +46,6 @@ test.beforeAll(async () => {
   }
   await mkdir(evidenceRoot, { recursive: true })
   if (process.env.AGENT_WORKSPACE_E2E_SKIP_BUILD !== '1') {
-    execFileSync('cargo', ['build', '-p', 'agent-workspace-service', '-p', 'agent-workspace-cli'], {
-      cwd: repositoryDirectory,
-      stdio: 'inherit'
-    })
     execFileSync('pnpm', ['--filter', '@agent-workspace/desktop', 'build'], {
       cwd: repositoryDirectory,
       stdio: 'inherit'
@@ -77,8 +70,8 @@ test('qualifies packaged M4 actions, confirmation, containment, and provider los
   let application
 
   try {
-    const harness = await createPackagedElectronHarness(profileDirectory, serviceBinary)
-    const sessionFile = join(harness.runtimeDirectory, 'agent-workspace', 'cli-session.json')
+    const harness = await createPackagedElectronHarness(profileDirectory)
+    const sessionFile = join(profileDirectory, 'runtime', 'node-cli-session.json')
     application = await electron.launch({
       args: [mainEntry, `--user-data-dir=${profileDirectory}`, '--disable-gpu'],
       cwd: desktopDirectory,

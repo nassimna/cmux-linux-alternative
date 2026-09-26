@@ -6,9 +6,9 @@ import type {
   DesktopUpdateChannel,
   DesktopUpdatePackageType,
   DesktopUpdateState
-} from '../shared/desktop-bridge'
-import { parseDesktopUpdateState } from '../shared/desktop-bridge'
-import { desktopMessages } from '../shared/desktop-messages'
+} from '@agent-workspace/contracts/desktop/desktop-bridge'
+import { parseDesktopUpdateState } from '@agent-workspace/contracts/desktop/desktop-bridge'
+import { desktopMessages } from '@agent-workspace/contracts/desktop/desktop-messages'
 
 const FEED_URL_MAX_LENGTH = 2_048
 const DEFAULT_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1_000

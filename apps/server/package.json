@@ -1,0 +1,41 @@
+{
+  "name": "@agent-workspace/server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "pnpm build && node dist/bin.mjs",
+    "build": "esbuild src/bin.ts --bundle --platform=node --format=esm --external:node-pty --external:better-sqlite3 --external:@hono/node-server --external:hono --external:ws --external:zod --external:dbus-next --external:ssh2 --outfile=dist/bin.mjs && pnpm build:credential-enroll && pnpm build:recovery-export && node scripts/build-rename-exchange.mjs && node scripts/build-seal-executable.mjs",
+    "build:credential-enroll": "esbuild src/remote/credential-enroll-cli.ts --bundle --platform=node --format=esm --external:better-sqlite3 --external:dbus-next --external:ssh2 --outfile=dist/credential-enroll.mjs",
+    "build:recovery-export": "esbuild src/recovery-export-cli.ts --bundle --platform=node --format=esm --external:better-sqlite3 --outfile=dist/recovery-export.mjs",
+    "build:cutover-preflight": "esbuild src/cutover-preflight-cli.ts --bundle --platform=node --format=esm --external:better-sqlite3 --outfile=dist/cutover-preflight.mjs",
+    "preflight:cutover": "pnpm build:cutover-preflight && node dist/cutover-preflight.mjs",
+    "test": "vitest run",
+    "test:smoke": "pnpm build && node scripts/smoke.mjs",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@agent-workspace/client-runtime": "workspace:*",
+    "@agent-workspace/contracts": "workspace:*",
+    "@agent-workspace/protocol-client": "workspace:*",
+    "@hono/node-server": "2.1.1",
+    "@noble/ciphers": "2.3.0",
+    "@noble/hashes": "2.2.0",
+    "better-sqlite3": "13.0.3",
+    "dbus-next": "0.10.2",
+    "hono": "4.13.9",
+    "node-pty": "1.1.0",
+    "ssh2": "1.17.0",
+    "ws": "8.18.3",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "9.6.0",
+    "@types/node": "catalog:",
+    "@types/ssh2": "1.15.6",
+    "@types/ws": "8.18.1",
+    "esbuild": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  }
+}

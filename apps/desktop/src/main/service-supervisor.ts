@@ -195,6 +195,7 @@ export class ServiceSupervisor {
   private readonly pendingContainmentCleanup = new Set<ServiceProcessContainment>()
   private readonly unexpectedExitListeners = new Set<(event: UnexpectedServiceExit) => void>()
   private utilityQueue: Promise<void> = Promise.resolve()
+  private handoffRequested = false
   private readonly configurationPath: string
   private readonly defaultWorkingDirectory: string | undefined
   private readonly cliSessionFilePath: string
@@ -278,11 +279,21 @@ export class ServiceSupervisor {
   }
 
   public start(): Promise<ControlClient> {
+    if (this.handoffRequested) return Promise.reject(new Error('Rust service handoff is in progress'))
     return this.enqueueLifecycle(() => this.startUnlocked())
   }
 
   public stop(): Promise<void> {
     return this.enqueueLifecycle(() => this.stopUnlocked())
+  }
+
+  /** Seal utility submissions and drain queued jobs before releasing Rust ownership. */
+  public stopForHandoff(): Promise<void> {
+    this.handoffRequested = true
+    return this.enqueueLifecycle(async () => {
+      await this.utilityQueue
+      await this.stopUnlocked()
+    })
   }
 
   public getDesktopBootstrapProof(): string | undefined {
@@ -303,6 +314,7 @@ export class ServiceSupervisor {
   }
 
   public restart(): Promise<ControlClient> {
+    if (this.handoffRequested) return Promise.reject(new Error('Rust service handoff is in progress'))
     return this.enqueueLifecycle(async () => {
       await this.stopUnlocked()
       return this.startUnlocked()
@@ -465,6 +477,7 @@ export class ServiceSupervisor {
   }
 
   private enqueueUtility<T>(operation: () => Promise<T>): Promise<T> {
+    if (this.handoffRequested) return Promise.reject(new Error('Rust service handoff is in progress'))
     const result = this.utilityQueue.then(operation, operation)
     this.utilityQueue = result.then(
       () => undefined,

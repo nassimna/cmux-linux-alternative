@@ -76,6 +76,8 @@ export class WindowRegistry {
   #providerEpoch: number | undefined
   #nextGeneration = 0
 
+  public constructor(private readonly invalidateGeneration?: (windowId: string) => void) {}
+
   public register(
     windowId: string,
     window: BrowserWindow,
@@ -138,6 +140,7 @@ export class WindowRegistry {
     const entry = this.require(currentWindowId)
     if (currentWindowId === serviceWindowId) return entry
     if (this.#entries.has(serviceWindowId)) throw new Error('Window placement is already hosted')
+    this.invalidateGeneration?.(currentWindowId)
     const rekeyed: WindowRegistryEntry = { ...entry, windowId: serviceWindowId }
     this.#entries.delete(currentWindowId)
     this.#entries.set(serviceWindowId, rekeyed)
@@ -154,6 +157,7 @@ export class WindowRegistry {
     if (this.#nextGeneration === Number.MAX_SAFE_INTEGER) {
       throw new Error('Renderer generation capacity is exhausted')
     }
+    this.invalidateGeneration?.(windowId)
     const refreshed: WindowRegistryEntry = {
       ...entry,
       generation: ++this.#nextGeneration
@@ -539,6 +543,7 @@ export class WindowRegistry {
   ): Promise<RemovedWindow | undefined> {
     const entry = this.#entries.get(windowId)
     if (!entry) return undefined
+    this.invalidateGeneration?.(windowId)
     this.failWindowActivation(windowId, 'Window was removed before provider activation')
     this.#entries.delete(windowId)
     if (this.#windows.get(entry.window) === entry) this.#windows.delete(entry.window)
