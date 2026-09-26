@@ -105,6 +105,7 @@ import {
   type ConfigurationUpdateParams,
   type DesktopProviderIdentityParams,
   type WindowCloseParams,
+  type TabCloseAdvancedParams,
   type MutationResult,
   type NotificationListParams,
   type WorkspaceBatchCloseParams,
@@ -188,6 +189,7 @@ import {
   desktopSearchSourceRequestSchema,
   desktopSidebarSelectionSchema,
   desktopTaskActionRequestSchema,
+  type DesktopTaskActionRequest,
   desktopTextBoxCreateRequestSchema,
   desktopTextBoxDeleteRequestSchema,
   desktopTextBoxSaveRequestSchema,
@@ -197,8 +199,8 @@ import {
   type DesktopLifecycleState,
   type DesktopWorkspacePathOpenerId,
   type SavedLayoutImportRequest
-} from '../shared/desktop-bridge'
-import { desktopMessages } from '../shared/desktop-messages'
+} from '@agent-workspace/contracts/desktop/desktop-bridge'
+import { desktopMessages } from '@agent-workspace/contracts/desktop/desktop-messages'
 import {
   isSafeRemoteUrl,
   type BrowserLiveAction,
@@ -229,12 +231,54 @@ export interface DesktopLifecycleController {
 }
 
 export interface DesktopUtilitySupervisor {
-  exportRecovery(destination: string): Promise<unknown>
+  exportRecovery(destination: string, format?: 'sqlite' | 'archive'): Promise<unknown>
   previewDiagnostics(): Promise<unknown>
   exportDiagnostics(destination: string, approvedPreview: unknown): Promise<unknown>
 }
 
 export interface DesktopHandlerDependencies {
+  isNodeCoreEnabled?: () => boolean
+  /** Live ownership must never fall through to a sealed Rust window binding. */
+  isNodeExclusive?: () => boolean
+  isNodeConfigurationEnabled?: () => boolean
+  isNodeRemoteEnabled?: () => boolean
+  isNodeRemoteEnrollmentEnabled?: () => boolean
+  isNodeRemoteReplacementEnabled?: () => boolean
+  isNodeRemoteDeletionEnabled?: () => boolean
+  isNodeAgentAssessmentEnabled?: () => boolean
+  isNodeAgentRegistrationEnabled?: () => boolean
+  isNodeAgentForkEnabled?: () => boolean
+  isNodeRecentlyClosedEnabled?: () => boolean
+  isNodeTaskListEnabled?: () => boolean
+  isNodeTaskDetachEnabled?: () => boolean
+  isNodeEncryptedSearchEnabled?: () => boolean
+  issueNodeSearchExportConfirmation?: (params: {
+    sourceAuthorizationId: string
+  }) => Promise<unknown>
+  exportNodeSearchSource?: (params: {
+    sourceAuthorizationId: string
+    confirmationId: string
+  }) => Promise<unknown>
+  invokeNodeCore?: (
+    entry: WindowRegistryEntry,
+    channel: string,
+    args: readonly unknown[]
+  ) => Promise<{ handled: boolean; value?: unknown }> | undefined
+  resolveNodeWorkspacePath?: (entry: WindowRegistryEntry, workspaceId: string) => Promise<string>
+  listTasksFromNodeSidecar?: (
+    entry: WindowRegistryEntry,
+    request: Parameters<ControlClient['listTasks']>[0]
+  ) => Promise<unknown> | undefined
+  isNodeTaskListSelected?: () => boolean
+  detachRemoteTaskFromNodeSidecar?: (
+    entry: WindowRegistryEntry,
+    request: Extract<Parameters<ControlClient['actOnTask']>[0], { action: 'detach' }>
+  ) => Promise<unknown> | undefined
+  actOnNodeTaskFromSidecar?: (
+    entry: WindowRegistryEntry,
+    request: DesktopTaskActionRequest,
+    confirm: () => Promise<boolean>
+  ) => Promise<unknown> | undefined
   resolveWorkspaceRuntimeMetadata?: typeof resolveWorkspaceRuntimeMetadata
   showOpenDialog?: typeof dialog.showOpenDialog
   showSaveDialog?: typeof dialog.showSaveDialog
@@ -242,9 +286,17 @@ export interface DesktopHandlerDependencies {
   isWindowEntryCurrent?: (entry: WindowRegistryEntry) => boolean
   isApplicationGlobalLayoutAvailable?: () => boolean
   getDesktopProviderIdentity?: () => DesktopProviderIdentityParams | undefined
+  getNodeAgentHibernationContext?: (entry: WindowRegistryEntry) =>
+    | {
+        client: AgentHibernationClient
+        provider: DesktopProviderIdentityParams
+        isCurrent: () => boolean
+      }
+    | undefined
   serializeResource?: <T>(resourceId: string, operation: () => Promise<T>) => Promise<T>
   terminalAttached?: (windowId: string, terminalId: string) => void
   terminalDetached?: (windowId: string, terminalId: string) => void
+  isTerminalCleanupDuringQuit?: () => boolean
   ownershipAcquired?: (windowId: string, resourceId: string) => void
   waitForOwnershipTransfer?: (windowId: string, resourceId: string) => Promise<void>
   waitForWindowActivation?: (entry: WindowRegistryEntry) => Promise<void>
@@ -272,6 +324,15 @@ export interface DesktopLifecycleHandlerDependencies {
   downloadsDirectory: string
   scheduleQuit?: (quit: () => void) => void
   configurationChanged?: (channel: 'stable' | 'beta') => void
+  isNodeCoreEnabled?: () => boolean
+  isNodeLifecycleEnabled?: () => boolean
+  isNodeConfigurationEnabled?: () => boolean
+  isNodeDiagnosticsEnabled?: () => boolean
+  isNodeDiagnosticsMode?: () => boolean
+  previewNodeDiagnostics?: () => Promise<unknown>
+  exportNodeDiagnostics?: (destination: string, approvedPreview: unknown) => Promise<unknown>
+  getNodeConfiguration?: () => Promise<unknown>
+  updateNodeConfiguration?: (params: ConfigurationUpdateParams) => Promise<unknown>
   quit(): void
 }
 
@@ -290,6 +351,34 @@ interface LifecycleDesktopHandlerMap {
 }
 
 let currentCollectingHost: ReturnType<typeof createCollectingHost> | undefined
+
+const NODE_CORE_DEFERRED_CAPABILITIES = new Set([
+  'configuration-v2',
+  'remote.target.enroll',
+  'remote.target.replaceCredential',
+  'remote.target.delete',
+  'agent-sessions-v1',
+  'agent.restore.assess',
+  'browser-automation-v1',
+  'multi-window-v1',
+  'saved-layouts-v1',
+  'sidebar-surfaces-v1',
+  'recentlyClosed.list',
+  'recentlyClosed.reopen',
+  'task.list',
+  'task.confirmation.issue',
+  'task.action',
+  'task.detach',
+  'search.encrypted-v1',
+  'search.query',
+  'search.cancel',
+  'search.source.policy',
+  'search.source.exclude',
+  'search.source.forget',
+  'search.source.rebuild',
+  'search.source.export.confirmation.issue',
+  'search.source.export'
+])
 
 function createCollectingHost(handlers: DesktopHandlerMap): {
   handle(channel: string, listener: DesktopHandler): void
@@ -355,34 +444,62 @@ function collectDesktopLifecycleHandlers(
   })
   host.handle(DESKTOP_IPC.serviceRestart, async (event) => {
     validate(event)
+    if (!dependencies.isNodeLifecycleEnabled?.())
+      requireRustFallback(entry.binding, DESKTOP_IPC.serviceRestart)
     await controller.restart()
   })
   host.handle(DESKTOP_IPC.recoveryExportDatabase, async (event) => {
     validate(event)
-    const messages = desktopMessages.exportDialogs.recovery
+    if (!dependencies.isNodeLifecycleEnabled?.())
+      requireRustFallback(entry.binding, DESKTOP_IPC.recoveryExportDatabase)
+    const state = controller.getState()
+    const rawArchive = dependencies.isNodeLifecycleEnabled?.() === true && state.status === 'failed'
+    if (rawArchive && state.availableActions?.recoveryExport !== true) {
+      throw new Error('No private database is available for recovery export')
+    }
+    const messages = rawArchive
+      ? desktopMessages.exportDialogs.recoveryFiles
+      : desktopMessages.exportDialogs.recovery
+    const extension = rawArchive ? 'tar' : 'sqlite'
     const chosen = await showSaveDialog(window, {
       title: messages.title,
       defaultPath: join(
         dependencies.downloadsDirectory,
-        datedFilename('workspace-recovery', 'sqlite')
+        datedFilename(rawArchive ? 'workspace-recovery-files' : 'workspace-recovery', extension)
       ),
       buttonLabel: messages.button,
-      filters: [{ name: messages.filter, extensions: ['sqlite'] }],
+      filters: [{ name: messages.filter, extensions: [extension] }],
       properties: ['createDirectory', 'showOverwriteConfirmation']
     })
     if (chosen.canceled || !chosen.filePath) return null
     if (await pathExists(chosen.filePath)) {
       throw new Error(messages.overwriteRejected)
     }
-    return recoveryExportResultSchema.parse(await supervisor.exportRecovery(chosen.filePath))
+    return recoveryExportResultSchema.parse(
+      await supervisor.exportRecovery(chosen.filePath, rawArchive ? 'archive' : 'sqlite')
+    )
   })
   host.handle(DESKTOP_IPC.diagnosticsPreview, async (event) => {
     validate(event)
+    if (dependencies.isNodeDiagnosticsMode?.() ?? dependencies.isNodeCoreEnabled?.()) {
+      if (!dependencies.isNodeDiagnosticsEnabled?.() || !dependencies.previewNodeDiagnostics) {
+        throw new Error('Node diagnostics are unavailable')
+      }
+      return diagnosticBundlePreviewSchema.parse(await dependencies.previewNodeDiagnostics())
+    }
+    requireRustFallback(entry.binding, DESKTOP_IPC.diagnosticsPreview)
     return diagnosticBundlePreviewSchema.parse(await supervisor.previewDiagnostics())
   })
   host.handle(DESKTOP_IPC.diagnosticsExport, async (event, rawPreview: unknown) => {
     validate(event)
     const preview = diagnosticBundlePreviewSchema.parse(rawPreview)
+    const useNode =
+      (dependencies.isNodeDiagnosticsMode?.() ?? dependencies.isNodeCoreEnabled?.()) === true
+    const exportNode = dependencies.exportNodeDiagnostics
+    if (useNode && (!dependencies.isNodeDiagnosticsEnabled?.() || !exportNode)) {
+      throw new Error('Node diagnostics are unavailable')
+    }
+    if (!useNode) requireRustFallback(entry.binding, DESKTOP_IPC.diagnosticsExport)
     const messages = desktopMessages.exportDialogs.diagnostics
     const chosen = await showSaveDialog(window, {
       title: messages.title,
@@ -398,22 +515,42 @@ function collectDesktopLifecycleHandlers(
     if (await pathExists(chosen.filePath)) {
       throw new Error(messages.overwriteRejected)
     }
-    await supervisor.exportDiagnostics(chosen.filePath, preview)
+    if (useNode && exportNode) {
+      await exportNode(chosen.filePath, preview)
+    } else {
+      await supervisor.exportDiagnostics(chosen.filePath, preview)
+    }
     return undefined
   })
   host.handle(DESKTOP_IPC.configurationGet, async (event) => {
     validate(event)
+    if (dependencies.isNodeCoreEnabled?.() && dependencies.isNodeConfigurationEnabled?.()) {
+      if (!dependencies.getNodeConfiguration) {
+        throw new Error('Node configuration is unavailable')
+      }
+      return configurationGetResultSchema.parse(await dependencies.getNodeConfiguration())
+    }
+    // Until a qualified private copy is writable, retain Rust's read-only projection.
+    requireRustFallback(entry.binding, DESKTOP_IPC.configurationGet)
     const client = requireReadyClient(controller, entry.binding)
     return configurationGetResultSchema.parse(await client.getConfiguration())
   })
   host.handle(DESKTOP_IPC.configurationUpdate, async (event, rawParams: unknown) => {
     validate(event)
-    const client = requireReadyClient(controller, entry.binding)
-    const result = configurationGetResultSchema.parse(
-      await client.updateConfiguration(
-        configurationUpdateParamsSchema.parse(rawParams) as ConfigurationUpdateParams
+    const params = configurationUpdateParamsSchema.parse(rawParams) as ConfigurationUpdateParams
+    if (dependencies.isNodeCoreEnabled?.()) {
+      if (!dependencies.isNodeConfigurationEnabled?.() || !dependencies.updateNodeConfiguration) {
+        throw new Error('Configuration is unavailable in the isolated Node demo')
+      }
+      const result = configurationGetResultSchema.parse(
+        await dependencies.updateNodeConfiguration(params)
       )
-    )
+      dependencies.configurationChanged?.(result.config.updates.channel)
+      return result
+    }
+    requireRustFallback(entry.binding, DESKTOP_IPC.configurationUpdate)
+    const client = requireReadyClient(controller, entry.binding)
+    const result = configurationGetResultSchema.parse(await client.updateConfiguration(params))
     dependencies.configurationChanged?.(result.config.updates.channel)
     return result
   })
@@ -461,6 +598,7 @@ export const DESKTOP_INVOKE_CHANNELS = [
   DESKTOP_IPC.contentDirectoryList,
   DESKTOP_IPC.contentDocumentIssue,
   DESKTOP_IPC.contentRead,
+  DESKTOP_IPC.contentSave,
   DESKTOP_IPC.contentMarkdown,
   DESKTOP_IPC.contentDiff,
   DESKTOP_IPC.searchQuery,
@@ -562,31 +700,101 @@ export const DESKTOP_INVOKE_CHANNELS = [
   DESKTOP_IPC.agentAttentionSet
 ] as const
 
-export function registerMultiWindowDesktopHandlers(router: SenderBoundIpcRouter): void {
-  router.handle(DESKTOP_IPC.windowList, async ({ binding }) =>
-    windowListResultSchema.parse(await readyWindowClient(binding).listWindows())
-  )
+export function registerMultiWindowDesktopHandlers(
+  router: SenderBoundIpcRouter,
+  isNodeCoreDemo: () => boolean = () => false,
+  listNodeWindows?: (entry: WindowRegistryEntry) => Promise<unknown>,
+  nodeWindows?: {
+    create(
+      entry: WindowRegistryEntry,
+      params: ReturnType<typeof windowCreateParamsSchema.parse>
+    ): Promise<unknown>
+    focus(
+      entry: WindowRegistryEntry,
+      params: ReturnType<typeof windowFocusParamsSchema.parse>
+    ): Promise<unknown>
+    close(entry: WindowRegistryEntry, params: WindowCloseParams): Promise<unknown>
+    closeTab?(entry: WindowRegistryEntry, params: TabCloseAdvancedParams): Promise<unknown>
+    duplicateTab?(
+      entry: WindowRegistryEntry,
+      params: ReturnType<typeof tabDuplicateParamsSchema.parse>
+    ): Promise<unknown>
+    moveTabExact?(
+      entry: WindowRegistryEntry,
+      params: ReturnType<typeof tabMoveExactParamsSchema.parse>
+    ): Promise<unknown>
+    detachTab?(
+      entry: WindowRegistryEntry,
+      params: ReturnType<typeof tabDetachParamsSchema.parse>
+    ): Promise<unknown>
+    reopenTab?(
+      entry: WindowRegistryEntry,
+      params: ReturnType<typeof tabReopenParamsSchema.parse>
+    ): Promise<unknown>
+    listClosedItems?(entry: WindowRegistryEntry): Promise<unknown>
+    getClosedItem?(
+      entry: WindowRegistryEntry,
+      params: ReturnType<typeof closedItemGetParamsSchema.parse>
+    ): Promise<unknown>
+    navigateFocusHistory?(
+      entry: WindowRegistryEntry,
+      params: ReturnType<typeof focusHistoryNavigateParamsSchema.parse>
+    ): Promise<unknown>
+  }
+): void {
+  router.handle(DESKTOP_IPC.windowList, async (entry) => {
+    if (isNodeCoreDemo()) {
+      if (!listNodeWindows) throw new Error('Node window topology is unavailable')
+      return windowListResultSchema.parse(await listNodeWindows(entry))
+    }
+    return windowListResultSchema.parse(await readyWindowClient(entry.binding).listWindows())
+  })
   router.handle(DESKTOP_IPC.windowCreate, async (entry, _event, rawParams) => {
+    if (isNodeCoreDemo() && !nodeWindows)
+      throw new Error('This command is unavailable in the isolated Node demo')
     const params = windowCreateParamsSchema.parse(rawParams)
     requireCallerWindow(entry.windowId, params.sourceWindow.windowId)
+    if (isNodeCoreDemo()) {
+      if (!nodeWindows) throw new Error('Node window mutations are unavailable')
+      return windowMutationResultSchema.parse(await nodeWindows.create(entry, params))
+    }
     return windowMutationResultSchema.parse(
       await readyWindowClient(entry.binding).createWindow(params)
     )
   })
   router.handle(DESKTOP_IPC.windowClose, async (entry, _event, rawParams) => {
+    if (isNodeCoreDemo() && !nodeWindows)
+      throw new Error('This command is unavailable in the isolated Node demo')
     const params = windowCloseParamsSchema.parse(rawParams)
     requireCallerWindow(entry.windowId, params.window.windowId)
+    if (isNodeCoreDemo()) {
+      if (!nodeWindows) throw new Error('Node window mutations are unavailable')
+      return windowCloseResultSchema.parse(
+        await nodeWindows.close(entry, params as WindowCloseParams)
+      )
+    }
     return windowCloseResultSchema.parse(
       await readyWindowClient(entry.binding).closeWindow(params as WindowCloseParams)
     )
   })
-  router.handle(DESKTOP_IPC.windowFocus, async ({ binding }, _event, rawParams) => {
+  router.handle(DESKTOP_IPC.windowFocus, async (entry, _event, rawParams) => {
+    if (isNodeCoreDemo() && !nodeWindows)
+      throw new Error('This command is unavailable in the isolated Node demo')
     const params = windowFocusParamsSchema.parse(rawParams)
+    if (isNodeCoreDemo()) {
+      if (!nodeWindows) throw new Error('Node window mutations are unavailable')
+      return windowMutationResultSchema.parse(await nodeWindows.focus(entry, params))
+    }
+    const { binding } = entry
     return windowMutationResultSchema.parse(await readyWindowClient(binding).focusWindow(params))
   })
   router.handle(DESKTOP_IPC.tabDuplicate, async (entry, _event, rawParams) => {
     const params = tabDuplicateParamsSchema.parse(rawParams)
     requireCallerWindow(entry.windowId, params.source.windowId)
+    if (isNodeCoreDemo()) {
+      if (!nodeWindows?.duplicateTab) throw new Error('Node tab duplicate is unavailable')
+      return advancedTabMutationResultSchema.parse(await nodeWindows.duplicateTab(entry, params))
+    }
     return advancedTabMutationResultSchema.parse(
       await readyWindowClient(entry.binding).duplicateTab(params)
     )
@@ -594,6 +802,10 @@ export function registerMultiWindowDesktopHandlers(router: SenderBoundIpcRouter)
   router.handle(DESKTOP_IPC.tabMoveExact, async (entry, _event, rawParams) => {
     const params = tabMoveExactParamsSchema.parse(rawParams)
     requireCallerWindow(entry.windowId, params.source.windowId)
+    if (isNodeCoreDemo()) {
+      if (!nodeWindows?.moveTabExact) throw new Error('Node tab move is unavailable')
+      return advancedTabMutationResultSchema.parse(await nodeWindows.moveTabExact(entry, params))
+    }
     return advancedTabMutationResultSchema.parse(
       await readyWindowClient(entry.binding).moveTabExact(params)
     )
@@ -601,6 +813,10 @@ export function registerMultiWindowDesktopHandlers(router: SenderBoundIpcRouter)
   router.handle(DESKTOP_IPC.tabDetach, async (entry, _event, rawParams) => {
     const params = tabDetachParamsSchema.parse(rawParams)
     requireCallerWindow(entry.windowId, params.source.windowId)
+    if (isNodeCoreDemo()) {
+      if (!nodeWindows?.detachTab) throw new Error('Node tab detach is unavailable')
+      return advancedTabMutationResultSchema.parse(await nodeWindows.detachTab(entry, params))
+    }
     return advancedTabMutationResultSchema.parse(
       await readyWindowClient(entry.binding).detachTab(params)
     )
@@ -608,6 +824,10 @@ export function registerMultiWindowDesktopHandlers(router: SenderBoundIpcRouter)
   router.handle(DESKTOP_IPC.tabCloseAdvanced, async (entry, _event, rawParams) => {
     const params = tabCloseAdvancedParamsSchema.parse(rawParams)
     requireCallerWindow(entry.windowId, params.source.windowId)
+    if (isNodeCoreDemo()) {
+      if (!nodeWindows?.closeTab) throw new Error('Node tab close is unavailable')
+      return advancedTabCloseResultSchema.parse(await nodeWindows.closeTab(entry, params))
+    }
     return advancedTabCloseResultSchema.parse(
       await readyWindowClient(entry.binding).closeTabAdvanced(params)
     )
@@ -615,30 +835,57 @@ export function registerMultiWindowDesktopHandlers(router: SenderBoundIpcRouter)
   router.handle(DESKTOP_IPC.tabReopen, async (entry, _event, rawParams) => {
     const params = tabReopenParamsSchema.parse(rawParams)
     requireCallerWindow(entry.windowId, params.target.windowId)
+    if (isNodeCoreDemo()) {
+      if (!nodeWindows?.reopenTab) throw new Error('Node tab reopen is unavailable')
+      return advancedTabMutationResultSchema.parse(await nodeWindows.reopenTab(entry, params))
+    }
     return advancedTabMutationResultSchema.parse(
       await readyWindowClient(entry.binding).reopenTab(params)
     )
   })
-  router.handle(DESKTOP_IPC.closedList, async ({ binding }) =>
-    closedItemListResultSchema.parse(await readyWindowClient(binding).listClosedItems())
-  )
-  router.handle(DESKTOP_IPC.closedGet, async ({ binding }, _event, rawParams) =>
-    closedItemGetResultSchema.parse(
-      await readyWindowClient(binding).getClosedItem(closedItemGetParamsSchema.parse(rawParams))
+  router.handle(DESKTOP_IPC.closedList, async (entry) => {
+    if (isNodeCoreDemo()) {
+      if (!nodeWindows?.listClosedItems) throw new Error('Node closed items are unavailable')
+      return closedItemListResultSchema.parse(await nodeWindows.listClosedItems(entry))
+    }
+    return closedItemListResultSchema.parse(
+      await readyWindowClient(entry.binding).listClosedItems()
     )
-  )
-  router.handle(DESKTOP_IPC.focusHistoryNavigate, async ({ binding }, _event, rawParams) =>
-    focusHistoryNavigateResultSchema.parse(
-      await readyWindowClient(binding).navigateFocusHistory(
-        focusHistoryNavigateParamsSchema.parse(rawParams)
+  })
+  router.handle(DESKTOP_IPC.closedGet, async (entry, _event, rawParams) => {
+    const params = closedItemGetParamsSchema.parse(rawParams)
+    if (isNodeCoreDemo()) {
+      if (!nodeWindows?.getClosedItem) throw new Error('Node closed item is unavailable')
+      return closedItemGetResultSchema.parse(await nodeWindows.getClosedItem(entry, params))
+    }
+    return closedItemGetResultSchema.parse(
+      await readyWindowClient(entry.binding).getClosedItem(params)
+    )
+  })
+  router.handle(DESKTOP_IPC.focusHistoryNavigate, async (entry, _event, rawParams) => {
+    const params = focusHistoryNavigateParamsSchema.parse(rawParams)
+    if (isNodeCoreDemo()) {
+      if (!nodeWindows?.navigateFocusHistory)
+        throw new Error('Node focus navigation is unavailable')
+      return focusHistoryNavigateResultSchema.parse(
+        await nodeWindows.navigateFocusHistory(entry, params)
       )
+    }
+    return focusHistoryNavigateResultSchema.parse(
+      await readyWindowClient(entry.binding).navigateFocusHistory(params)
     )
-  )
+  })
 }
 
 function readyWindowClient(binding: unknown): ControlClient {
   if (!(binding instanceof DesktopWindowBinding)) throw new Error('Window renderer is not ready')
   return binding.client
+}
+
+function requireRustFallback(binding: WindowRegistryBinding, channel: string): void {
+  if (binding instanceof DesktopWindowBinding && binding.isNodeExclusive) {
+    throw new Error(`Node owner cannot handle desktop channel ${channel}`)
+  }
 }
 
 function requireCallerWindow(callerWindowId: string, authorityWindowId: string): void {
@@ -650,6 +897,7 @@ export function registerDesktopHandlers(
   dependencies: DesktopHandlerDependencies = {}
 ): void {
   const handlerMaps = new WeakMap<WindowRegistryBinding, ReadyDesktopHandlerMap>()
+  const nodeHibernationHandlers = new WeakMap<WindowRegistryEntry, DesktopHandler>()
   const hostKeyConfirmations = new Map<string, Promise<unknown>>()
   const serializeHostKeyConfirmation = <T>(
     key: string,
@@ -664,6 +912,115 @@ export function registerDesktopHandlers(
   for (const channel of DESKTOP_INVOKE_CHANNELS) {
     router.handle(channel, async (entry, event, ...args) => {
       await dependencies.waitForWindowActivation?.(entry)
+      if (
+        entry.binding instanceof DesktopWindowBinding &&
+        entry.binding.isNodeExclusive &&
+        dependencies.isNodeCoreEnabled?.() &&
+        (channel === DESKTOP_IPC.taskList || channel === DESKTOP_IPC.taskAction)
+      ) {
+        const current = () =>
+          !entry.window.isDestroyed() &&
+          (dependencies.isWindowEntryCurrent?.(entry) ?? true) &&
+          event.sender === entry.window.webContents
+        if (!current()) throw new Error('The task window changed')
+        if (!dependencies.isNodeTaskListSelected?.())
+          throw new Error('The Node task list is unavailable')
+        if (channel === DESKTOP_IPC.taskList) {
+          const request = taskListParamsSchema.parse(args[0]) as unknown as Parameters<
+            ControlClient['listTasks']
+          >[0]
+          const pending = dependencies.listTasksFromNodeSidecar?.(entry, request)
+          if (!pending) throw new Error('The Node task list is unavailable')
+          const result = taskListResultSchema.parse(await pending)
+          if (!current()) throw new Error('The task list window changed')
+          return result
+        }
+        const request = desktopTaskActionRequestSchema.parse(args[0])
+        if (request.action === 'detach') {
+          const pending = dependencies.detachRemoteTaskFromNodeSidecar?.(entry, {
+            action: 'detach',
+            target: request.target,
+            mutation: remoteMutation('task.action', request, request.target.revision)
+          })
+          if (!pending) throw new Error('The Node task action is unavailable')
+          const result = taskActionResultSchema.parse(await pending)
+          if (!current()) throw new Error('The task action window changed')
+          return result
+        }
+        const pending = dependencies.actOnNodeTaskFromSidecar?.(entry, request, async () => {
+          const showMessageBox = dependencies.showMessageBox ?? dialog.showMessageBox.bind(dialog)
+          const choice = await showMessageBox(entry.window, {
+            type: 'warning',
+            title: 'Confirm task action',
+            message: `${request.action === 'forceTerminate' ? 'Force terminate' : request.action} this task?`,
+            detail: 'This action can stop work and cannot be undone.',
+            buttons: ['Cancel', 'Continue'],
+            defaultId: 0,
+            cancelId: 0,
+            noLink: true
+          })
+          if (!current()) throw new Error('The task action window changed')
+          return choice.response === 1
+        })
+        if (!pending) throw new Error('The Node task action is unavailable')
+        const result = await pending
+        if (!current()) throw new Error('The task action window changed')
+        return result === null ? null : taskActionResultSchema.parse(result)
+      }
+      if (
+        entry.binding instanceof DesktopWindowBinding &&
+        entry.binding.isNodeExclusive &&
+        dependencies.isNodeCoreEnabled?.() &&
+        (channel === DESKTOP_IPC.workspacePickDirectory ||
+          channel === DESKTOP_IPC.workspacePathOpeners ||
+          channel === DESKTOP_IPC.workspacePathOpen)
+      ) {
+        return invokeNodeWorkspacePathChannel(entry, event, channel, args, dependencies)
+      }
+      if (
+        channel === DESKTOP_IPC.agentSessionHibernate &&
+        entry.binding instanceof DesktopWindowBinding &&
+        entry.binding.isNodeExclusive
+      ) {
+        let handler = nodeHibernationHandlers.get(entry)
+        if (!handler) {
+          handler = createAgentSessionHibernateHandler(entry, dependencies)
+          nodeHibernationHandlers.set(entry, handler)
+        }
+        return handler(event, ...args)
+      }
+      const nodeActive = Boolean(
+        dependencies.invokeNodeCore && (dependencies.isNodeCoreEnabled?.() ?? true)
+      )
+      const terminalId =
+        nodeActive &&
+        (channel === DESKTOP_IPC.terminalAttach || channel === DESKTOP_IPC.terminalDetach)
+          ? parseTerminalId(args[0])
+          : undefined
+      if (channel === DESKTOP_IPC.terminalAttach && terminalId) {
+        await dependencies.waitForOwnershipTransfer?.(entry.windowId, terminalId)
+      }
+      const invokeNode = async () =>
+        nodeActive && channel !== DESKTOP_IPC.agentSessionHibernate
+          ? dependencies.invokeNodeCore?.(entry, channel, args)
+          : undefined
+      const nodeResult =
+        terminalId && dependencies.serializeResource
+          ? await dependencies.serializeResource(terminalId, invokeNode)
+          : await invokeNode()
+      if (nodeResult?.handled) {
+        if (channel === DESKTOP_IPC.terminalAttach && terminalId) {
+          dependencies.terminalAttached?.(entry.windowId, terminalId)
+          dependencies.ownershipAcquired?.(entry.windowId, terminalId)
+        } else if (channel === DESKTOP_IPC.terminalDetach && terminalId) {
+          dependencies.terminalDetached?.(entry.windowId, terminalId)
+        }
+        return nodeResult.value
+      }
+      requireRustFallback(entry.binding, channel)
+      if (dependencies.isNodeExclusive?.()) {
+        throw new Error(`Node owner cannot handle desktop channel ${channel}`)
+      }
       const client = readyWindowClient(entry.binding)
       const browserViews = entry.binding.browserViews
       let cached = handlerMaps.get(entry.binding)
@@ -686,6 +1043,188 @@ export function registerDesktopHandlers(
   }
 }
 
+async function invokeNodeWorkspacePathChannel(
+  entry: WindowRegistryEntry,
+  event: IpcMainInvokeEvent,
+  channel: string,
+  args: readonly unknown[],
+  dependencies: DesktopHandlerDependencies
+): Promise<unknown> {
+  const current = (): void => {
+    if (
+      entry.window.isDestroyed() ||
+      event.sender !== entry.window.webContents ||
+      event.senderFrame !== entry.window.webContents.mainFrame ||
+      dependencies.isWindowEntryCurrent?.(entry) === false
+    ) {
+      throw new Error('The Node workspace window changed')
+    }
+  }
+  current()
+  if (channel === DESKTOP_IPC.workspacePickDirectory) {
+    const chosen = await (dependencies.showOpenDialog ?? dialog.showOpenDialog.bind(dialog))(
+      entry.window,
+      {
+        title: 'Open a folder as a workspace',
+        buttonLabel: 'Open workspace',
+        properties: ['openDirectory', 'createDirectory']
+      }
+    )
+    current()
+    return chosen.canceled || chosen.filePaths.length !== 1 ? null : (chosen.filePaths[0] ?? null)
+  }
+  if (channel === DESKTOP_IPC.workspacePathOpeners) {
+    const openers = await (dependencies.detectWorkspacePathOpeners ?? detectWorkspacePathOpeners)()
+    current()
+    return desktopWorkspacePathOpenersSchema.parse(openers)
+  }
+  const request = desktopWorkspacePathOpenRequestSchema.parse(args[0])
+  if (!dependencies.resolveNodeWorkspacePath) throw new Error('Node workspace path is unavailable')
+  const workspacePath = await dependencies.resolveNodeWorkspacePath(entry, request.workspaceId)
+  current()
+  if (!(await stat(workspacePath)).isDirectory()) {
+    throw new Error('The workspace path is not a directory')
+  }
+  current()
+  if (dependencies.openWorkspacePath) {
+    await dependencies.openWorkspacePath(request.openerId, workspacePath)
+    return
+  }
+  if (request.openerId === 'fileManager') {
+    const failure = await shell.openPath(workspacePath)
+    if (failure) throw new Error(failure)
+    return
+  }
+  await launchWorkspacePathInIde(request.openerId, workspacePath)
+}
+
+function createDestructiveSerializer() {
+  const operations = new Map<string, Promise<unknown>>()
+  return <T>(key: string, operation: () => Promise<T>): Promise<T> => {
+    const existing = operations.get(key)
+    if (existing) return existing as Promise<T>
+    const pending = operation().finally(() => operations.delete(key))
+    operations.set(key, pending)
+    return pending
+  }
+}
+
+function createAgentSessionHibernateHandler(
+  entry: WindowRegistryEntry,
+  dependencies: DesktopHandlerDependencies,
+  rustClient?: AgentHibernationClient,
+  serializeDestructive = createDestructiveSerializer()
+): DesktopHandler {
+  const window = entry.window
+  const validate = createSenderValidator(window)
+  const showMessageBox = dependencies.showMessageBox ?? dialog.showMessageBox.bind(dialog)
+  const isWindowEntryCurrent = dependencies.isWindowEntryCurrent ?? (() => true)
+  return async (event, rawRequest: unknown) => {
+    validate(event)
+    const request = desktopAgentSessionActionSchema.parse(rawRequest)
+    return serializeDestructive(
+      `agent:${request.agentSessionId}:${request.expectedRevision}`,
+      async () => {
+        const node = dependencies.isNodeCoreEnabled?.()
+          ? dependencies.getNodeAgentHibernationContext?.(entry)
+          : undefined
+        if (dependencies.isNodeCoreEnabled?.() && !node)
+          throw new Error('Node hibernation authority is unavailable')
+        const hibernationClient = node?.client ?? rustClient
+        if (!hibernationClient) throw new Error('Node hibernation authority is unavailable')
+        const currentProvider = () =>
+          node
+            ? node.isCurrent()
+              ? node.provider
+              : undefined
+            : dependencies.getDesktopProviderIdentity?.()
+        if (node && !node.isCurrent()) throw new Error('Node hibernation authority is stale')
+        const initial = await exactAgentSession(hibernationClient, request)
+        const provider = currentProvider()
+        if (!provider) throw new Error('Desktop-provider identity is unavailable')
+        const target = { windowId: entry.windowId, windowGeneration: entry.generation }
+        const preflight = agentHibernationPreflightResultSchema.parse(
+          await hibernationClient.preflightAgentHibernation({
+            agentSessionId: request.agentSessionId,
+            challenge: { choice: 'terminateAfterWarning', provider, window: target },
+            operation: agentOperation(
+              'agent.hibernate.preflight',
+              request,
+              initial.revision,
+              initial.attemptEpoch
+            )
+          })
+        )
+        if (
+          preflight.state !== 'confirmationRequired' ||
+          !preflight.confirmationId ||
+          !preflight.challenge
+        ) {
+          throw new Error('The hibernation challenge is unavailable')
+        }
+        const prepared = await getAgentSession(hibernationClient, request.agentSessionId)
+        const message = preflight.checkpoint
+          ? desktopMessages.agentHibernation
+          : desktopMessages.agentTermination
+        const confirmation = await showMessageBox(window, {
+          type: 'warning',
+          buttons: [message.cancel, message.confirm],
+          defaultId: 0,
+          cancelId: 0,
+          noLink: true,
+          title: message.title,
+          message: message.message,
+          detail: message.detail
+        })
+        validate(event)
+        const current = await getAgentSession(hibernationClient, request.agentSessionId)
+        const cancel = async (): Promise<void> => {
+          await hibernationClient.cancelAgentHibernation({
+            agentSessionId: request.agentSessionId,
+            operation: agentOperation(
+              'agent.hibernate.cancel',
+              request,
+              current.revision,
+              current.attemptEpoch
+            )
+          })
+        }
+        if (confirmation.response !== 1 || !isWindowEntryCurrent(entry)) {
+          await cancel()
+          return null
+        }
+        const providerNow = currentProvider()
+        if (
+          current.revision !== prepared.revision ||
+          !sameProviderIdentity(providerNow, preflight.challenge.provider) ||
+          preflight.challenge.window.windowId !== entry.windowId ||
+          preflight.challenge.window.windowGeneration !== entry.generation
+        ) {
+          await cancel()
+          throw new Error('The agent session revision or desktop authority is stale')
+        }
+        return agentHibernationMutationResultSchema.parse(
+          await hibernationClient.confirmAgentHibernation({
+            agentSessionId: request.agentSessionId,
+            confirmationId: preflight.challenge.confirmationId,
+            choice: preflight.challenge.choice,
+            provider: preflight.challenge.provider,
+            window: preflight.challenge.window,
+            nonce: preflight.challenge.nonce,
+            expiresAtMs: preflight.challenge.expiresAtMs,
+            operation: agentOperation(
+              'agent.hibernate.confirm',
+              request,
+              current.revision,
+              current.attemptEpoch
+            )
+          })
+        )
+      }
+    )
+  }
+}
+
 function collectDesktopHandlers(
   entry: WindowRegistryEntry,
   client: ControlClient,
@@ -700,14 +1239,7 @@ function collectDesktopHandlers(
   const showSaveDialog = dependencies.showSaveDialog ?? dialog.showSaveDialog.bind(dialog)
   const showMessageBox = dependencies.showMessageBox ?? dialog.showMessageBox.bind(dialog)
   const isWindowEntryCurrent = dependencies.isWindowEntryCurrent ?? (() => true)
-  const destructiveOperations = new Map<string, Promise<unknown>>()
-  const serializeDestructive = <T>(key: string, operation: () => Promise<T>): Promise<T> => {
-    const existing = destructiveOperations.get(key)
-    if (existing) return existing as Promise<T>
-    const pending = operation().finally(() => destructiveOperations.delete(key))
-    destructiveOperations.set(key, pending)
-    return pending
-  }
+  const serializeDestructive = createDestructiveSerializer()
   const validate = (event: IpcMainInvokeEvent): void => {
     if (event.sender !== window.webContents || event.senderFrame !== window.webContents.mainFrame) {
       throw new Error('Unauthorized desktop IPC sender')
@@ -717,10 +1249,59 @@ function collectDesktopHandlers(
   host.handle(DESKTOP_IPC.identify, async (event) => {
     validate(event)
     const identity = identifyResultSchema.parse(await client.identify())
-    if (dependencies.isApplicationGlobalLayoutAvailable?.() !== false) return identity
+    const capabilities = dependencies.isNodeCoreEnabled?.()
+      ? [
+          ...identity.capabilities.filter(
+            (capability) =>
+              !NODE_CORE_DEFERRED_CAPABILITIES.has(capability) &&
+              (capability !== 'remote-sessions-v1' || dependencies.isNodeRemoteEnabled?.() === true)
+          ),
+          ...(dependencies.isNodeConfigurationEnabled?.() ? ['configuration-v2'] : []),
+          ...(dependencies.isNodeRemoteEnabled?.() && dependencies.isNodeRemoteEnrollmentEnabled?.()
+            ? ['remote.target.enroll']
+            : []),
+          ...(dependencies.isNodeRemoteEnabled?.() &&
+          dependencies.isNodeRemoteReplacementEnabled?.()
+            ? ['remote.target.replaceCredential']
+            : []),
+          ...(dependencies.isNodeRemoteEnabled?.() && dependencies.isNodeRemoteDeletionEnabled?.()
+            ? ['remote.target.delete']
+            : []),
+          ...(dependencies.isNodeAgentAssessmentEnabled?.()
+            ? ['agent.catalog.list', 'agent.catalog.get', 'agent.restore.assess']
+            : []),
+          ...(dependencies.isNodeAgentRegistrationEnabled?.()
+            ? ['agent.catalog.register', 'agent.session.restore']
+            : []),
+          ...(dependencies.isNodeAgentForkEnabled?.() ? ['agent.session.fork'] : []),
+          ...(dependencies.isNodeRecentlyClosedEnabled?.()
+            ? ['recentlyClosed.list', 'recentlyClosed.reopen']
+            : []),
+          ...(dependencies.isNodeTaskListEnabled?.() ? ['task.list'] : []),
+          ...(dependencies.isNodeTaskListEnabled?.() && dependencies.isNodeTaskDetachEnabled?.()
+            ? ['task.detach']
+            : []),
+          ...(dependencies.isNodeEncryptedSearchEnabled?.()
+            ? [
+                'search.encrypted-v1',
+                'search.query',
+                'search.source.policy',
+                'search.source.exclude',
+                'search.source.forget',
+                'search.source.rebuild',
+                'search.source.export.confirmation.issue',
+                'search.source.export'
+              ]
+            : []),
+          'node-core-demo'
+        ]
+      : identity.capabilities
+    if (dependencies.isApplicationGlobalLayoutAvailable?.() !== false) {
+      return identifyResultSchema.parse({ ...identity, capabilities })
+    }
     return identifyResultSchema.parse({
       ...identity,
-      capabilities: identity.capabilities.filter((capability) => capability !== 'saved-layouts-v1')
+      capabilities: capabilities.filter((capability) => capability !== 'saved-layouts-v1')
     })
   })
   host.handle(DESKTOP_IPC.actionList, async (event) => {
@@ -975,6 +1556,10 @@ function collectDesktopHandlers(
       await client.readContent(contentReadParamsSchema.parse(rawParams))
     )
   })
+  host.handle(DESKTOP_IPC.contentSave, (event) => {
+    validate(event)
+    throw new Error('File editing is unavailable in this service')
+  })
   host.handle(DESKTOP_IPC.contentMarkdown, async (event, rawParams: unknown) => {
     validate(event)
     return safeMarkdownDocumentSchema.parse(
@@ -1033,6 +1618,15 @@ function collectDesktopHandlers(
   host.handle(DESKTOP_IPC.searchExport, async (event, rawParams: unknown) => {
     validate(event)
     const params = desktopSearchExportRequestSchema.parse(rawParams)
+    const useNode = dependencies.isNodeCoreEnabled?.() === true
+    if (
+      useNode &&
+      (!dependencies.isNodeEncryptedSearchEnabled?.() ||
+        !dependencies.issueNodeSearchExportConfirmation ||
+        !dependencies.exportNodeSearchSource)
+    ) {
+      throw new Error('Encrypted search is unavailable in this Node sidecar')
+    }
     const warning = await showMessageBox(window, {
       type: 'warning',
       title: 'Export local search data?',
@@ -1057,16 +1651,23 @@ function collectDesktopHandlers(
     if (!isWindowEntryCurrent(entry) || chosen.canceled || !chosen.filePath) return false
 
     const issued = desktopSearchExportConfirmationIssueResultSchema.parse(
-      await client.issueSearchExportConfirmation(params)
+      useNode
+        ? await dependencies.issueNodeSearchExportConfirmation?.(params)
+        : await client.issueSearchExportConfirmation(params)
     )
     if (issued.confirmation.sourceAuthorizationId !== params.sourceAuthorizationId) {
       throw new Error('The search export confirmation source changed')
     }
     const result = desktopSearchExportResultSchema.parse(
-      await client.exportSearchSource({
-        sourceAuthorizationId: params.sourceAuthorizationId,
-        confirmationId: issued.confirmation.confirmationId
-      })
+      useNode
+        ? await dependencies.exportNodeSearchSource?.({
+            sourceAuthorizationId: params.sourceAuthorizationId,
+            confirmationId: issued.confirmation.confirmationId
+          })
+        : await client.exportSearchSource({
+            sourceAuthorizationId: params.sourceAuthorizationId,
+            confirmationId: issued.confirmation.confirmationId
+          })
     )
     if (result.sourceAuthorizationId !== params.sourceAuthorizationId) {
       throw new Error('The search export source changed')
@@ -1081,17 +1682,24 @@ function collectDesktopHandlers(
   })
   host.handle(DESKTOP_IPC.taskList, async (event, rawParams: unknown) => {
     validate(event)
-    return taskListResultSchema.parse(
-      await client.listTasks(
-        taskListParamsSchema.parse(rawParams) as unknown as Parameters<
-          ControlClient['listTasks']
-        >[0]
-      )
-    )
+    const request = taskListParamsSchema.parse(rawParams) as unknown as Parameters<
+      ControlClient['listTasks']
+    >[0]
+    if (!isWindowEntryCurrent(entry)) throw new Error('The task list window changed')
+    const nodeSelected = dependencies.isNodeTaskListSelected?.() === true
+    const nodeResult = nodeSelected
+      ? dependencies.listTasksFromNodeSidecar?.(entry, request)
+      : undefined
+    if (nodeSelected && !nodeResult) throw new Error('The Node task list is unavailable')
+    const result = taskListResultSchema.parse(await (nodeResult ?? client.listTasks(request)))
+    if (!isWindowEntryCurrent(entry)) throw new Error('The task list window changed')
+    return result
   })
   host.handle(DESKTOP_IPC.taskAction, async (event, rawParams: unknown) => {
     validate(event)
     const params = desktopTaskActionRequestSchema.parse(rawParams)
+    if (!isWindowEntryCurrent(entry)) throw new Error('The task action window changed')
+    const nodeSelected = dependencies.isNodeTaskListSelected?.() === true
     const requestHash = createHash('sha256')
       .update(
         JSON.stringify({
@@ -1103,18 +1711,26 @@ function collectDesktopHandlers(
       )
       .digest('hex')
     if (params.action === 'detach') {
-      return taskActionResultSchema.parse(
-        await client.actOnTask({
-          action: 'detach',
-          target: params.target,
-          mutation: remoteMutation(
-            'task.action',
-            { action: params.action, target: params.target },
-            params.target.revision
-          )
-        })
-      )
+      const request = {
+        action: 'detach' as const,
+        target: params.target,
+        mutation: remoteMutation(
+          'task.action',
+          { action: params.action, target: params.target },
+          params.target.revision
+        )
+      }
+      if (nodeSelected) {
+        const pending = dependencies.detachRemoteTaskFromNodeSidecar?.(entry, request)
+        if (!pending) throw new Error('The Node task action is unavailable')
+        const result = taskActionResultSchema.parse(await pending)
+        validate(event)
+        if (!isWindowEntryCurrent(entry)) throw new Error('The task action window changed')
+        return result
+      }
+      return taskActionResultSchema.parse(await client.actOnTask(request))
     }
+    if (nodeSelected) throw new Error('Node task confirmation is unavailable')
     return serializeDestructive(
       `${params.target.sessionId}:${params.target.generation}:${params.target.revision}:${params.action}`,
       async () => {
@@ -1599,6 +2215,8 @@ function collectDesktopHandlers(
     validate(event)
     const terminalId = parseTerminalId(rawTerminalId)
     const detach = async () => {
+      // The service and its in-memory terminal runtime are already being stopped.
+      if (dependencies.isTerminalCleanupDuringQuit?.()) return
       validateVoid(await client.detachTerminal(terminalId))
       dependencies.terminalDetached?.(entry.windowId, terminalId)
     }
@@ -1630,7 +2248,9 @@ function collectDesktopHandlers(
       if (Buffer.byteLength(JSON.stringify(checkpoint)) > MAX_TERMINAL_CHECKPOINT_WIRE_BYTES) {
         throw new Error('Terminal checkpoint exceeds the maximum wire size')
       }
-      validateVoid(await client.checkpointTerminal(parseTerminalId(rawTerminalId), checkpoint))
+      const terminalId = parseTerminalId(rawTerminalId)
+      if (dependencies.isTerminalCleanupDuringQuit?.()) return
+      validateVoid(await client.checkpointTerminal(terminalId, checkpoint))
     }
   )
   host.handle(DESKTOP_IPC.remoteTargetList, async (event) => {
@@ -1986,96 +2606,10 @@ function collectDesktopHandlers(
       })
     )
   })
-  host.handle(DESKTOP_IPC.agentSessionHibernate, async (event, rawRequest: unknown) => {
-    validate(event)
-    const request = desktopAgentSessionActionSchema.parse(rawRequest)
-    return serializeDestructive(
-      `agent:${request.agentSessionId}:${request.expectedRevision}`,
-      async () => {
-        const initial = await exactAgentSession(client, request)
-        const provider = dependencies.getDesktopProviderIdentity?.()
-        if (!provider) throw new Error('Desktop-provider identity is unavailable')
-        const target = { windowId: entry.windowId, windowGeneration: entry.generation }
-        const preflight = agentHibernationPreflightResultSchema.parse(
-          await client.preflightAgentHibernation({
-            agentSessionId: request.agentSessionId,
-            challenge: { choice: 'terminateAfterWarning', provider, window: target },
-            operation: agentOperation(
-              'agent.hibernate.preflight',
-              request,
-              initial.revision,
-              initial.attemptEpoch
-            )
-          })
-        )
-        if (
-          preflight.state !== 'confirmationRequired' ||
-          !preflight.confirmationId ||
-          !preflight.challenge
-        ) {
-          throw new Error('The hibernation challenge is unavailable')
-        }
-        const prepared = await getAgentSession(client, request.agentSessionId)
-        const message = desktopMessages.agentHibernation
-        const confirmation = await showMessageBox(window, {
-          type: 'warning',
-          buttons: [message.cancel, message.confirm],
-          defaultId: 0,
-          cancelId: 0,
-          noLink: true,
-          title: message.title,
-          message: message.message,
-          detail: preflight.checkpoint
-            ? `${message.detail} ${message.checkpointDetail}`
-            : message.detail
-        })
-        validate(event)
-        const current = await getAgentSession(client, request.agentSessionId)
-        const cancel = async (): Promise<void> => {
-          await client.cancelAgentHibernation({
-            agentSessionId: request.agentSessionId,
-            operation: agentOperation(
-              'agent.hibernate.cancel',
-              request,
-              current.revision,
-              current.attemptEpoch
-            )
-          })
-        }
-        if (confirmation.response !== 1 || !isWindowEntryCurrent(entry)) {
-          await cancel()
-          return null
-        }
-        const currentProvider = dependencies.getDesktopProviderIdentity?.()
-        if (
-          current.revision !== prepared.revision ||
-          !sameProviderIdentity(currentProvider, preflight.challenge.provider) ||
-          preflight.challenge.window.windowId !== entry.windowId ||
-          preflight.challenge.window.windowGeneration !== entry.generation
-        ) {
-          await cancel()
-          throw new Error('The agent session revision or desktop authority is stale')
-        }
-        return agentHibernationMutationResultSchema.parse(
-          await client.confirmAgentHibernation({
-            agentSessionId: request.agentSessionId,
-            confirmationId: preflight.challenge.confirmationId,
-            choice: preflight.challenge.choice,
-            provider: preflight.challenge.provider,
-            window: preflight.challenge.window,
-            nonce: preflight.challenge.nonce,
-            expiresAtMs: preflight.challenge.expiresAtMs,
-            operation: agentOperation(
-              'agent.hibernate.confirm',
-              request,
-              current.revision,
-              current.attemptEpoch
-            )
-          })
-        )
-      }
-    )
-  })
+  host.handle(
+    DESKTOP_IPC.agentSessionHibernate,
+    createAgentSessionHibernateHandler(entry, dependencies, client, serializeDestructive)
+  )
   host.handle(DESKTOP_IPC.agentTeamCreate, async (event, rawRequest: unknown) => {
     validate(event)
     const request = desktopAgentTeamCreateRequestSchema.parse(rawRequest)
@@ -2273,12 +2807,20 @@ function agentTeamMutation(
   }
 }
 
-async function getAgentSession(client: ControlClient, agentSessionId: string) {
+type AgentHibernationClient = Pick<
+  ControlClient,
+  | 'getAgentSession'
+  | 'preflightAgentHibernation'
+  | 'cancelAgentHibernation'
+  | 'confirmAgentHibernation'
+>
+
+async function getAgentSession(client: AgentHibernationClient, agentSessionId: string) {
   return agentCatalogGetResultSchema.parse(await client.getAgentSession({ agentSessionId })).session
 }
 
 async function exactAgentSession(
-  client: ControlClient,
+  client: AgentHibernationClient,
   request: { agentSessionId: string; expectedRevision: number }
 ): Promise<AgentSessionSnapshot> {
   const session = await getAgentSession(client, request.agentSessionId)

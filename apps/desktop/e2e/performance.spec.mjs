@@ -33,8 +33,9 @@ const packagedCli = join(
   'release',
   'linux-unpacked',
   'resources',
+  'node-linux',
   'bin',
-  'agent-workspace-cli'
+  'agent-workspace-node.mjs'
 )
 const mode = process.env.AGENT_WORKSPACE_PERFORMANCE_MODE ?? 'smoke'
 const IDLE_SETTLE_MS = 5 * 60_000
@@ -718,7 +719,7 @@ async function browserViewLoop(page, url) {
 }
 
 async function notificationStorm(profile) {
-  const sessionFile = join(profile, 'runtime', 'agent-workspace', 'cli-session.json')
+  const sessionFile = join(profile, 'runtime', 'node-cli-session.json')
   const started = performance.now()
   for (let index = 0; index < 100; index += 1) {
     await execFileAsync(packagedCli, [

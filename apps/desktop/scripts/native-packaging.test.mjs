@@ -10,18 +10,12 @@ const desktopDirectory = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const readBuilderConfiguration = () =>
   readFile(resolve(desktopDirectory, 'electron-builder.yml'), 'utf8')
 
-test('native sidecars include only the platform executable variants', async () => {
+test('Linux packages include the staged Node runtime', async () => {
   const configuration = await readBuilderConfiguration()
-  assert.match(configuration, /from: \.\.\/\.\.\/target\/release/u)
-  for (const sidecar of [
-    'agent-workspace-service',
-    'agent-workspace-service.exe',
-    'agent-workspace-cli',
-    'agent-workspace-cli.exe'
-  ]) {
-    assert.match(configuration, new RegExp(`- ${sidecar.replace('.', '\\.')}$`, 'mu'))
-  }
-  assert.doesNotMatch(configuration, /target\/release\/agent-workspace-(?:service|cli)$/mu)
+  const linux = section(configuration, 'linux', 'rpm')
+  assert.match(linux, /from: \.\.\/\.\.\/target\/node-linux/u)
+  assert.match(linux, /to: node-linux/u)
+  assert.doesNotMatch(configuration, /target\/release\/agent-workspace-(?:service|cli)/u)
 })
 
 test('the packaged application carries the bundled font license', async () => {

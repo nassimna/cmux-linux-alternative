@@ -11,7 +11,7 @@ formal WCAG conformance or a completed human assistive-technology review.
 - Playwright 1.61.1 driving a fresh isolated Electron profile
 - axe-core 4.12.1, WCAG 2 A/AA, WCAG 2.1 A/AA, and WCAG 2.2 AA tags
 - Explicit dark and light appearance for axe and visual regression, default density, and the real
-  local Rust service
+  local Node service
 
 The maintained `@axe-core/playwright` wrapper was evaluated first, but its
 `analyze()` implementation creates a new browser page. Playwright's Electron

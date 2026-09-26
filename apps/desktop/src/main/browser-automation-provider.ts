@@ -10,7 +10,10 @@ import type {
   DesktopProviderIdentityParams
 } from '@agent-workspace/protocol-client'
 
-import type { BrowserAutomationManager } from './browser-automation-manager'
+import {
+  BrowserAutomationFailure,
+  type BrowserAutomationManager
+} from './browser-automation-manager'
 
 const POLL_TIMEOUT_MS = 5_000
 const MAX_INFLIGHT_REQUESTS = 64
@@ -261,7 +264,17 @@ export class BrowserAutomationProvider {
       return
     }
 
-    const snapshot = await manager.execute(request.request)
+    let snapshot
+    try {
+      snapshot = await manager.execute(request.request)
+    } catch (error) {
+      // Target/session preflight in execute runs before its operation-level catch.
+      // An invalidated attached tab is one failed operation, not a lost provider.
+      if (!(error instanceof BrowserAutomationFailure)) throw error
+      if (signal.aborted || !this.isCurrentManager(manager, request.request.target)) return
+      await this.acknowledgeFailure(request.request, error.code)
+      return
+    }
     if (signal.aborted || !manager.canAcknowledge(request.request)) return
     await this.options.transport.acknowledge({
       identity: this.options.identity,

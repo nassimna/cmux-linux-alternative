@@ -39,9 +39,14 @@ export function escapeDesktopExecArgument(argument) {
 export async function installLocalAppImage({
   appImagePath,
   iconPath,
-  dataHome = resolveDataHome()
+  dataHome = resolveDataHome(),
+  runtimePath,
+  binDirectory
 }) {
   if (!isAbsolute(dataHome)) throw new Error(`Data home must be an absolute path: ${dataHome}`)
+  if (runtimePath && (!binDirectory || !isAbsolute(binDirectory))) {
+    throw new Error('Installing the CLI requires an absolute bin directory')
+  }
 
   const sourceAppImage = resolveRequiredPath(appImagePath, 'AppImage')
   const sourceIcon = resolveRequiredPath(iconPath, 'icon')
@@ -72,7 +77,21 @@ export async function installLocalAppImage({
   await atomicCopyRegularFile(sourceIcon, installedIcon, 0o644)
   await atomicWriteFile(desktopEntry, desktopEntryContent, 0o644)
 
-  return { appImage: installedAppImage, desktopEntry, icon: installedIcon }
+  let cli
+  if (runtimePath) {
+    const cliDirectory = join(applicationDirectory, 'cli')
+    await mkdir(cliDirectory, { recursive: true })
+    await mkdir(binDirectory, { recursive: true })
+    const node = join(cliDirectory, 'node')
+    const script = join(cliDirectory, 'agent-workspace.mjs')
+    await atomicCopyRegularFile(join(runtimePath, 'bin', 'node'), node, 0o755)
+    await atomicCopyRegularFile(join(runtimePath, 'bin', 'agent-workspace-node.mjs'), script, 0o644)
+    cli = join(binDirectory, 'agent-workspace-cli')
+    const quote = (value) => `'${value.replaceAll("'", "'\\''")}'`
+    await atomicWriteFile(cli, `#!/bin/sh\nexec ${quote(node)} ${quote(script)} "$@"\n`, 0o755)
+  }
+
+  return { appImage: installedAppImage, desktopEntry, icon: installedIcon, ...(cli ? { cli } : {}) }
 }
 
 function createDesktopEntry(appImagePath) {
@@ -174,7 +193,7 @@ function parseArguments(arguments_) {
     const key = arguments_[index]
     const value = arguments_[index + 1]
     if (
-      !['--appimage', '--icon'].includes(key) ||
+      !['--appimage', '--icon', '--runtime', '--bin-dir'].includes(key) ||
       value === undefined ||
       value.startsWith('--') ||
       options.has(key)
@@ -183,16 +202,30 @@ function parseArguments(arguments_) {
     }
     options.set(key, value)
   }
-  if (options.size !== 2 || !options.has('--appimage') || !options.has('--icon')) {
+  if (
+    !options.has('--appimage') ||
+    !options.has('--icon') ||
+    (options.has('--bin-dir') && !options.has('--runtime'))
+  ) {
     throw new Error('Usage: install-local-appimage.mjs --appimage <path> --icon <512x512.png>')
   }
-  return { appImagePath: options.get('--appimage'), iconPath: options.get('--icon') }
+  return {
+    appImagePath: options.get('--appimage'),
+    iconPath: options.get('--icon'),
+    ...(options.has('--runtime')
+      ? {
+          runtimePath: resolve(options.get('--runtime')),
+          binDirectory: options.get('--bin-dir') ?? join(homedir(), '.local', 'bin')
+        }
+      : {})
+  }
 }
 
 async function run() {
   const installed = await installLocalAppImage(parseArguments(process.argv.slice(2)))
   process.stdout.write(`Installed local AppImage: ${installed.appImage}\n`)
   process.stdout.write(`Installed desktop entry: ${installed.desktopEntry}\n`)
+  if (installed.cli) process.stdout.write(`Installed Node CLI: ${installed.cli}\n`)
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

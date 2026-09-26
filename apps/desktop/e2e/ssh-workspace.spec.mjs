@@ -13,7 +13,6 @@ import { createPackagedElectronHarness } from './helpers/packaged-electron-harne
 
 const desktopDirectory = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const repositoryDirectory = resolve(desktopDirectory, '../..')
-const serviceBinary = join(repositoryDirectory, 'target/debug/agent-workspace-service')
 const dialogHarnessEntry = join(desktopDirectory, 'e2e/helpers/dialog-harness-main.cjs')
 const evidenceDirectory =
   process.env.AGENT_WORKSPACE_EVIDENCE_DIR ??
@@ -39,10 +38,6 @@ async function auditDialog(page) {
 
 test.beforeAll(async () => {
   test.setTimeout(120_000)
-  execFileSync('cargo', ['build', '-p', 'agent-workspace-service'], {
-    cwd: repositoryDirectory,
-    stdio: 'pipe'
-  })
   execFileSync('pnpm', ['--filter', '@agent-workspace/desktop', 'build'], {
     cwd: repositoryDirectory,
     stdio: 'pipe'
@@ -91,7 +86,7 @@ test('keeps output responsive and manages a saved SSH workspace', async () => {
     await mkdir(binDirectory)
     await writeFile(sshExecutable, '#!/bin/sh\nprintf "SSH_ARGS:%s\\n" "$*"\nsleep 30\n')
     await chmod(sshExecutable, 0o700)
-    harness = await createPackagedElectronHarness(profileDirectory, serviceBinary)
+    harness = await createPackagedElectronHarness(profileDirectory)
     let page = await launch()
     await page.locator('.xterm-helper-textarea').focus()
     await page.keyboard.type('seq 1 20000; printf "OUTPUT_COMPLETE\\n"')

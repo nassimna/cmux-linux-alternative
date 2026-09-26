@@ -18,6 +18,18 @@ function fixture(id: number) {
 }
 
 describe('WindowRegistry', () => {
+  it('invalidates private provider claims before rekey, reload, and native removal', async () => {
+    const invalidated = vi.fn()
+    const registry = new WindowRegistry(invalidated)
+    const owned = fixture(99)
+    registry.register('window-before', owned.window, owned.binding)
+    registry.rekey('window-before', 'window-after')
+    registry.refreshRenderer('window-after')
+    await registry.removeWindow(owned.window, 'closed')
+    expect(invalidated.mock.calls).toEqual([
+      ['window-before'], ['window-after'], ['window-after']
+    ])
+  })
   it('fails closed and releases a rekeyed binding without dereferencing destroyed WebContents', async () => {
     const registry = new WindowRegistry()
     const destroyed = fixture(11)

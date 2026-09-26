@@ -370,8 +370,8 @@ export class WindowStateController {
       revision,
       x: Math.round(bounds.x),
       y: Math.round(bounds.y),
-      width: Math.round(bounds.width),
-      height: Math.round(bounds.height),
+      width: Math.max(200, Math.round(bounds.width)),
+      height: Math.max(200, Math.round(bounds.height)),
       maximized: this.window.isMaximized(),
       fullscreen: this.window.isFullScreen(),
       displayId

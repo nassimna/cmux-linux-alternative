@@ -8,16 +8,14 @@ files:
   - out/**/*
   - package.json
 extraResources:
-  - from: ../../target/release
-    to: bin
-    filter:
-      - agent-workspace-service
-      - agent-workspace-service.exe
-      - agent-workspace-cli
-      - agent-workspace-cli.exe
   - from: node_modules/@fontsource-variable/jetbrains-mono/LICENSE
     to: licenses/JetBrainsMono-OFL-1.1.txt
 linux:
+  extraResources:
+    - from: ../../target/node-linux
+      to: node-linux
+      filter:
+        - '**/*'
   icon: build/icons
   electronUpdaterCompatibility: '>= 2.16'
   category: Development

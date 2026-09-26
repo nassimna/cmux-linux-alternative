@@ -1,0 +1,24 @@
+{
+  "name": "@agent-workspace/cli",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "agent-workspace-node": "./dist/bin.mjs"
+  },
+  "scripts": {
+    "build": "esbuild src/bin.ts --bundle --platform=node --format=esm --outfile=dist/bin.mjs",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@agent-workspace/client-runtime": "workspace:*",
+    "@agent-workspace/contracts": "workspace:*",
+    "jsonc-parser": "3.3.1",
+    "smol-toml": "1.9.0"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "esbuild": "catalog:",
+    "typescript": "catalog:"
+  }
+}

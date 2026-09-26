@@ -1,3 +1,5 @@
+> Historical Rust-era design record. The current Node/TypeScript architecture and release path are documented in [Architecture](ARCHITECTURE.md).
+
 # M0–M8 implementation work breakdown
 
 These local issue handles decompose the parity specification without creating external tracker

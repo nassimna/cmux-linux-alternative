@@ -1,7 +1,7 @@
 import { EventEmitter } from 'node:events'
 
 import { describe, expect, it, vi } from 'vitest'
-import { desktopMessages } from '../shared/desktop-messages'
+import { desktopMessages } from '@agent-workspace/contracts/desktop/desktop-messages'
 
 import {
   detectLinuxPackageType,

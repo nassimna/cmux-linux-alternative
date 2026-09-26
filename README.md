@@ -3,9 +3,7 @@
 > Working title: `agent-workspace` is a centralized temporary slug, not a selected public name.
 
 Agent Workspace is an independent, clean-room desktop workspace for terminal-driven development
-sessions. It does not copy another product's source, assets, identity, or trademarks. Development
-and validation are Linux-first; the Electron, TypeScript, and Rust boundaries now include native
-macOS and Windows packaging and test lanes without claiming those platforms are qualified.
+sessions. It does not copy another product's source, assets, identity, or trademarks. Development and validation are Linux-first. The desktop, server, CLI, and shared contracts are TypeScript; the Linux package carries a pinned Node runtime.
 
 This is pre-alpha software. Milestones 0–5 are established on the documented Linux reference host.
 Milestone 6 release-candidate work is implemented in substantial part but remains in validation;
@@ -26,13 +24,9 @@ there is no published download, signed stable release, or public support guarant
   create/send, pane split, identify, notifications, and reversible agent hooks.
 - Exact x86_64 AppImage, deb, and rpm packaging with deterministic `SHA256SUMS`; feed-free default
   packages; explicit user-approved update check, download, and install state transitions.
-- Configured x64 macOS DMG/zip and Windows NSIS packages, native updater detection, platform E2E and
-  installed-package launch workflows, and a protected Windows named-pipe DACL. Native runs and
-  signed artifacts remain required before support claims.
-- Locally runnable release-build accessibility and performance suites, plus pinned package,
-  security, SBOM, provenance, and clean-container workflow definitions. The release-candidate
-  workflow enforces direct accessibility and visual validation; performance qualification is a
-  separate workflow, and native and manual gates remain unrun.
+- Linux package, security, SBOM, provenance, and clean-container workflow definitions. The
+  release-candidate workflow retains direct accessibility and visual validation; Node performance
+  qualification and manual gates remain open.
 
 Current limitations matter: package publication metadata and signing are unresolved, the public
 name and identity are still temporary, the hosted dual update feeds do not exist, GitHub release
@@ -45,6 +39,8 @@ review succeed.
 
 ## User documentation
 
+- [Supported features and boundaries](docs/FEATURES.md)
+- [Node Linux AppImage and CLI installation](docs/node-linux-packaging.md)
 - [Installation and uninstall](docs/INSTALLATION.md)
 - [Configuration](docs/CONFIGURATION.md)
 - [SSH workspaces](docs/SSH_WORKSPACES.md)
@@ -66,13 +62,11 @@ review succeed.
 
 ## Local development
 
-Requires Node.js 22.20 or newer, pnpm 10.34.5, Rust 1.96.0, and Electron's Linux development
-libraries.
+Requires Node.js 22.22.3, pnpm 10.34.5, a native-addon build toolchain, and Electron's Linux development libraries.
 
 ```sh
 corepack enable
 pnpm install
-pnpm generate:protocol
 pnpm dev
 ```
 
@@ -80,11 +74,11 @@ Run the repository gate with `pnpm validate`. Focused commands and packaging/qua
 are documented in [CONTRIBUTING.md](CONTRIBUTING.md). Test totals change as coverage grows, so the
 status does not use a stale count as a quality claim.
 
-The latest local release performance evidence passed every required smoke gate: aggregate PSS was
+Historical Rust-package performance evidence passed its smoke gates: aggregate PSS was
 307.20 MiB for one terminal (limit 350 MiB) and 331.72 MiB for ten terminals (limit 700 MiB), while
 the packaged process tree averaged 0.8893% CPU during a five-minute idle window after a five-minute
-settle (strict limit below 1%). Cold/warm launch and resize passed their informational targets. This
-was a smoke run, not the unrun eight-hour soak; see [Performance](docs/PERFORMANCE.md).
+settle (strict limit below 1%). Cold/warm launch and resize passed their informational targets. This does not qualify the Node package or the unrun eight-hour soak; see
+[Performance](docs/PERFORMANCE.md).
 
 ## License
 

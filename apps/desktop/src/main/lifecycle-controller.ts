@@ -4,8 +4,8 @@ import {
   type ServiceSupervisor,
   type UnexpectedServiceExit
 } from './service-supervisor'
-import { parseDesktopLifecycleState, type DesktopLifecycleState } from '../shared/desktop-bridge'
-import { desktopMessages } from '../shared/desktop-messages'
+import { parseDesktopLifecycleState, type DesktopLifecycleState } from '@agent-workspace/contracts/desktop/desktop-bridge'
+import { desktopMessages } from '@agent-workspace/contracts/desktop/desktop-messages'
 
 const lifecycleMessages = desktopMessages.lifecycleController
 

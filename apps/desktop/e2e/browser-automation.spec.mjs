@@ -19,10 +19,7 @@ const desktopDirectory = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const repositoryDirectory = resolve(desktopDirectory, '../..')
 const automationMainEntry = join(desktopDirectory, 'e2e/helpers/browser-automation-main.cjs')
 const dialogHarnessEntry = join(desktopDirectory, 'e2e/helpers/dialog-harness-main.cjs')
-const executable = (name) =>
-  join(repositoryDirectory, 'target', 'debug', process.platform === 'win32' ? `${name}.exe` : name)
-const serviceBinary = executable('agent-workspace-service')
-const cliBinary = executable('agent-workspace-cli')
+const cliBinary = join(repositoryDirectory, 'target/node-linux/bin/agent-workspace-node.mjs')
 const rendererUrl = 'agent-workspace://renderer/index.html'
 const evidenceRoot =
   process.env.AGENT_WORKSPACE_EVIDENCE_DIR ?? join(tmpdir(), 'agent-workspace-m5-validation')
@@ -34,10 +31,6 @@ test.beforeAll(async () => {
   }
   await mkdir(evidenceRoot, { recursive: true })
   if (process.env.AGENT_WORKSPACE_E2E_SKIP_BUILD !== '1') {
-    execFileSync('cargo', ['build', '-p', 'agent-workspace-service', '-p', 'agent-workspace-cli'], {
-      cwd: repositoryDirectory,
-      stdio: 'inherit'
-    })
     execFileSync('pnpm', ['--filter', '@agent-workspace/desktop', 'build'], {
       cwd: repositoryDirectory,
       stdio: 'inherit'
@@ -60,8 +53,8 @@ test('attach mode requires trusted approval for the exact live target', async ({
   let sessionFile
 
   try {
-    const harness = await createPackagedElectronHarness(profileDirectory, serviceBinary)
-    sessionFile = join(harness.runtimeDirectory, 'agent-workspace', 'cli-session.json')
+    const harness = await createPackagedElectronHarness(profileDirectory)
+    sessionFile = join(profileDirectory, 'runtime', 'node-cli-session.json')
     application = await electron.launch({
       args: [dialogHarnessEntry, `--user-data-dir=${profileDirectory}`, '--disable-gpu'],
       cwd: desktopDirectory,
@@ -179,8 +172,8 @@ test('packaged M5 CLI automation is isolated, policy-bound, cancellable, and lea
   let preserveFailureProfile = false
 
   try {
-    const harness = await createPackagedElectronHarness(profileDirectory, serviceBinary)
-    sessionFile = join(harness.runtimeDirectory, 'agent-workspace', 'cli-session.json')
+    const harness = await createPackagedElectronHarness(profileDirectory)
+    sessionFile = join(profileDirectory, 'runtime', 'node-cli-session.json')
     application = await electron.launch({
       args: [automationMainEntry, `--user-data-dir=${profileDirectory}`, '--disable-gpu'],
       cwd: desktopDirectory,
@@ -527,8 +520,8 @@ test('packaged M5 provider and window races terminate once and preserve exact ro
     writeFile(join(evidenceDirectory, 'm5-ac04-progress.json'), `${JSON.stringify({ step })}\n`)
 
   try {
-    const harness = await createPackagedElectronHarness(profileDirectory, serviceBinary)
-    sessionFile = join(harness.runtimeDirectory, 'agent-workspace', 'cli-session.json')
+    const harness = await createPackagedElectronHarness(profileDirectory)
+    sessionFile = join(profileDirectory, 'runtime', 'node-cli-session.json')
     application = await electron.launch({
       args: [automationMainEntry, `--user-data-dir=${profileDirectory}`, '--disable-gpu'],
       cwd: desktopDirectory,

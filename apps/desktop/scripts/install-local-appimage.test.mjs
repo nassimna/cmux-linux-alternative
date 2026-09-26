@@ -36,7 +36,7 @@ test('local package scripts build only a staged x64 AppImage before installing i
 
   assert.equal(
     rootCommand,
-    'pnpm build:service && pnpm --filter @agent-workspace/desktop package:linux:local'
+    'pnpm stage:node:linux && pnpm --filter @agent-workspace/desktop package:linux:local'
   )
   assert.match(desktopCommand, /electron-builder --linux AppImage --x64 --publish never/u)
   assert.match(desktopCommand, /-c\.directories\.output=\.\.\/\.\.\/target\/local-appimage/u)
@@ -106,6 +106,35 @@ test('installs and atomically updates the AppImage, icon, and desktop entry', as
         false
       )
     }
+  })
+})
+
+test('installs a self-contained Node CLI and preserves shell arguments', async () => {
+  await withTemporaryDirectory(async (directory) => {
+    const runtime = join(directory, 'runtime')
+    const dataHome = join(directory, "data with 'quotes and $dollars")
+    const binDirectory = join(directory, 'bin')
+    await writeFileTree(join(directory, 'app.AppImage'), 'appimage')
+    await writeFileTree(join(directory, 'icon.png'), 'icon')
+    await writeFileTree(join(runtime, 'bin', 'node'), '#!/bin/sh\nprintf "%s\\n" "$@"\n')
+    await writeFileTree(join(runtime, 'bin', 'agent-workspace-node.mjs'), 'bundled-cli')
+    const installed = await installLocalAppImage({
+      appImagePath: join(directory, 'app.AppImage'),
+      iconPath: join(directory, 'icon.png'),
+      runtimePath: runtime,
+      dataHome,
+      binDirectory
+    })
+    const { stdout } = await execFile(installed.cli, ['identify', 'literal $value'])
+    assert.deepEqual(stdout.trimEnd().split('\n'), [
+      join(dataHome, 'agent-workspace', 'cli', 'agent-workspace.mjs'),
+      'identify',
+      'literal $value'
+    ])
+    assert.equal(
+      await readFile(join(dataHome, 'agent-workspace', 'cli', 'agent-workspace.mjs'), 'utf8'),
+      'bundled-cli'
+    )
   })
 })
 

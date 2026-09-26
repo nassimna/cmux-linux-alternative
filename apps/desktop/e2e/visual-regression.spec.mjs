@@ -15,9 +15,7 @@ const execFileAsync = promisify(execFile)
 const desktopDirectory = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const repositoryDirectory = resolve(desktopDirectory, '../..')
 const mainEntry = join(desktopDirectory, 'out/main/index.js')
-const executable = (name) => join(repositoryDirectory, 'target', 'debug', name)
-const serviceBinary = executable('agent-workspace-service')
-const cliBinary = executable('agent-workspace-cli')
+const cliBinary = join(repositoryDirectory, 'target/node-linux/bin/agent-workspace-node.mjs')
 const rendererUrl = 'agent-workspace://renderer/index.html'
 const rendererOrigin = 'agent-workspace://renderer/'
 const benignExternalConsoleError = /(?:font(?:config)?|gpu|mesa|dri3|webgl)/iu
@@ -30,10 +28,6 @@ test.beforeAll(() => {
   if (!process.env.DISPLAY && !process.env.WAYLAND_DISPLAY) {
     throw new Error('Electron visual regression needs an X11 or Wayland display.')
   }
-  execFileSync('cargo', ['build', '-p', 'agent-workspace-service', '-p', 'agent-workspace-cli'], {
-    cwd: repositoryDirectory,
-    stdio: 'inherit'
-  })
   execFileSync('pnpm', ['--filter', '@agent-workspace/desktop', 'build'], {
     cwd: repositoryDirectory,
     stdio: 'inherit'
@@ -49,8 +43,8 @@ test('project-owned workspace states match the Linux visual baseline', async () 
   let electronApplication
 
   try {
-    const harness = await createPackagedElectronHarness(profileDirectory, serviceBinary)
-    const sessionFile = join(harness.runtimeDirectory, 'agent-workspace', 'cli-session.json')
+    const harness = await createPackagedElectronHarness(profileDirectory)
+    const sessionFile = join(profileDirectory, 'runtime', 'node-cli-session.json')
     electronApplication = await electron.launch({
       args: [mainEntry, `--user-data-dir=${profileDirectory}`, '--disable-gpu'],
       cwd: desktopDirectory,
@@ -267,7 +261,7 @@ test('workspace matches the Linux visual baseline at 125 percent scale', async (
   let electronApplication
 
   try {
-    const harness = await createPackagedElectronHarness(profileDirectory, serviceBinary)
+    const harness = await createPackagedElectronHarness(profileDirectory)
     electronApplication = await electron.launch({
       args: [mainEntry, `--user-data-dir=${profileDirectory}`, '--disable-gpu'],
       cwd: desktopDirectory,
@@ -340,16 +334,13 @@ test('workspace matches the Linux visual baseline at 125 percent scale', async (
 test('bundled service startup failure matches the Linux visual baseline', async () => {
   test.setTimeout(60_000)
   const profileDirectory = await mkdtemp(join(tmpdir(), 'agent-workspace-visual-failure-'))
-  const serviceFixtureDirectory = join(profileDirectory, 'service-fixture')
-  const failingServiceBinary = join(serviceFixtureDirectory, 'agent-workspace-service')
-  await mkdir(serviceFixtureDirectory, { recursive: true })
-  await writeFile(failingServiceBinary, '#!/bin/sh\nexit 23\n', { mode: 0o700 })
   const consoleErrors = []
   const pageErrors = []
   let electronApplication
 
   try {
-    const harness = await createPackagedElectronHarness(profileDirectory, failingServiceBinary)
+    const harness = await createPackagedElectronHarness(profileDirectory)
+    await writeFile(harness.serverPath, 'process.exit(23)\n')
     electronApplication = await electron.launch({
       args: [mainEntry, `--user-data-dir=${profileDirectory}`, '--disable-gpu'],
       cwd: desktopDirectory,

@@ -1,15 +1,12 @@
 name: Release (downloadable packages)
 
-# Builds unsigned, downloadable packages for Linux and macOS (Intel + Apple
-# Silicon), then publishes them to a single GitHub Release.
+# Builds unsigned Linux x64 Node packages, then publishes a GitHub Release.
 #
 # Trigger either by:
 #   - pushing a tag like v0.1.0, or
 #   - running this workflow manually (Actions tab) with a tag input.
 #
-# The builds are UNSIGNED. macOS shows a Gatekeeper "unidentified developer"
-# warning (right-click -> Open to bypass). Add Apple signing secrets later to
-# remove it. Windows is intentionally not built (the Rust backend is Unix-only).
+# The builds are unsigned. Publication remains a maintainer-triggered release action.
 
 on:
   push:
@@ -36,28 +33,19 @@ concurrency:
 
 env:
   PNPM_VERSION: 10.34.5
-  NODE_VERSION: 22.20.0
-  RUST_VERSION: 1.96.0
+  NODE_VERSION: 22.22.3
 
 jobs:
   build:
     name: Build ${{ matrix.label }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
-    # Linux is required for a release; macOS/Windows are best-effort while the
-    # backend is ported off Linux-only syscalls. Their assets auto-append to the
-    # same release once they start building green.
-    continue-on-error: ${{ matrix.label != 'linux-x64' }}
     strategy:
       fail-fast: false
       matrix:
         include:
           - label: linux-x64
             os: ubuntu-latest
-          - label: macos-x64
-            os: macos-13 # Intel host: native x86_64 Rust sidecar for the x64 app
-          - label: macos-arm64
-            os: macos-14 # Apple Silicon host: native arm64 Rust sidecar for the arm64 app
     steps:
       - name: Check out repository
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -73,12 +61,6 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
 
-      - name: Install Rust toolchain
-        run: rustup toolchain install ${{ env.RUST_VERSION }} --profile minimal
-
-      - name: Cache Rust builds
-        uses: Swatinem/rust-cache@23869a5bd66c73db3c0ac40331f3206eb23791dc # v2.9.1
-
       - name: Install rpm tooling (Linux rpm target)
         if: matrix.label == 'linux-x64'
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends rpm
@@ -86,8 +68,8 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Build native service sidecar
-        run: pnpm build:service
+      - name: Stage Node service and CLI
+        run: pnpm stage:node:linux
 
       - name: Build renderer bundle
         run: pnpm --filter @agent-workspace/desktop exec electron-vite build
@@ -98,19 +80,12 @@ jobs:
           pnpm --filter @agent-workspace/desktop exec electron-builder
           --linux AppImage deb rpm --x64 --publish never
 
-      - name: Package macOS Intel (dmg, zip)
-        if: matrix.label == 'macos-x64'
-        run: >-
-          pnpm --filter @agent-workspace/desktop exec electron-builder
-          --mac dmg zip --x64 --publish never
-          -c.mac.identity=null -c.mac.hardenedRuntime=false -c.mac.notarize=false
-
-      - name: Package macOS Apple Silicon (dmg, zip)
-        if: matrix.label == 'macos-arm64'
-        run: >-
-          pnpm --filter @agent-workspace/desktop exec electron-builder
-          --mac dmg zip --arm64 --publish never
-          -c.mac.identity=null -c.mac.hardenedRuntime=false -c.mac.notarize=false
+      - name: Inspect packaged Node runtime
+        run: |
+          version=$(node -p "require('./package.json').version")
+          for type in AppImage deb rpm; do
+            scripts/release/inspect-node-preview.sh "release/agent-workspace-${version}-x86_64.${type}" "$type"
+          done
 
       - name: Collect installable artifacts
         shell: bash
@@ -120,10 +95,7 @@ jobs:
           for f in \
             release/*.AppImage \
             release/*.deb \
-            release/*.rpm \
-            release/*.dmg \
-            release/*.zip \
-            release/*-setup.exe; do
+            release/*.rpm; do
             cp "$f" dist-artifacts/
           done
           echo "Collected:"; ls -la dist-artifacts
@@ -183,13 +155,10 @@ jobs:
           | Linux (AppImage) | `agent-workspace-*-x86_64.AppImage` |
           | Linux (Debian/Ubuntu) | `agent-workspace-*-x86_64.deb` |
           | Linux (Fedora/RHEL) | `agent-workspace-*-x86_64.rpm` |
-          | macOS Intel | `agent-workspace-*-macos-x64.dmg` |
-          | macOS Apple Silicon | `agent-workspace-*-macos-arm64.dmg` |
 
           Verify downloads against `SHA256SUMS`.
 
-          > **Note:** These builds are **unsigned**. On macOS, right-click the app and choose
-          > **Open** to bypass the Gatekeeper "unidentified developer" prompt.
+          > **Note:** These Linux builds are **unsigned**.
           EOF
           )
           prerelease_flag=()

@@ -142,6 +142,7 @@ import {
   contentMarkdownParamsSchema,
   contentPreviewSchema,
   contentReadParamsSchema,
+  contentSaveResultSchema,
   recentlyClosedListResultSchema,
   searchControlResultSchema,
   searchQueryParamsSchema,
@@ -192,17 +193,18 @@ import {
   desktopTextBoxCreateRequestSchema,
   desktopTextBoxDeleteRequestSchema,
   desktopTextBoxSaveRequestSchema,
+  desktopContentSaveRequestSchema,
   desktopWorkspacePathOpenersSchema,
   desktopWorkspacePathOpenRequestSchema,
   savedLayoutImportRequestSchema,
   desktopActionInvokeRequestSchema,
   type DesktopBridge,
   type DomainResyncNotice
-} from '../shared/desktop-bridge'
+} from '@agent-workspace/contracts/desktop/desktop-bridge'
 import {
   parseApplicationMenuCommandId,
   parseApplicationMenuState
-} from '../shared/application-menu'
+} from '@agent-workspace/contracts/desktop/application-menu'
 
 const PROTOCOL_ERROR_PATTERN = /\[agent-workspace-protocol-error:([a-z0-9_]+)\]\s*(.*)$/u
 
@@ -466,6 +468,13 @@ const desktopBridge = Object.freeze({
   readContent: async (params) =>
     contentPreviewSchema.parse(
       await ipcRenderer.invoke(DESKTOP_IPC.contentRead, contentReadParamsSchema.parse(params))
+    ),
+  saveContent: async (params) =>
+    contentSaveResultSchema.parse(
+      await ipcRenderer.invoke(
+        DESKTOP_IPC.contentSave,
+        desktopContentSaveRequestSchema.parse(params)
+      )
     ),
   renderMarkdown: async (params) =>
     // Recursive markdown node inference is `unknown[]`; the parser validates every node.
