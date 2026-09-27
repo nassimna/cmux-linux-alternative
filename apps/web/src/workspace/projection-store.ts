@@ -710,6 +710,9 @@ export const useProjectionStore = create<ProjectionState>((set, get) => ({
             Math.max(pendingAttentionRevisions.get(workspaceId) ?? 0, attentionRevision)
           )
           void get().refreshWorkspaceAttention(workspaceId, attentionRevision)
+          void get()
+            .refreshNotifications()
+            .catch(() => undefined)
         })
       )
     }

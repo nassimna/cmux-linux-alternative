@@ -29,7 +29,6 @@ import {
   Code2,
   Command,
   FolderOpen,
-  FolderTree,
   GitBranch,
   Globe2,
   GripVertical,
@@ -56,7 +55,6 @@ import { Group, Panel, Separator, type Layout } from 'react-resizable-panels'
 
 import type {
   ActionDefinition,
-  AgentSessionBinding,
   MutationResult,
   LayoutListResult,
   ExactTabPlacement,
@@ -78,7 +76,6 @@ import type {
 } from '@agent-workspace/protocol-client'
 import { displayTabTitle } from '@agent-workspace/contracts/desktop/browser-messages'
 import type {
-  DesktopBridge,
   DesktopActionInvokeRequest,
   DesktopWorkspacePathOpener,
   DesktopWorkspacePathOpenerId,
@@ -127,7 +124,6 @@ import { TerminalPane } from '../terminal/TerminalPane'
 import { AttentionBadge } from '../notifications/AttentionBadge'
 import { NotificationCenter } from '../notifications/NotificationCenter'
 import { NotificationToasts } from '../notifications/NotificationToasts'
-import { RightSidebar } from '../sidebar/RightSidebar'
 import { jumpToNotification, waitForVisibleTarget } from '../notifications/jump'
 import { runAfterNotificationCenterClose } from '../notifications/notification-center-close'
 import { Button } from '../ui/button'
@@ -160,8 +156,6 @@ import {
 } from '../ui/dialog'
 import { useProjectionStore, type WorkspaceCardSlotsV2Projection } from './projection-store'
 import { ConfigurationSettings, type ConfigurationSettingsSection } from './ConfigurationSettings'
-import { AgentSessionsSettings, type AgentWorkspaceContext } from './AgentSessionsSettings'
-import { navigateToAgentBinding } from './agent-session-navigation'
 import { RemoteSessionsSettings, type RemoteWorkspaceContext } from './RemoteSessionsSettings'
 import { WorkspaceCardSlots } from './WorkspaceCardSlots'
 import { WorkspaceCardSlotsV2 } from './WorkspaceCardSlotsV2'
@@ -215,36 +209,6 @@ interface ShellProps {
   workspace: WorkspaceSnapshot | null
 }
 
-export function canShowNodeRecentlyClosed(
-  capabilities: readonly string[] | undefined,
-  bridge: Pick<DesktopBridge, 'listRecentlyClosed' | 'reopenRecentlyClosed'>
-): boolean {
-  return (
-    capabilities?.includes('node-core-demo') === true &&
-    capabilities.includes('recentlyClosed.list') &&
-    capabilities.includes('recentlyClosed.reopen') &&
-    typeof bridge.listRecentlyClosed === 'function' &&
-    typeof bridge.reopenRecentlyClosed === 'function'
-  )
-}
-
-export function canShowNodeTaskManager(
-  capabilities: readonly string[] | undefined,
-  bridge: Pick<DesktopBridge, 'listTasks' | 'actOnTask'>
-): { list: boolean; detach: boolean } {
-  const list =
-    capabilities?.includes('node-core-demo') === true &&
-    capabilities.includes('task.list') &&
-    typeof bridge.listTasks === 'function'
-  return {
-    list,
-    detach:
-      list &&
-      capabilities?.includes('task.detach') === true &&
-      typeof bridge.actOnTask === 'function'
-  }
-}
-
 export function WorkspaceShell({ workspace }: ShellProps): React.JSX.Element {
   const projection = useProjectionStore()
   const [createOpen, setCreateOpen] = useState(false)
@@ -258,8 +222,6 @@ export function WorkspaceShell({ workspace }: ShellProps): React.JSX.Element {
   }, [])
   const [windowMove, setWindowMove] = useState<WindowMoveDialogState | null>(null)
   const [notificationsOpen, setNotificationsOpen] = useState(false)
-  const [toolsOpen, setToolsOpen] = useState(false)
-  const [toolsFileDirty, setToolsFileDirty] = useState(false)
   const [preserveNotificationTargetFocus, setPreserveNotificationTargetFocus] = useState(false)
   const [notificationNavigationError, setNotificationNavigationError] = useState<string | null>(
     null
@@ -310,29 +272,6 @@ export function WorkspaceShell({ workspace }: ShellProps): React.JSX.Element {
     window.desktopBridge.listPublicActions !== undefined &&
     window.desktopBridge.invokePublicAction !== undefined
   const browserTabsEnabled = projection.identity?.capabilities.includes('tab.openBrowser') === true
-  const nodeFilesEnabled =
-    projection.identity?.capabilities.includes('node-core-demo') === true &&
-    !!window.desktopBridge.listContentRoots &&
-    !!window.desktopBridge.listContentDirectory &&
-    !!window.desktopBridge.issueContentDocument &&
-    !!window.desktopBridge.readContent
-  const nodeEncryptedSearchEnabled =
-    projection.identity?.capabilities.includes('node-core-demo') === true &&
-    projection.identity.capabilities.includes('search.encrypted-v1') &&
-    !!window.desktopBridge.searchContent &&
-    !!window.desktopBridge.setSearchConsent
-  const nodeRecentlyClosedEnabled =
-    nodeFilesEnabled &&
-    canShowNodeRecentlyClosed(projection.identity?.capabilities, window.desktopBridge)
-  const nodeTaskManager = canShowNodeTaskManager(
-    projection.identity?.capabilities,
-    window.desktopBridge
-  )
-  const placementToolsEnabled =
-    !nodeFilesEnabled &&
-    projection.identity?.capabilities.includes('sidebar-surfaces-v1') === true &&
-    !!window.desktopBridge.getSidebarPlacement
-  const toolsEnabled = nodeFilesEnabled || placementToolsEnabled
   useEffect(() => {
     if (!publicActionsEnabled) {
       queueMicrotask(() => setPublicActions([]))
@@ -682,27 +621,6 @@ export function WorkspaceShell({ workspace }: ShellProps): React.JSX.Element {
             mode: 'focused'
           })
         }
-      } catch (error) {
-        projection.reportMutationError(error)
-      }
-    },
-    [projection]
-  )
-
-  const openAgentSession = useCallback(
-    async (binding: AgentSessionBinding): Promise<void> => {
-      try {
-        await navigateToAgentBinding(binding, {
-          loadSnapshot: async () => (await window.desktopBridge.listWorkspaces()).snapshot,
-          selectWorkspace: (params) => window.desktopBridge.selectWorkspace(params),
-          focusPane: (params) => window.desktopBridge.focusPane(params),
-          selectTab: (params) => window.desktopBridge.selectTab(params),
-          applyMutation: (result) => projection.applyMutation(result),
-          waitUntilVisible: async (target) => {
-            projection.setSettingsOpen(false)
-            return waitForVisibleTarget(target)
-          }
-        })
       } catch (error) {
         projection.reportMutationError(error)
       }
@@ -1067,7 +985,7 @@ export function WorkspaceShell({ workspace }: ShellProps): React.JSX.Element {
     <main
       className={projection.sidebarOpen ? 'workspace-shell' : 'workspace-shell sidebar-collapsed'}
       ref={shellRef}
-      style={{ '--sidebar-width': `${String(sidebarWidth)}px` } as React.CSSProperties}
+      style={{ '--sidebar-width-preference': `${String(sidebarWidth)}px` } as React.CSSProperties}
     >
       <header className="titlebar">
         <span className="mark" aria-hidden="true" />
@@ -1076,21 +994,6 @@ export function WorkspaceShell({ workspace }: ShellProps): React.JSX.Element {
           {workspace?.name ?? messages.workspaceShell.titlebar.noWorkspaceSelected}
         </span>
         <div className="titlebar-actions">
-          {toolsEnabled ? (
-            <IconButton
-              aria-label={toolsOpen ? 'Close workspace tools' : 'Open workspace tools'}
-              aria-pressed={toolsOpen}
-              onClick={() => {
-                if (toolsOpen && toolsFileDirty && !window.confirm('Discard unsaved file changes?'))
-                  return
-                if (toolsOpen) setToolsFileDirty(false)
-                setToolsOpen(!toolsOpen)
-              }}
-              tooltip="Workspace tools"
-            >
-              <FolderTree size={14} />
-            </IconButton>
-          ) : null}
           <IconButton
             aria-label={messages.workspaceShell.titlebar.toggleSidebar}
             onClick={() => projection.toggleSidebar()}
@@ -1277,23 +1180,6 @@ export function WorkspaceShell({ workspace }: ShellProps): React.JSX.Element {
           />
         )}
       </section>
-      {toolsEnabled && toolsOpen ? (
-        <RightSidebar
-          enabled
-          encryptedSearchEnabled={nodeEncryptedSearchEnabled}
-          recentlyClosedEnabled={nodeRecentlyClosedEnabled}
-          nodeTaskListEnabled={nodeFilesEnabled && nodeTaskManager.list}
-          nodeTaskDetachEnabled={nodeFilesEnabled && nodeTaskManager.detach}
-          mode={nodeFilesEnabled ? 'files' : 'placement'}
-          onClose={() => {
-            setToolsFileDirty(false)
-            setToolsOpen(false)
-          }}
-          onFileDirtyChange={setToolsFileDirty}
-          paneId={workspace?.selectedPaneId ?? ''}
-          workspaceId={workspace?.id ?? ''}
-        />
-      ) : null}
       <CreateWorkspaceDialog
         fallbackDirectory={workspace?.workingDirectory ?? '/'}
         mode={createMode}
@@ -1360,40 +1246,12 @@ export function WorkspaceShell({ workspace }: ShellProps): React.JSX.Element {
         recentCommandIds={recentCommands}
       />
       <SettingsDialog
-        agentSessionsEnabled={
-          projection.identity?.capabilities.includes('agent-sessions-v1') === true ||
-          (projection.identity?.capabilities.includes('node-core-demo') === true &&
-            projection.identity.capabilities.includes('agent.catalog.list') &&
-            projection.identity.capabilities.includes('agent.restore.assess'))
-        }
-        agentWorkspaceContext={
-          workspace && selectedPane && selectedTab
-            ? {
-                workspaceId: workspace.id,
-                paneId: selectedPane.id,
-                tabId: selectedTab.id,
-                workingDirectory: workspace.workingDirectory
-              }
-            : null
-        }
         configurationV2={projection.identity?.capabilities.includes('configuration-v2') ?? false}
         configurationReadOnly={
           (projection.identity?.capabilities.includes('node-core-demo') ?? false) &&
           !(projection.identity?.capabilities.includes('configuration-v2') ?? false)
         }
         nodePreview={projection.identity?.capabilities.includes('node-core-demo') ?? false}
-        agentRegistrationEnabled={
-          projection.identity?.capabilities.includes('agent.catalog.register') ?? false
-        }
-        agentRestoreEnabled={
-          projection.identity?.capabilities.includes('agent.session.restore') ?? false
-        }
-        agentForkEnabled={projection.identity?.capabilities.includes('agent.session.fork') ?? false}
-        agentHibernationEnabled={
-          projection.identity?.capabilities.includes('agent.hibernate.preflight') === true &&
-          projection.identity.capabilities.includes('agent.hibernate.cancel') &&
-          projection.identity.capabilities.includes('agent.hibernate.confirm')
-        }
         remoteSessionsEnabled={
           projection.identity?.capabilities.includes('remote-sessions-v1') ?? false
         }
@@ -1415,8 +1273,6 @@ export function WorkspaceShell({ workspace }: ShellProps): React.JSX.Element {
               }
             : null
         }
-        onAgentNavigate={openAgentSession}
-        onAgentRuntimeChanged={() => projection.refresh()}
         onMutation={async (operation) => {
           const succeeded = await runMutation(operation)
           if (!succeeded) return false
@@ -3393,6 +3249,7 @@ function PaneView({
                   : messages.terminalPane.controls.openTools
               }
               aria-pressed={terminalToolsOpen}
+              className="pane-search-action"
               onClick={() => setTerminalToolsTabId(terminalToolsOpen ? null : selectedTab.id)}
               tooltip={`${messages.terminalPane.controls.openTools} · Ctrl+F`}
             >
@@ -3445,6 +3302,7 @@ function PaneView({
           </DropdownMenu>
           <IconButton
             aria-label={messages.workspaceShell.pane.splitRight}
+            className="pane-split-action"
             onClick={() => void splitWithTerminal(workspace, pane.id, 'horizontal', onMutation)}
             tooltip={`${messages.workspaceShell.pane.splitRight} · Ctrl+D`}
           >
@@ -3452,6 +3310,7 @@ function PaneView({
           </IconButton>
           <IconButton
             aria-label={messages.workspaceShell.pane.splitDown}
+            className="pane-split-action"
             onClick={() => void splitWithTerminal(workspace, pane.id, 'vertical', onMutation)}
             tooltip={`${messages.workspaceShell.pane.splitDown} · Ctrl+Shift+D`}
           >
@@ -4539,7 +4398,7 @@ function commandOptionDomId(commandId: string): string {
   return `command-palette-option-${commandId.replace(/[^a-zA-Z0-9_-]/g, '-')}`
 }
 
-type SettingsSectionId = ConfigurationSettingsSection | 'shortcuts' | 'agents-sessions' | 'remote'
+type SettingsSectionId = ConfigurationSettingsSection | 'shortcuts' | 'remote'
 
 const SETTINGS_SECTIONS: readonly {
   id: SettingsSectionId
@@ -4559,31 +4418,18 @@ const SETTINGS_SECTIONS: readonly {
   },
   { id: 'shortcuts', label: messages.settings.keyboard, keywords: 'keys commands hotkeys' },
   { id: 'updates', label: messages.settings.updates, keywords: 'version stable beta download' },
-  {
-    id: 'agents-sessions',
-    label: messages.agentSessions.title,
-    keywords: 'codex agent thread restore hibernate fork team attention'
-  },
   { id: 'remote', label: 'Remote sessions', keywords: 'ssh tmux host key credential' },
   {
     id: 'advanced',
     label: messages.settings.advanced,
-    keywords: 'browser agents integrations logging privacy profile'
+    keywords: 'browser logging privacy profile'
   }
 ] as const
 
 export function SettingsDialog({
-  agentSessionsEnabled,
-  agentWorkspaceContext,
   configurationV2,
   configurationReadOnly,
   nodePreview,
-  agentRegistrationEnabled,
-  agentRestoreEnabled,
-  agentForkEnabled,
-  agentHibernationEnabled,
-  onAgentNavigate,
-  onAgentRuntimeChanged,
   onMutation,
   onOpenChange,
   open,
@@ -4594,17 +4440,9 @@ export function SettingsDialog({
   remoteWorkspaceContext,
   shortcuts
 }: {
-  agentSessionsEnabled: boolean
-  agentWorkspaceContext: AgentWorkspaceContext | null
   configurationV2: boolean
   configurationReadOnly?: boolean
   nodePreview?: boolean
-  agentRegistrationEnabled?: boolean
-  agentRestoreEnabled?: boolean
-  agentForkEnabled?: boolean
-  agentHibernationEnabled?: boolean
-  onAgentNavigate: (binding: AgentSessionBinding) => Promise<void>
-  onAgentRuntimeChanged: () => Promise<void>
   onMutation: (operation: MutationOperation) => Promise<boolean>
   onOpenChange: (open: boolean) => void
   open: boolean
@@ -4642,9 +4480,7 @@ export function SettingsDialog({
     )
   }
   const availableSettingsSections = SETTINGS_SECTIONS.filter(
-    ({ id }) =>
-      (id !== 'remote' || remoteSessionsEnabled) &&
-      (id !== 'agents-sessions' || agentSessionsEnabled)
+    ({ id }) => id !== 'remote' || remoteSessionsEnabled
   )
   const visibleSettingsSections = availableSettingsSections.filter(({ keywords, label }) => {
     const query = settingsQuery.trim().toLocaleLowerCase()
@@ -4700,19 +4536,6 @@ export function SettingsDialog({
           </IconButton>
           {visibleSettingsSections.length === 0 ? (
             <p className="settings-empty-search">{messages.settings.noSearchResults}</p>
-          ) : activeSection === 'agents-sessions' ? (
-            <AgentSessionsSettings
-              assessmentOnly={nodePreview ?? false}
-              allowRegistration={!nodePreview || (agentRegistrationEnabled ?? false)}
-              allowRestore={!nodePreview || (agentRestoreEnabled ?? false)}
-              allowFork={!nodePreview || (agentForkEnabled ?? false)}
-              allowHibernate={!nodePreview || (agentHibernationEnabled ?? false)}
-              context={agentWorkspaceContext}
-              onNavigate={onAgentNavigate}
-              onWorkspaceMutation={onMutation}
-              onRuntimeChanged={onAgentRuntimeChanged}
-              open={open}
-            />
           ) : activeSection === 'remote' ? (
             <RemoteSessionsSettings
               context={remoteWorkspaceContext}
@@ -4859,7 +4682,6 @@ function SettingsSectionIcon({ section }: { section: SettingsSectionId }): React
   if (section === 'notifications') return <Bell aria-hidden="true" size={15} />
   if (section === 'shortcuts') return <Keyboard aria-hidden="true" size={15} />
   if (section === 'updates') return <RefreshCw aria-hidden="true" size={15} />
-  if (section === 'agents-sessions') return <Command aria-hidden="true" size={15} />
   if (section === 'remote') return <TerminalSquare aria-hidden="true" size={15} />
   return <SlidersHorizontal aria-hidden="true" size={15} />
 }

@@ -430,29 +430,6 @@ export function ConfigurationSettings({
 
         <SettingsSection
           activeSection={activeSection}
-          note={messages.settings.deferred.agents}
-          section="advanced"
-          title={messages.settings.agents}
-        >
-          <CheckField
-            checked={draft.agentIntegration.enabled}
-            disabled
-            label={messages.settings.fields.enableAgents}
-          />
-          <CheckField
-            checked={draft.agentIntegration.notificationsEnabled}
-            disabled
-            label={messages.settings.fields.agentNotifications}
-          />
-          <CheckField
-            checked={draft.agentIntegration.browserEnabled}
-            disabled
-            label={messages.settings.fields.agentBrowser}
-          />
-        </SettingsSection>
-
-        <SettingsSection
-          activeSection={activeSection}
           section="advanced"
           title={messages.settings.logging}
         >

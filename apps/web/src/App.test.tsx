@@ -100,12 +100,18 @@ describe('App', () => {
     expect(window.desktopBridge.getConfiguration).toHaveBeenCalledOnce()
   })
 
-  it('keeps the unfinished tools sidebar hidden when the service advertises it', async () => {
+  it('keeps agent management and content tools hidden while notifications remain available', async () => {
     const identify = vi.fn().mockResolvedValue({
       application: 'agent-workspace',
       version: '0.1.0',
       protocolVersion: 1,
-      capabilities: ['configuration-v2', 'sidebar-surfaces-v1']
+      capabilities: [
+        'configuration-v2',
+        'node-core-demo',
+        'sidebar-surfaces-v1',
+        'agent-sessions-v1',
+        'agent.catalog.list'
+      ]
     })
     window.desktopBridge = createBridge(identify)
     render(<App />)
@@ -116,6 +122,16 @@ describe('App', () => {
     ).not.toBeInTheDocument()
     expect(
       screen.queryByRole('complementary', { name: messages.sidebarSurfaces.title })
+    ).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Open workspace tools' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Open notifications/i })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Open settings' }))
+    expect(
+      screen.queryByRole('button', { name: messages.agentSessions.title })
+    ).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Advanced' }))
+    expect(
+      screen.queryByRole('checkbox', { name: 'Enable agent integrations' })
     ).not.toBeInTheDocument()
   })
 
@@ -1851,12 +1867,11 @@ describe('App', () => {
     ).toBeVisible()
     fireEvent.click(screen.getByRole('button', { name: 'Advanced' }))
     expect(screen.getByRole('textbox', { name: 'Profile name' })).toBeDisabled()
-    expect(screen.getByRole('checkbox', { name: 'Enable agent integrations' })).toBeDisabled()
+    expect(
+      screen.queryByRole('checkbox', { name: 'Enable agent integrations' })
+    ).not.toBeInTheDocument()
     expect(screen.getByRole('combobox', { name: 'Log level' })).toBeEnabled()
     expect(screen.getByText('Applies immediately to subsequent service log events.')).toBeVisible()
-    expect(
-      screen.getByText('Agent integrations are not connected to a runtime in this version.')
-    ).toBeVisible()
     fireEvent.click(screen.getByRole('button', { name: 'Updates' }))
     expect(screen.getByRole('combobox', { name: 'Update channel' })).toBeEnabled()
   })

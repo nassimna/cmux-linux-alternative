@@ -361,6 +361,42 @@ describe('projection store', () => {
     expect(bridge.acknowledgeAttention).not.toHaveBeenCalled()
   })
 
+  it('refreshes notification history when an external attention event arrives', async () => {
+    type AttentionListener = Parameters<NonNullable<DesktopBridge['onWorkspaceAttentionEvent']>>[0]
+    let attentionListener: AttentionListener | undefined
+    const workspaceId = projectionFixture.workspaces[0]!.id
+    const bridge = createBridge()
+    vi.mocked(bridge.identify).mockResolvedValue(identityWith('attention-v1'))
+    vi.mocked(bridge.listNotifications!)
+      .mockResolvedValueOnce(notificationListAt(42, []))
+      .mockResolvedValue(notificationListAt(43, [notificationFixture]))
+    bridge.getWorkspaceAttention = vi.fn().mockResolvedValue({
+      workspaceId,
+      revision: 1,
+      state: 'informational',
+      reason: 'notificationInfo',
+      unreadCount: 1,
+      notificationId: notificationFixture.id
+    })
+    bridge.onWorkspaceAttentionEvent = vi.fn((listener: AttentionListener): (() => void) => {
+      attentionListener = listener
+      return () => undefined
+    })
+
+    await useProjectionStore.getState().initialize(bridge)
+    expect(useProjectionStore.getState().notifications?.notifications).toEqual([])
+    attentionListener?.({
+      event: 'workspace.attentionChanged',
+      data: { workspaceId, attentionRevision: 1, reason: 'sourcesChanged' }
+    })
+
+    await vi.waitFor(() =>
+      expect(useProjectionStore.getState().notifications?.notifications).toEqual([
+        notificationFixture
+      ])
+    )
+  })
+
   it('bounds failed attention refetch retries and recovers on a later invalidation', async () => {
     vi.useFakeTimers()
     type AttentionListener = Parameters<NonNullable<DesktopBridge['onWorkspaceAttentionEvent']>>[0]

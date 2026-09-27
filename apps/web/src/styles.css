@@ -854,6 +854,7 @@ button {
 
 .terminal-search {
   display: flex;
+  flex: 1 1 auto;
   gap: 3px;
   align-items: center;
   min-width: 0;
@@ -862,6 +863,8 @@ button {
 
 .terminal-search input {
   width: clamp(96px, 12vw, 180px);
+  min-width: 0;
+  flex: 1 1 96px;
   height: 25px;
   padding: 0 8px;
   color: var(--aw-color-text-primary);
@@ -920,6 +923,12 @@ button {
 
 .terminal-tools-close {
   margin-left: 2px;
+}
+
+@container (max-width: 260px) {
+  .terminal-search button:nth-of-type(-n + 3) {
+    display: none;
+  }
 }
 
 @container (max-width: 650px) {
@@ -1032,10 +1041,24 @@ button {
   align-items: center;
   min-width: 0;
   padding: 0 9px;
+  overflow: hidden;
   color: var(--aw-color-text-muted);
   font-size: var(--aw-font-size-xs);
   border-top: var(--aw-border-width) solid var(--aw-color-border-default);
   background: var(--aw-color-surface-sidebar);
+}
+
+.terminal-statusbar > span:not(.status-dot) {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@container (max-width: 220px) {
+  .terminal-process {
+    display: none;
+  }
 }
 
 .status-dot {
@@ -1063,7 +1086,7 @@ button {
 
 /* Milestone 2 workspace chrome */
 .workspace-shell {
-  --sidebar-width: 232px;
+  --sidebar-width: var(--sidebar-width-preference, 232px);
   grid-template:
     'title title' 32px
     'sidebar content' minmax(0, 1fr) /
@@ -1989,6 +2012,7 @@ button {
 .pane-view {
   position: relative;
   display: grid;
+  container: pane / inline-size;
   width: 100%;
   height: 100%;
   min-width: 0;
@@ -2229,6 +2253,7 @@ button {
   inset: 38px 7px 7px;
   display: grid;
   grid-template: 25% 50% 25% / 25% 50% 25%;
+  overflow: hidden;
   pointer-events: none;
   visibility: hidden;
   opacity: 0;
@@ -2319,6 +2344,27 @@ button {
   align-items: center;
   padding: 0 7px;
   line-height: var(--aw-line-height-normal);
+}
+
+@container pane (max-width: 380px) {
+  .pane-add-tab span,
+  .pane-actions .pane-split-action {
+    display: none;
+  }
+}
+
+@container pane (max-width: 260px) {
+  .pane-tab-utilities .tab-keyboard-move,
+  .pane-tab-utilities .tab-drop-actions-control {
+    display: none;
+  }
+}
+
+@container pane (max-width: 200px) {
+  .pane-actions > .attention-badge,
+  .pane-actions .pane-search-action {
+    display: none;
+  }
 }
 
 .pane-add-tab span {
@@ -2494,9 +2540,16 @@ button {
 }
 
 .browser-status span {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+@container (max-width: 220px) {
+  .browser-status span:last-child {
+    display: none;
+  }
 }
 
 @keyframes browser-spin {
@@ -3439,7 +3492,7 @@ kbd {
     grid-template-columns: 1fr;
   }
   .workspace-shell {
-    --sidebar-width: 196px;
+    --sidebar-width: min(var(--sidebar-width-preference, 232px), 196px);
   }
 
   .service-version,
@@ -3457,6 +3510,15 @@ kbd {
 }
 
 @media (max-width: 520px) {
+  .sidebar-heading {
+    padding-right: 8px;
+    padding-left: 8px;
+  }
+
+  .sidebar-heading-action span {
+    display: none;
+  }
+
   .settings-navigation {
     grid-template:
       'header' auto
@@ -3469,6 +3531,11 @@ kbd {
 
   .settings-navigation header p {
     display: none;
+  }
+
+  .settings-navigation nav {
+    flex-wrap: wrap;
+    overflow-x: visible;
   }
 
   .settings-content {
@@ -3505,6 +3572,12 @@ kbd {
     padding: 6px;
   }
 
+  .settings-navigation nav {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    scrollbar-width: thin;
+  }
+
   .settings-navigation header,
   .settings-navigation > div:first-child {
     display: none;
@@ -3527,7 +3600,7 @@ kbd {
   }
 
   .workspace-shell {
-    --sidebar-width: clamp(96px, 36vw, 128px);
+    --sidebar-width: min(var(--sidebar-width-preference, 232px), clamp(96px, 36vw, 128px));
   }
 
   .titlebar {
