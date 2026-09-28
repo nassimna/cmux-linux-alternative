@@ -427,7 +427,7 @@ export const messages = {
   },
   workspaceShell: {
     titlebar: {
-      applicationTitle: 'Agent Workspace',
+      applicationTitle: 'Ternline',
       noWorkspaceSelected: 'No workspace selected',
       toggleSidebar: 'Toggle workspace sidebar',
       toggleToolsSidebar: 'Toggle tools sidebar',
@@ -584,6 +584,11 @@ export const messages = {
     conflict: 'Settings changed elsewhere. The latest configuration has been reloaded.',
     saveFailed: 'The setting could not be saved. The latest configuration has been reloaded.',
     saved: 'Setting saved.',
+    unsaved: 'Unsaved changes',
+    discardTitle: 'Discard unsaved changes?',
+    discardDescription: 'Your settings edits will be lost.',
+    keepEditing: 'Keep editing',
+    discard: 'Discard changes',
     search: 'Search settings',
     noSearchResults: 'No settings match your search.',
     advanced: 'Advanced',
@@ -668,10 +673,8 @@ export const messages = {
     title: 'Agent sessions',
     description:
       'Catalog exact Codex thread IDs, assess honest restore support, and manage forks, teams, and attention.',
-    assessmentOnlyDescription:
-      'Review cataloged sessions and assess their restore support.',
-    nodeProviderDescription:
-      'Review cataloged sessions and use the available Codex actions.',
+    assessmentOnlyDescription: 'Review cataloged sessions and assess their restore support.',
+    nodeProviderDescription: 'Review cataloged sessions and use the available Codex actions.',
     loadFailed: 'Agent sessions could not be loaded.',
     operationFailed: 'The agent session operation failed.',
     register: 'Register Codex thread',

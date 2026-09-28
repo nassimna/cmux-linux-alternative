@@ -3586,6 +3586,10 @@ function PaneTabUtilities({
           onChange={(event) => {
             const [kind, targetPaneId, direction] = event.currentTarget.value.split(':')
             event.currentTarget.value = ''
+            if (kind === 'previous' || kind === 'next') {
+              move(kind === 'previous' ? -1 : 1)
+              return
+            }
             const targetPane = workspace.panes.find((candidate) => candidate.id === targetPaneId)
             if (!targetPane) return
             const source = { tabId: tab.id, sourcePaneId: pane.id }
@@ -3605,6 +3609,12 @@ function PaneTabUtilities({
           title={messages.workspaceShell.tab.keyboardDestinations}
         >
           <option value="">{messages.workspaceShell.tab.destinations}</option>
+          <option disabled={index === 0} value="previous">
+            {messages.workspaceShell.tab.moveLeft(title)}
+          </option>
+          <option disabled={index === pane.tabIds.length - 1} value="next">
+            {messages.workspaceShell.tab.moveRight(title)}
+          </option>
           {workspace.panes.map((targetPane) => (
             <option key={`move:${targetPane.id}`} value={`move:${targetPane.id}`}>
               {messages.workspaceShell.tab.moveToPane(paneLabel(targetPane, workspace))}
@@ -4455,6 +4465,8 @@ export function SettingsDialog({
 }): React.JSX.Element {
   const [activeSection, setActiveSection] = useState<SettingsSectionId>('appearance')
   const [settingsQuery, setSettingsQuery] = useState('')
+  const [configurationDirty, setConfigurationDirty] = useState(false)
+  const [confirmDiscard, setConfirmDiscard] = useState(false)
   const [drafts, setDrafts] = useState<Record<string, string>>(() =>
     Object.fromEntries(shortcuts.map((item) => [item.commandId, item.effectiveShortcut ?? '']))
   )
@@ -4486,13 +4498,33 @@ export function SettingsDialog({
     const query = settingsQuery.trim().toLocaleLowerCase()
     return !query || `${label} ${keywords}`.toLocaleLowerCase().includes(query)
   })
+  const shortcutsDirty = shortcuts.some(
+    (setting) => (drafts[setting.commandId]?.trim() || null) !== setting.effectiveShortcut
+  )
+  const hasUnsavedChanges = configurationDirty || shortcutsDirty
+  const configurationSection =
+    activeSection === 'remote' || activeSection === 'shortcuts' ? 'appearance' : activeSection
+  const configurationVisible =
+    visibleSettingsSections.length > 0 &&
+    activeSection !== 'remote' &&
+    activeSection !== 'shortcuts'
+  const requestOpenChange = (next: boolean): void => {
+    if (!next && hasUnsavedChanges) {
+      setConfirmDiscard(true)
+      return
+    }
+    onOpenChange(next)
+  }
   return (
-    <Dialog onOpenChange={onOpenChange} open={open}>
+    <Dialog onOpenChange={requestOpenChange} open={open}>
       <DialogContent className="settings-dialog" showClose={false}>
         <aside className="settings-navigation">
           <DialogHeader>
             <DialogTitle>{messages.workspaceShell.settingsShortcuts.title}</DialogTitle>
             <DialogDescription>{messages.settings.description}</DialogDescription>
+            {hasUnsavedChanges ? (
+              <small className="settings-unsaved">{messages.settings.unsaved}</small>
+            ) : null}
           </DialogHeader>
           <label className="settings-search">
             <Search aria-hidden="true" size={14} />
@@ -4529,7 +4561,7 @@ export function SettingsDialog({
           <IconButton
             aria-label={messages.ui.closeDialog}
             className="settings-close"
-            onClick={() => onOpenChange(false)}
+            onClick={() => requestOpenChange(false)}
             tooltip={messages.ui.closeDialog}
           >
             <X size={16} />
@@ -4655,23 +4687,45 @@ export function SettingsDialog({
                 })}
               </div>
             </>
-          ) : (
-            <>
-              <div className="settings-content-heading">
-                <h2>{SETTINGS_SECTIONS.find(({ id }) => id === activeSection)?.label}</h2>
-                <p>{messages.settings.description}</p>
-              </div>
-              <ConfigurationSettings
-                activeSection={activeSection}
-                configurationV2={configurationV2}
-                nodePreview={nodePreview ?? false}
-                readOnly={configurationReadOnly ?? false}
-                open={open}
-              />
-            </>
-          )}
+          ) : null}
+          <div hidden={!configurationVisible}>
+            <div className="settings-content-heading">
+              <h2>{SETTINGS_SECTIONS.find(({ id }) => id === configurationSection)?.label}</h2>
+              <p>{messages.settings.description}</p>
+            </div>
+            <ConfigurationSettings
+              activeSection={configurationSection}
+              configurationV2={configurationV2}
+              nodePreview={nodePreview ?? false}
+              onDirtyChange={setConfigurationDirty}
+              readOnly={configurationReadOnly ?? false}
+              open={open}
+            />
+          </div>
         </div>
       </DialogContent>
+      <Dialog onOpenChange={setConfirmDiscard} open={confirmDiscard}>
+        <DialogContent showClose={false}>
+          <DialogHeader>
+            <DialogTitle>{messages.settings.discardTitle}</DialogTitle>
+            <DialogDescription>{messages.settings.discardDescription}</DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button onClick={() => setConfirmDiscard(false)} variant="ghost">
+              {messages.settings.keepEditing}
+            </Button>
+            <Button
+              onClick={() => {
+                setConfirmDiscard(false)
+                onOpenChange(false)
+              }}
+              variant="destructive"
+            >
+              {messages.settings.discard}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </Dialog>
   )
 }

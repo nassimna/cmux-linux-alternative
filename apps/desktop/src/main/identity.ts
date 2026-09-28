@@ -1,5 +1,5 @@
 export const APPLICATION_ID = 'agent-workspace'
-export const PRODUCT_NAME = 'Agent Workspace'
+export const PRODUCT_NAME = 'Ternline'
 export const SERVICE_BINARY_NAME = 'agent-workspace-service'
 export const CLI_BINARY_NAME = 'agent-workspace-cli'
 export const CLI_SESSION_FILE_NAME = 'cli-session.json'

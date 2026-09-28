@@ -83,6 +83,21 @@ describe('BrowserToolbar', () => {
     expect(bridge.navigateBrowser).not.toHaveBeenCalled()
   })
 
+  it('keeps the typed address available after navigation fails', async () => {
+    const bridge = createBridge()
+    vi.mocked(bridge.navigateBrowser).mockRejectedValueOnce(new Error('navigation failed'))
+    const owner = createOwner()
+    render(<BrowserToolbar bridge={bridge} {...owner} state={state()} />)
+    const address = screen.getByRole('textbox', { name: 'Address' })
+
+    fireEvent.change(address, { target: { value: 'docs.example.com/guide' } })
+    fireEvent.keyDown(address, { key: 'Enter' })
+    fireEvent.blur(address)
+
+    await waitFor(() => expect(owner.onError).toHaveBeenCalledOnce())
+    expect(address).toHaveValue('docs.example.com/guide')
+  })
+
   it('routes enabled navigation, external open, and developer tools through the bridge', () => {
     const bridge = createBridge()
     const owner = createOwner()

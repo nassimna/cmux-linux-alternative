@@ -71,6 +71,7 @@ test('installs and atomically updates the AppImage, icon, and desktop entry', as
 
     const desktopEntry = await readFile(installed.desktopEntry, 'utf8')
     assert.match(desktopEntry, /^\[Desktop Entry\]\nType=Application\n/u)
+    assert.match(desktopEntry, /\nName=Ternline\n/u)
     assert.match(desktopEntry, /\nIcon=agent-workspace\n/u)
     assert.match(
       desktopEntry,

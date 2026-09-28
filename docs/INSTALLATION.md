@@ -59,14 +59,12 @@ agent-workspace
 
 Deb/rpm packages install a desktop entry through the package manager. AppImage desktop-menu
 integration depends on the user's AppImage integration tooling and is not performed by the app.
-The package includes an original project icon in the standard Linux hicolor sizes. The icon remains
-temporary until the public project identity is selected.
+The package includes the Ternline icon in the standard Linux hicolor sizes.
 
 ## User data and runtime files
 
-Electron's Linux user-data root is normally `$XDG_CONFIG_HOME/Agent Workspace`, or
-`~/.config/Agent Workspace` when `XDG_CONFIG_HOME` is unset. The exact root follows Electron's
-`userData` path for the current product name. Important children are:
+Ternline keeps the existing Linux user-data root at `$XDG_CONFIG_HOME/Agent Workspace`, or
+`~/.config/Agent Workspace` when `XDG_CONFIG_HOME` is unset. Important children are:
 
 ```text
 configuration/desktop.json

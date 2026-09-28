@@ -51,7 +51,11 @@ type SlotV2Event = {
     reason: 'slotReplaced' | 'resyncRequired'
   }
 }
-export type CardSlotAttentionEvent = AttentionEvent | SlotEvent | SlotV2Event
+type ProjectionEvent = {
+  event: 'workspace.projectionInvalidated'
+  data: { revision: number }
+}
+export type CardSlotAttentionEvent = AttentionEvent | SlotEvent | SlotV2Event | ProjectionEvent
 
 export class CardSlotAttentionError extends Error {
   constructor(
@@ -205,6 +209,14 @@ export class CardSlotAttentionService {
   resyncEvents(): CardSlotAttentionEvent[] {
     this.refreshAttention()
     return [
+      ...(this.lastApplicationRevision > 0
+        ? [
+            {
+              event: 'workspace.projectionInvalidated',
+              data: { revision: this.lastApplicationRevision }
+            } as ProjectionEvent
+          ]
+        : []),
       ...[...this.attention.values()].map((snapshot): SlotEvent => ({
         event: 'workspace.cardSlotsChanged',
         data: {
@@ -362,6 +374,7 @@ export class CardSlotAttentionService {
   refreshAttention(): void {
     const state = this.readState()
     if (state.revision < this.lastApplicationRevision) return
+    const previousRevision = this.lastApplicationRevision
     this.prune(state)
     const events: AttentionEvent[] = []
     for (const workspace of state.workspaces) {
@@ -384,6 +397,12 @@ export class CardSlotAttentionService {
       this.attention.set(id, next)
     }
     this.lastApplicationRevision = state.revision
+    if (state.revision > previousRevision) {
+      this.emit({
+        event: 'workspace.projectionInvalidated',
+        data: { revision: state.revision }
+      })
+    }
     for (const event of events) this.emit(event)
   }
 

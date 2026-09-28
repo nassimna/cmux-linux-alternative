@@ -63,7 +63,7 @@ import {
   type RustNamedCommand
 } from './rust-named-commands'
 
-const HELP = `Agent Workspace CLI
+const HELP = `Ternline CLI
 
 Usage:
   agent-workspace-cli [--session-file PATH] identify

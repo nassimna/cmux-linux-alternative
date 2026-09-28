@@ -97,7 +97,7 @@ export interface DesktopMessages {
 }
 
 export const desktopMessages: DesktopMessages = {
-  applicationName: 'Agent Workspace',
+  applicationName: 'Ternline',
   applicationMenu: {
     file: 'File',
     edit: 'Edit',

@@ -1068,6 +1068,10 @@ describe('App', () => {
     expect(moveRight.querySelector('svg')).not.toBeNull()
     expect(moveLeft).not.toHaveTextContent('‹')
     expect(moveRight).not.toHaveTextContent('›')
+    const destinations = screen.getByRole('combobox', { name: 'Move or split M2 tests' })
+    expect(within(destinations).getByRole('option', { name: 'Move M2 tests left' })).toBeEnabled()
+    fireEvent.change(destinations, { target: { value: 'previous' } })
+    await waitFor(() => expect(bridge.moveTab).toHaveBeenCalledOnce())
     expect(screen.getByRole('tabpanel', { name: 'M2 tests' })).toHaveAttribute(
       'id',
       selected.getAttribute('aria-controls')
@@ -1874,6 +1878,54 @@ describe('App', () => {
     expect(screen.getByText('Applies immediately to subsequent service log events.')).toBeVisible()
     fireEvent.click(screen.getByRole('button', { name: 'Updates' }))
     expect(screen.getByRole('combobox', { name: 'Update channel' })).toBeEnabled()
+  })
+
+  it('keeps unsaved terminal edits when another settings section is saved', async () => {
+    const bridge = createBridge()
+    bridge.getConfiguration = vi.fn().mockResolvedValue({ config: configurationFixture })
+    bridge.updateConfiguration = vi.fn().mockResolvedValue({
+      config: {
+        ...configurationFixture,
+        revision: 5,
+        appearance: { ...configurationFixture.appearance, theme: 'light' }
+      }
+    })
+    window.desktopBridge = bridge
+    render(<App />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Open settings' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Terminal' }))
+    fireEvent.change(await screen.findByRole('textbox', { name: 'Shell path' }), {
+      target: { value: '/bin/zsh' }
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Keyboard shortcuts' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Appearance' }))
+    fireEvent.change(screen.getByRole('combobox', { name: 'Theme' }), {
+      target: { value: 'light' }
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Save section' }))
+    await waitFor(() => expect(bridge.updateConfiguration).toHaveBeenCalledOnce())
+
+    fireEvent.click(screen.getByRole('button', { name: 'Terminal' }))
+    expect(screen.getByRole('textbox', { name: 'Shell path' })).toHaveValue('/bin/zsh')
+    expect(screen.getByText('Unsaved changes')).toBeVisible()
+  })
+
+  it('asks before closing settings with unsaved edits', async () => {
+    window.desktopBridge = createBridge()
+    render(<App />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Open settings' }))
+    fireEvent.change(await screen.findByRole('combobox', { name: 'Theme' }), {
+      target: { value: 'light' }
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Close dialog' }))
+
+    expect(await screen.findByRole('dialog', { name: 'Discard unsaved changes?' })).toBeVisible()
+    fireEvent.click(screen.getByRole('button', { name: 'Keep editing' }))
+    expect(screen.getByRole('dialog', { name: 'Settings' })).toBeVisible()
+    fireEvent.click(screen.getByRole('button', { name: 'Close dialog' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Discard changes' }))
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Settings' })).toBeNull())
   })
 
   it('keeps configuration readable but disables its controls in the isolated Node demo', async () => {

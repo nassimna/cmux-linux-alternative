@@ -52,16 +52,22 @@ export function BrowserToolbar({
   const address = editing ? draft : state.url
   const error = validation?.sourceUrl === state.url ? validation.message : null
 
-  const navigate = (): void => {
+  const navigate = async (): Promise<void> => {
     const normalized = normalizeBrowserAddress(address, messages)
     if (!normalized.valid) {
       setValidation({ sourceUrl: state.url, message: normalized.reason })
       return
     }
-    setDraft(normalized.url)
-    setEditing(false)
     setValidation(null)
-    void onMutation(bridge.navigateBrowser({ ...browserCommandParams(state), url: normalized.url }))
+    const succeeded = await onMutation(
+      bridge.navigateBrowser({ ...browserCommandParams(state), url: normalized.url })
+    )
+    if (succeeded) {
+      setDraft(normalized.url)
+      setEditing(false)
+    } else {
+      setEditing(true)
+    }
   }
   const security = browserSecurity(state.url)
   const securityLabel = messages.toolbar.securityLabel(security)
@@ -120,7 +126,7 @@ export function BrowserToolbar({
           onKeyDown={(event) => {
             if (event.key === 'Enter') {
               event.preventDefault()
-              navigate()
+              void navigate()
             } else if (event.key === 'Escape') {
               event.preventDefault()
               event.stopPropagation()

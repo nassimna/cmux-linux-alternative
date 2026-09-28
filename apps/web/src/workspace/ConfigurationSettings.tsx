@@ -15,6 +15,7 @@ interface ConfigurationSettingsProps {
   activeSection: ConfigurationSettingsSection
   configurationV2: boolean
   nodePreview?: boolean
+  onDirtyChange?: (dirty: boolean) => void
   readOnly?: boolean
   open: boolean
 }
@@ -22,10 +23,21 @@ interface ConfigurationSettingsProps {
 export type ConfigurationSettingsSection =
   'appearance' | 'terminal' | 'notifications' | 'updates' | 'advanced'
 
+const editableSections = ['appearance', 'terminal', 'notifications', 'updates', 'logging'] as const
+
+function sectionChanged(
+  current: ConfigurationSnapshot,
+  baseline: ConfigurationSnapshot,
+  section: (typeof editableSections)[number]
+): boolean {
+  return JSON.stringify(current[section]) !== JSON.stringify(baseline[section])
+}
+
 export function ConfigurationSettings({
   activeSection,
   configurationV2,
   nodePreview = false,
+  onDirtyChange,
   readOnly = false,
   open
 }: ConfigurationSettingsProps): React.JSX.Element {
@@ -33,6 +45,7 @@ export function ConfigurationSettings({
   const configurationStatus = useConfigurationStore((state) => state.status)
   const [draft, setDraft] = useState<ConfigurationSnapshot | null>(null)
   const draftRef = useRef<ConfigurationSnapshot | null>(null)
+  const baselineRef = useRef<ConfigurationSnapshot | null>(null)
   const themeSelectRef = useRef<HTMLSelectElement | null>(null)
   const densitySelectRef = useRef<HTMLSelectElement | null>(null)
   const fontFamilyInputRef = useRef<HTMLInputElement | null>(null)
@@ -53,10 +66,30 @@ export function ConfigurationSettings({
     if (!open || !config) return
     queueMicrotask(() => {
       const next = structuredClone(config)
+      const previous = baselineRef.current
+      const current = draftRef.current
+      if (previous && current) {
+        for (const section of editableSections) {
+          if (sectionChanged(current, previous, section)) {
+            Object.assign(next, { [section]: current[section] })
+          }
+        }
+      }
+      baselineRef.current = config
       draftRef.current = next
       setDraft(next)
     })
   }, [config, open])
+
+  useEffect(() => {
+    onDirtyChange?.(
+      Boolean(
+        config &&
+        draft &&
+        editableSections.some((section) => sectionChanged(draft, config, section))
+      )
+    )
+  }, [config, draft, onDirtyChange])
 
   const adoptDraft = (next: ConfigurationSnapshot): void => {
     draftRef.current = next
@@ -114,12 +147,24 @@ export function ConfigurationSettings({
         expectedRevision: currentConfig.revision,
         update: createUpdate(currentDraft)
       })
+      adoptDraft({ ...currentDraft, [section]: result.config[section] })
       useConfigurationStore.getState().apply(result.config)
-      adoptDraft(structuredClone(result.config))
       setStatus(messages.settings.saved)
     } catch (error) {
       const latest = await useConfigurationStore.getState().refresh()
-      if (latest) adoptDraft(structuredClone(latest))
+      if (latest) {
+        const next = structuredClone(latest)
+        for (const editableSection of editableSections) {
+          if (
+            editableSection !== section &&
+            sectionChanged(currentDraft, currentConfig, editableSection)
+          ) {
+            Object.assign(next, { [editableSection]: currentDraft[editableSection] })
+          }
+        }
+        baselineRef.current = latest
+        adoptDraft(next)
+      }
       setStatus(
         error instanceof Error && /conflict|revision|stale/iu.test(error.message)
           ? messages.settings.conflict

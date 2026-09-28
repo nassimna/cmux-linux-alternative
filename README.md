@@ -1,8 +1,8 @@
-# Agent Workspace
+# Ternline
 
-> Working title: `agent-workspace` is a centralized temporary slug, not a selected public name.
+> The internal `agent-workspace` slug remains stable for user data and automation integrations.
 
-Agent Workspace is an independent, clean-room desktop workspace for terminal-driven development
+Ternline is an independent, clean-room desktop workspace for terminal-driven development
 sessions. It does not copy another product's source, assets, identity, or trademarks. Development and validation are Linux-first. The desktop, server, CLI, and shared contracts are TypeScript; the Linux package carries a pinned Node runtime.
 
 This is pre-alpha software. Milestones 0–5 are established on the documented Linux reference host.

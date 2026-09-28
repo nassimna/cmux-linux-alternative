@@ -50,14 +50,35 @@ describe('process-local card slots and attention', () => {
       unreadCount: 2,
       notificationId: errorId
     })
-    expect(events).toEqual(['workspace.cardSlotsChanged'])
+    expect(events).toEqual(['workspace.cardSlotsChanged', 'workspace.projectionInvalidated'])
     const resync = service.resyncEvents()
     expect(resync.filter((event) => event.event === 'workspace.cardSlots.v2Changed')).toHaveLength(
       9
     )
     expect(resync).toContainEqual({
+      event: 'workspace.projectionInvalidated',
+      data: { revision: 1 }
+    })
+    expect(resync).toContainEqual({
       event: 'workspace.cardSlotsChanged',
       data: { workspaceId, slotRevision: 1, reason: 'slotsReplaced' }
+    })
+  })
+
+  it('invalidates the projection when the application revision changes without attention changes', () => {
+    const state = fixture()
+    const service = new CardSlotAttentionService(() => state)
+    service.resyncEvents()
+    const events: string[] = []
+    service.subscribe((event) => events.push(event.event))
+
+    state.revision += 1
+    service.refreshAttention()
+
+    expect(events).toEqual(['workspace.projectionInvalidated'])
+    expect(service.resyncEvents()[0]).toEqual({
+      event: 'workspace.projectionInvalidated',
+      data: { revision: 2 }
     })
   })
 

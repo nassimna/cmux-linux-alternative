@@ -2,7 +2,7 @@ import { dirname, join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { execFile } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
-import { constants } from 'node:fs'
+import { constants, mkdirSync } from 'node:fs'
 import { lstat, mkdir, open } from 'node:fs/promises'
 import { promisify } from 'node:util'
 
@@ -3462,6 +3462,23 @@ async function connectNativeNodeEvents(sidecar: NodeSidecar): Promise<void> {
   })
   await sidecar.startWorkspaceEvents((channel, event, workspaceId) => {
     if (!nodeCoreDemoReady || nodeSidecar !== sidecar) return
+    if (channel === DESKTOP_IPC.domainResyncRequired) {
+      void sidecar.client
+        .listWorkspaces()
+        .then((projection) => {
+          for (const browserViews of nodeBrowserViews.values()) {
+            browserViews.reconcileAuthoritativeSnapshot(projection, false)
+          }
+        })
+        .catch((error) => console.error('[node] projection reconciliation failed', error))
+        .finally(() => {
+          for (const { window } of windowRegistry.list()) {
+            if (!window.isDestroyed()) window.webContents.send(channel, event)
+          }
+        })
+      return
+    }
+    if (!workspaceId) return
     void Promise.all([sidecar.client.stateSnapshot(), sidecar.client.listWorkspaces()])
       .then(([{ snapshot }, projection]) => {
         for (const browserViews of nodeBrowserViews.values()) {
@@ -3571,6 +3588,11 @@ const quitOrchestrator = new ApplicationQuitOrchestrator({
   logFailure: (message) => console.error(message),
   quit: () => app.quit()
 })
+
+// Preserve existing user data across the displayed product name change.
+const userDataDirectory = join(app.getPath('appData'), 'Agent Workspace')
+mkdirSync(userDataDirectory, { recursive: true })
+app.setPath('userData', userDataDirectory)
 
 if (!app.requestSingleInstanceLock()) {
   app.quit()

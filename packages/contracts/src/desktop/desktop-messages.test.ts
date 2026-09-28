@@ -4,7 +4,7 @@ import { desktopMessages } from './desktop-messages'
 
 describe('desktop message catalog', () => {
   it('centralizes the application identity and explicit native menu labels', () => {
-    expect(desktopMessages.applicationName).toBe('Agent Workspace')
+    expect(desktopMessages.applicationName).toBe('Ternline')
     expect(desktopMessages.applicationMenu).toEqual({
       file: 'File',
       edit: 'Edit',

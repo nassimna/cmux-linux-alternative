@@ -1,5 +1,5 @@
 appId: dev.agentworkspace.desktop
-productName: Agent Workspace
+productName: Ternline
 asar: true
 afterPack: ./scripts/after-pack.mjs
 directories:
@@ -21,9 +21,9 @@ linux:
   category: Development
   executableName: agent-workspace
   artifactName: agent-workspace-${version}-x86_64.${ext}
-  maintainer: Agent Workspace contributors
-  vendor: Agent Workspace contributors
-  synopsis: Cross-platform workspace for agent-driven development
+  maintainer: Ternline contributors
+  vendor: Ternline contributors
+  synopsis: Terminal workspace for local and remote development
   syncDesktopName: true
   desktop:
     entry:
@@ -68,4 +68,4 @@ nsis:
   createDesktopShortcut: true
   createStartMenuShortcut: true
   deleteAppDataOnUninstall: false
-  uninstallDisplayName: Agent Workspace
+  uninstallDisplayName: Ternline

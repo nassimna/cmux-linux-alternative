@@ -706,12 +706,10 @@ button {
 }
 
 .mark {
-  width: 9px;
-  height: 9px;
+  width: 18px;
+  height: 18px;
   flex: 0 0 auto;
-  border: var(--aw-border-width-strong) solid var(--aw-color-accent);
-  border-radius: var(--aw-radius-xs);
-  transform: rotate(45deg);
+  background: url('/favicon.svg') center / contain no-repeat;
 }
 
 .service-version {
@@ -1250,7 +1248,7 @@ button {
 
 .sidebar-footer {
   display: flex;
-  height: 27px;
+  height: 22px;
   align-items: center;
   justify-content: flex-end;
   padding: 0 12px;
@@ -2354,8 +2352,7 @@ button {
 }
 
 @container pane (max-width: 260px) {
-  .pane-tab-utilities .tab-keyboard-move,
-  .pane-tab-utilities .tab-drop-actions-control {
+  .pane-tab-utilities .tab-keyboard-move {
     display: none;
   }
 }
@@ -2534,8 +2531,8 @@ button {
   overflow: hidden;
   color: var(--aw-color-text-muted);
   font-family: var(--aw-font-mono);
-  font-size: var(--aw-font-size-2xs);
-  border-top: var(--aw-border-width) solid var(--aw-color-surface-interactive);
+  font-size: var(--aw-font-size-xs);
+  border-top: var(--aw-border-width) solid var(--aw-color-border-default);
   background: var(--aw-color-surface-sidebar);
 }
 
@@ -2610,9 +2607,8 @@ button {
 }
 
 .mark.large {
-  width: 24px;
-  height: 24px;
-  border-width: var(--aw-border-width-attention);
+  width: 32px;
+  height: 32px;
 }
 
 .dialog-form {
@@ -2797,6 +2793,11 @@ kbd {
   padding: 0 8px;
 }
 
+.settings-unsaved {
+  color: var(--aw-color-warning);
+  font-size: var(--aw-font-size-label);
+}
+
 .settings-navigation nav {
   display: grid;
   align-content: start;
@@ -2893,7 +2894,7 @@ kbd {
 
 .settings-content-heading p {
   color: var(--aw-color-text-muted);
-  font-size: var(--aw-font-size-xs);
+  font-size: var(--aw-font-size-label);
 }
 
 .settings-empty-search {
@@ -3273,7 +3274,7 @@ kbd {
   margin: 0;
   padding: 7px 9px;
   color: var(--aw-color-text-secondary);
-  font-size: var(--aw-font-size-xs);
+  font-size: var(--aw-font-size-label);
   border: var(--aw-border-width) solid var(--aw-color-border-default);
   border-radius: var(--aw-radius-sm);
   background: var(--aw-color-surface-raised);
@@ -3292,7 +3293,7 @@ kbd {
 .configuration-section h3 {
   margin: 0;
   color: var(--aw-color-text-secondary);
-  font-size: var(--aw-font-size-xs);
+  font-size: var(--aw-font-size-label);
   letter-spacing: 0.07em;
   text-transform: uppercase;
 }
@@ -3300,7 +3301,7 @@ kbd {
 .configuration-deferred {
   margin: 0;
   color: var(--aw-color-text-muted);
-  font-size: var(--aw-font-size-2xs);
+  font-size: var(--aw-font-size-label);
   line-height: var(--aw-line-height-relaxed);
 }
 
@@ -3321,17 +3322,17 @@ kbd {
   gap: 4px;
   min-width: 0;
   color: var(--aw-color-text-secondary);
-  font-size: var(--aw-font-size-2xs);
+  font-size: var(--aw-font-size-label);
 }
 
 .configuration-field input,
 .configuration-field select {
   width: 100%;
   min-width: 0;
-  height: 28px;
+  height: 32px;
   padding: 0 7px;
   color: var(--aw-color-text-primary);
-  font-size: var(--aw-font-size-xs);
+  font-size: var(--aw-font-size-control);
   border: var(--aw-border-width) solid var(--aw-color-border-default);
   border-radius: var(--aw-radius-sm);
   background: var(--aw-color-surface-canvas);
@@ -3342,7 +3343,7 @@ kbd {
   gap: 7px;
   align-items: center;
   min-height: 28px;
-  font-size: var(--aw-font-size-xs);
+  font-size: var(--aw-font-size-label);
 }
 
 .configuration-check input {
@@ -3465,11 +3466,16 @@ kbd {
     gap: 4px;
     overflow-x: auto;
     overscroll-behavior-x: contain;
-    scrollbar-width: none;
+    scrollbar-color: var(--aw-color-border-strong) transparent;
+    scrollbar-width: thin;
   }
 
   .settings-navigation nav::-webkit-scrollbar {
-    display: none;
+    height: 6px;
+  }
+
+  .settings-navigation nav::-webkit-scrollbar-thumb {
+    background: var(--aw-color-border-strong);
   }
 
   .settings-navigation nav button {

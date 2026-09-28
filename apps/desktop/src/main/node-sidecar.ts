@@ -660,7 +660,7 @@ export class NodeSidecar {
   private workspaceEventRetry: NodeJS.Timeout | undefined
   private workspaceEventRetryMs = 1_000
   private workspaceEventSink:
-    ((channel: string, event: unknown, workspaceId: string) => void) | undefined
+    ((channel: string, event: unknown, workspaceId?: string) => void) | undefined
   private browserEventSink:
     ((workspaceId: string, event: DomainEventMessage) => Promise<void>) | undefined
 
@@ -1293,7 +1293,7 @@ export class NodeSidecar {
 
   /** Desktop-main-only, authenticated stream for process-local card and attention changes. */
   public async startWorkspaceEvents(
-    emit: (channel: string, event: unknown, workspaceId: string) => void
+    emit: (channel: string, event: unknown, workspaceId?: string) => void
   ): Promise<void> {
     if (this.stopped || this.workspaceEventSink) {
       throw new Error('Node workspace event stream is unavailable')
@@ -1319,6 +1319,17 @@ export class NodeSidecar {
       socket.on('message', (data) => {
         try {
           const frame = JSON.parse(socketText(data)) as { event?: string }
+          if (frame.event === 'workspace.projectionInvalidated') {
+            const revision = (frame as { data?: { revision?: unknown } }).data?.revision
+            if (typeof revision !== 'number' || !Number.isSafeInteger(revision) || revision < 1) {
+              throw new Error('Invalid Node projection revision')
+            }
+            this.workspaceEventSink?.(DESKTOP_IPC.domainResyncRequired, {
+              expectedRevision: revision - 1,
+              receivedRevision: revision
+            })
+            return
+          }
           let channel: string
           let event: { data: { workspaceId: string } }
           switch (frame.event) {

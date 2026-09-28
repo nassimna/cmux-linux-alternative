@@ -98,8 +98,8 @@ function createDesktopEntry(appImagePath) {
   return [
     '[Desktop Entry]',
     'Type=Application',
-    'Name=Agent Workspace',
-    'Comment=Cross-platform workspace for agent-driven development',
+    'Name=Ternline',
+    'Comment=Terminal workspace for local and remote development',
     `Exec=${escapeDesktopExecArgument(appImagePath)}`,
     'Icon=agent-workspace',
     'Terminal=false',
