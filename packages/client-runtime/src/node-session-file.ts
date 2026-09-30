@@ -1,8 +1,9 @@
 import { randomUUID } from 'node:crypto'
-import { constants, existsSync } from 'node:fs'
+import { constants, existsSync, realpathSync } from 'node:fs'
 import { link, lstat, open, realpath, unlink } from 'node:fs/promises'
 import { homedir, tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
+import { connect } from 'node:net'
 
 import { nodeSessionRecordSchema, type NodeSessionRecord } from '@agent-workspace/contracts'
 
@@ -14,28 +15,62 @@ export function resolveNodeSessionFile(explicit?: string): string {
   if (process.env.AGENT_WORKSPACE_NODE_SESSION_FILE) {
     return process.env.AGENT_WORKSPACE_NODE_SESSION_FILE
   }
-  const desktopSession = join(
-    process.env.XDG_CONFIG_HOME || join(homedir(), '.config'),
-    '@agent-workspace',
-    'desktop',
-    'runtime',
-    'node-cli-session.json'
-  )
-  if (existsSync(desktopSession)) return desktopSession
+  const desktopSessions =
+    process.platform === 'darwin'
+      ? [
+          join(
+            homedir(),
+            'Library',
+            'Application Support',
+            'Agent Workspace',
+            'runtime',
+            'node-cli-session.json'
+          ),
+          join(
+            homedir(),
+            'Library',
+            'Application Support',
+            'Ternline',
+            'runtime',
+            'node-cli-session.json'
+          )
+        ]
+      : [
+          join(
+            process.env.XDG_CONFIG_HOME || join(homedir(), '.config'),
+            '@agent-workspace',
+            'desktop',
+            'runtime',
+            'node-cli-session.json'
+          )
+        ]
+  const desktopSession = desktopSessions.find((candidate) => existsSync(candidate))
+  if (desktopSession) return desktopSession
+  let temporaryRoot = tmpdir()
+  if (process.platform === 'darwin') {
+    try {
+      temporaryRoot = realpathSync(temporaryRoot)
+    } catch {
+      // The normal temporary directory is still the best fallback if it vanishes.
+    }
+  }
   const root = process.env.XDG_RUNTIME_DIR
     ? join(process.env.XDG_RUNTIME_DIR, 'agent-workspace')
-    : join(tmpdir(), `agent-workspace-${process.getuid?.() ?? 'unknown'}`)
+    : join(temporaryRoot, `agent-workspace-${process.getuid?.() ?? 'unknown'}`)
   return join(root, 'node-cli-session.json')
 }
 
-function requireLinux(): void {
-  if (process.platform !== 'linux' || process.getuid === undefined) {
-    throw new Error('Node CLI discovery currently supports Linux only')
+function requireUnix(): void {
+  if (
+    (process.platform !== 'linux' && process.platform !== 'darwin') ||
+    process.getuid === undefined
+  ) {
+    throw new Error('Node CLI discovery currently supports Linux and macOS only')
   }
 }
 
 async function privateDirectory(path: string): Promise<void> {
-  requireLinux()
+  requireUnix()
   const [actual, metadata] = await Promise.all([realpath(path), lstat(path)])
   if (
     actual !== path ||
@@ -94,10 +129,50 @@ export async function readNodeSessionFile(path: string): Promise<NodeSessionReco
   }
 }
 
-/** Publish one private discovery record without replacing another service's record. */
+function endpointIsClosed(port: number): Promise<boolean> {
+  return new Promise((resolveClosed, rejectClosed) => {
+    const socket = connect({ host: '127.0.0.1', port })
+    socket.setTimeout(1_000)
+    socket.once('connect', () => {
+      socket.destroy()
+      resolveClosed(false)
+    })
+    socket.once('error', (error: NodeJS.ErrnoException) => {
+      socket.destroy()
+      if (error.code === 'ECONNREFUSED') resolveClosed(true)
+      else rejectClosed(error)
+    })
+    socket.once('timeout', () => {
+      socket.destroy()
+      rejectClosed(new Error('Node CLI session endpoint did not respond'))
+    })
+  })
+}
+
+async function removeStaleSession(file: string): Promise<boolean> {
+  const before = await lstat(file)
+  privateFile(before)
+  const previous = await readNodeSessionFile(file)
+  if (!(await endpointIsClosed(Number(new URL(previous.baseUrl).port)))) return false
+  const current = await lstat(file)
+  if (
+    current.dev !== before.dev ||
+    current.ino !== before.ino ||
+    current.size !== before.size ||
+    current.mtimeMs !== before.mtimeMs ||
+    (await readNodeSessionFile(file)).sessionId !== previous.sessionId
+  ) {
+    return false
+  }
+  await unlink(file)
+  return true
+}
+
+/** Publish one private discovery record without replacing a reachable service's record. */
 export async function createNodeSessionFile(
   path: string,
-  value: NodeSessionRecord
+  value: NodeSessionRecord,
+  options: { recoverStale?: boolean } = {}
 ): Promise<{ remove(): Promise<void> }> {
   const file = resolve(path)
   const parent = dirname(file)
@@ -117,7 +192,18 @@ export async function createNodeSessionFile(
     await handle.writeFile(encoded)
     await handle.sync()
     await handle.close()
-    await link(temporary, file)
+    try {
+      await link(temporary, file)
+    } catch (error) {
+      if (
+        options.recoverStale !== true ||
+        (error as NodeJS.ErrnoException).code !== 'EEXIST' ||
+        !(await removeStaleSession(file))
+      ) {
+        throw error
+      }
+      await link(temporary, file)
+    }
     published = true
     await unlink(temporary)
     const directory = await open(parent, constants.O_RDONLY | constants.O_DIRECTORY)

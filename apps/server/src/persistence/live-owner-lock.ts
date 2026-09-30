@@ -2,7 +2,7 @@ import { spawnSync } from 'node:child_process'
 import { closeSync, constants, fstatSync, lstatSync, openSync, realpathSync } from 'node:fs'
 import { dirname, isAbsolute, resolve } from 'node:path'
 
-/** Linux flock contract shared with the Rust service for the live state database. */
+/** Process ownership fence for the live state database. */
 export class LiveOwnerLock {
   private closed = false
 
@@ -15,8 +15,12 @@ export class LiveOwnerLock {
   ) {}
 
   static acquire(databasePath: string): LiveOwnerLock {
-    if (process.platform !== 'linux' || !process.getuid || !isAbsolute(databasePath)) {
-      throw new Error('Live ownership requires an absolute Linux state path')
+    if (
+      (process.platform !== 'linux' && process.platform !== 'darwin') ||
+      !process.getuid ||
+      !isAbsolute(databasePath)
+    ) {
+      throw new Error('Live ownership requires an absolute Unix state path')
     }
     if (resolve(databasePath) !== databasePath) {
       throw new Error('Live state path must be canonical')
@@ -111,12 +115,16 @@ function acquireFence(path: string, name: string): number {
     ) {
       throw new Error(`${name} lock file is unsafe`)
     }
-    // flock locks the shared open-file description passed as descriptor 3. The
-    // lock survives the short helper process and remains held by this fd.
-    const result = spawnSync('/usr/bin/flock', ['-n', '3'], {
-      stdio: ['ignore', 'ignore', 'pipe', fd],
-      timeout: 5_000
-    })
+    // Both helpers lock the shared open-file description passed as descriptor
+    // 3. The lock survives the short helper process and remains held by this fd.
+    const result = spawnSync(
+      process.platform === 'darwin' ? '/usr/bin/lockf' : '/usr/bin/flock',
+      process.platform === 'darwin' ? ['-t', '0', '3'] : ['-n', '3'],
+      {
+        stdio: ['ignore', 'ignore', 'pipe', fd],
+        timeout: 5_000
+      }
+    )
     if (result.status !== 0) {
       throw new Error(`Live state is already owned or the ${name} fence is unavailable`)
     }

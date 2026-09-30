@@ -148,7 +148,7 @@ Usage:
   agent-workspace-cli [--session-file PATH] browser-automation list
   agent-workspace-cli [--session-file PATH] browser-automation create|get|execute|cancel|read|release|destroy --params-json JSON
 
-On Linux, --session-file is optional when the desktop published its private Node
+On Linux and macOS, --session-file is optional when the desktop published its private Node
 discovery record. AGENT_WORKSPACE_NODE_SESSION_FILE can override that path. The record must be
 owned by the current user and readable only by that user. Notifications use the
 focused window/workspace unless --window-id/--workspace-id or

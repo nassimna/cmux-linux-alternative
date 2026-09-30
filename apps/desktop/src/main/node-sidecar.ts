@@ -1083,8 +1083,8 @@ export class NodeSidecar {
 
   /** Start the production Node owner without a Rust service or copied database. */
   static async startNative(options: NodeSidecarNativeOptions): Promise<NodeSidecar> {
-    if (process.platform !== 'linux' || !process.getuid) {
-      throw new Error('Native Node desktop ownership requires Linux')
+    if ((process.platform !== 'linux' && process.platform !== 'darwin') || !process.getuid) {
+      throw new Error('Native Node desktop ownership requires Linux or macOS')
     }
     for (const path of [
       options.serverPath,

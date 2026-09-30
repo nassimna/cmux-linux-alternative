@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, rmSync } from 'node:fs'
+import { existsSync, mkdtempSync, realpathSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -8,7 +8,7 @@ import { ApplicationStateStore } from './application-state-store'
 
 describe('native Node profile', () => {
   it('creates a valid durable workspace and reopens it without replacing the database', async () => {
-    const root = mkdtempSync(join(tmpdir(), 'agent-workspace-native-test-'))
+    const root = mkdtempSync(join(realpathSync(tmpdir()), 'agent-workspace-native-test-'))
     try {
       const path = join(root, 'state.sqlite')
       const backup = join(root, 'pre-node.sqlite')

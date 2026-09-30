@@ -1,7 +1,8 @@
 import { randomUUID } from 'node:crypto'
-import { chmod, lstat, mkdtemp, rm, symlink, unlink } from 'node:fs/promises'
+import { chmod, lstat, mkdtemp, realpath, rm, symlink, unlink } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { createServer } from 'node:net'
 
 import { createNodeSessionFile, readNodeSessionFile } from '@agent-workspace/client-runtime'
 import { expect, it } from 'vitest'
@@ -14,10 +15,10 @@ const record = () => ({
   sessionId: randomUUID()
 })
 
-it.skipIf(process.platform !== 'linux')(
+it.skipIf(process.platform !== 'linux' && process.platform !== 'darwin')(
   'publishes an owner-only record, rejects insecure paths, and preserves a newer session',
   async () => {
-    const directory = await mkdtemp(join(tmpdir(), 'agent-workspace-node-session-'))
+    const directory = await mkdtemp(join(await realpath(tmpdir()), 'agent-workspace-node-session-'))
     const path = join(directory, 'session.json')
     const alias = join(directory, 'session-link.json')
     try {
@@ -45,6 +46,38 @@ it.skipIf(process.platform !== 'linux')(
       await newGuard.remove()
       await expect(lstat(path)).rejects.toMatchObject({ code: 'ENOENT' })
     } finally {
+      await rm(directory, { recursive: true, force: true })
+    }
+  }
+)
+
+it.skipIf(process.platform !== 'linux' && process.platform !== 'darwin')(
+  'recovers a stale CLI session without replacing a reachable service',
+  async () => {
+    const directory = await mkdtemp(join(await realpath(tmpdir()), 'agent-workspace-stale-session-'))
+    const path = join(directory, 'session.json')
+    const server = createServer((socket) => socket.end())
+    try {
+      await new Promise<void>((resolveListen) => server.listen(0, '127.0.0.1', resolveListen))
+      const address = server.address()
+      if (!address || typeof address === 'string') throw new Error('No loopback address')
+      const previous = { ...record(), baseUrl: `http://127.0.0.1:${address.port}/` }
+      const oldGuard = await createNodeSessionFile(path, previous)
+
+      await expect(createNodeSessionFile(path, record(), { recoverStale: true })).rejects.toMatchObject({
+        code: 'EEXIST'
+      })
+      expect(await readNodeSessionFile(path)).toEqual(previous)
+
+      await new Promise<void>((resolveClose) => server.close(() => resolveClose()))
+      const replacement = record()
+      const newGuard = await createNodeSessionFile(path, replacement, { recoverStale: true })
+      await oldGuard.remove()
+      expect(await readNodeSessionFile(path)).toEqual(replacement)
+      await newGuard.remove()
+      await expect(lstat(path)).rejects.toMatchObject({ code: 'ENOENT' })
+    } finally {
+      if (server.listening) await new Promise<void>((resolveClose) => server.close(() => resolveClose()))
       await rm(directory, { recursive: true, force: true })
     }
   }

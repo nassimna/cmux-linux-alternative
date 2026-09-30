@@ -443,6 +443,12 @@ function implicitShellCommand(executable: string): string[] {
   const name = executable.split('/').at(-1)?.toLowerCase()
   if (name === 'nu') return [executable, '--login']
   if (name === 'powershell' || name === 'pwsh') return [executable, '-Login']
+  // macOS zsh emits its PROMPT_SP marker at the top of a fresh node-pty
+  // session because the PTY starts without a completed line. That marker is
+  // rendered as a stray inverse-video "%" above the real prompt.
+  if (process.platform === 'darwin' && name === 'zsh') {
+    return [executable, '-l', '-o', 'no_prompt_sp']
+  }
   return name && ['ash', 'bash', 'dash', 'fish', 'ksh', 'sh', 'zsh'].includes(name)
     ? [executable, '-l']
     : [executable]

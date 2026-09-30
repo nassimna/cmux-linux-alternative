@@ -7,6 +7,10 @@ directories:
 files:
   - out/**/*
   - package.json
+  - from: ../../apps/server/dist
+    to: server/dist
+    filter:
+      - '**/*'
 extraResources:
   - from: node_modules/@fontsource-variable/jetbrains-mono/LICENSE
     to: licenses/JetBrainsMono-OFL-1.1.txt

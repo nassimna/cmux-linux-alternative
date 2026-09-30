@@ -3,7 +3,10 @@ import { existsSync, mkdirSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-if (process.platform !== 'linux') throw new Error('Sealed executable launch requires Linux')
+if (process.platform !== 'linux') {
+  console.log('[server] skipping Linux-only sealed-executable addon')
+  process.exit(0)
+}
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const nodeHeaders = [
   resolve(dirname(process.execPath), '../include/node'),

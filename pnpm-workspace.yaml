@@ -9,6 +9,11 @@ onlyBuiltDependencies:
   - esbuild
   - node-pty
 
+# ssh2 treats cpu-features as an optional acceleration; omitting it keeps
+# Electron packaging from rebuilding a nonessential native addon.
+ignoredOptionalDependencies:
+  - cpu-features
+
 catalog:
   axe-core: 4.12.1
   '@dnd-kit/core': 6.3.1

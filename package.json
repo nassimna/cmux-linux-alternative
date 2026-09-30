@@ -9,6 +9,7 @@
     "node": ">=22.20.0"
   },
   "scripts": {
+    "postinstall": "node scripts/fix-native-executable-permissions.mjs",
     "build": "pnpm build:node && pnpm --filter @agent-workspace/desktop build",
     "build:node": "pnpm --filter @agent-workspace/server build && pnpm --filter @agent-workspace/cli build",
     "stage:node:linux": "pnpm build:node && node scripts/stage-linux-node-runtime.mjs",

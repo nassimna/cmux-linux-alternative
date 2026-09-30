@@ -3361,20 +3361,25 @@ async function startNativeDesktop(userData: string): Promise<void> {
   await mkdir(stateDirectory, { recursive: true, mode: 0o700 })
   await mkdir(runtimeDirectory, { recursive: true, mode: 0o700 })
   const stagedRuntime = join(process.resourcesPath, 'node-linux')
-  const serverPath = app.isPackaged
-    ? join(stagedRuntime, 'server', 'dist', 'bin.mjs')
-    : (process.env.AGENT_WORKSPACE_DESKTOP_NODE_SERVER_PATH ??
-      join(import.meta.dirname, '../../../server/dist/bin.mjs'))
+  const packagedServerPath = join(process.resourcesPath, 'app.asar', 'server', 'dist', 'bin.mjs')
+  const serverPath =
+    app.isPackaged && process.platform === 'linux'
+      ? join(stagedRuntime, 'server', 'dist', 'bin.mjs')
+      : app.isPackaged
+        ? packagedServerPath
+        : (process.env.AGENT_WORKSPACE_DESKTOP_NODE_SERVER_PATH ??
+          join(import.meta.dirname, '../../../server/dist/bin.mjs'))
   const options: Parameters<typeof NodeSidecar.startNative>[0] = {
     serverPath,
-    ...(app.isPackaged ? { executable: join(stagedRuntime, 'bin', 'node') } : {}),
+    ...(app.isPackaged && process.platform === 'linux'
+      ? { executable: join(stagedRuntime, 'bin', 'node') }
+      : {}),
     liveDatabasePath: join(stateDirectory, 'workspace.sqlite'),
     backupPath: join(stateDirectory, 'pre-node-migration.sqlite'),
     native: true,
     sessionFilePath: join(runtimeDirectory, 'node-cli-session.json'),
     defaultWorkingDirectory: app.getPath('home'),
-    encryptedSearch: true,
-    remoteTransport: true
+    ...(process.platform === 'linux' ? { encryptedSearch: true, remoteTransport: true } : {})
   }
   nativeNodeDesktop = true
   registerDesktopLifecycleHandlers(

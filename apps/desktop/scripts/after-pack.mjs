@@ -85,7 +85,9 @@ export default async function applyProductionFuses(context) {
     version: FuseVersion.V1,
     resetAdHocDarwinSignature: context.electronPlatformName === 'darwin' && context.arch === 3,
     strictlyRequireAllFuses: true,
-    [FuseV1Options.RunAsNode]: false,
+    // The packaged Mac sidecar uses Electron's embedded Node runtime. Linux
+    // keeps RunAsNode disabled because it launches the staged Node binary.
+    [FuseV1Options.RunAsNode]: context.electronPlatformName === 'darwin',
     [FuseV1Options.EnableCookieEncryption]: true,
     [FuseV1Options.EnableNodeOptionsEnvironmentVariable]: false,
     [FuseV1Options.EnableNodeCliInspectArguments]: false,

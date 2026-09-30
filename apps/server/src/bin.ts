@@ -438,7 +438,10 @@ async function main(): Promise<void> {
       notificationMutations = new NotificationMutations(statePath, () =>
         cardSlotAttention!.refreshAttention()
       )
-      settingsMutations = new SettingsMutations(statePath, 'nonMac')
+      settingsMutations = new SettingsMutations(
+        statePath,
+        process.platform === 'darwin' ? 'mac' : 'nonMac'
+      )
       if (process.env.AGENT_WORKSPACE_WINDOW_OWNER_CHANNEL === '1') {
         if (!fstatSync(3).isSocket()) {
           throw new Error('Window owner channel requires an inherited private socket')
@@ -702,13 +705,17 @@ async function main(): Promise<void> {
         if (typeof address !== 'object' || !address) throw new Error('Listener has no address')
         const sessionPath = process.env.AGENT_WORKSPACE_NODE_SESSION_FILE
         if (sessionPath) {
-          sessionGuard = await createNodeSessionFile(sessionPath, {
-            application: 'agent-workspace',
-            apiVersion: 1,
-            baseUrl: `http://127.0.0.1:${address.port}/`,
-            token,
-            sessionId: randomUUID()
-          })
+          sessionGuard = await createNodeSessionFile(
+            sessionPath,
+            {
+              application: 'agent-workspace',
+              apiVersion: 1,
+              baseUrl: `http://127.0.0.1:${address.port}/`,
+              token,
+              sessionId: randomUUID()
+            },
+            { recoverStale: native !== undefined || live !== undefined }
+          )
         }
         console.log(`[server] listening on 127.0.0.1:${address.port}`)
       })()
