@@ -45,7 +45,7 @@ agent-workspace-runtime = { path = "crates/workspace-runtime" }
 async-trait = "0.1.89"
 base64 = "0.22.1"
 blake3 = "1.8.2"
-chacha20poly1305 = "0.10.1"
+chacha20poly1305 = "0.11.0"
 clap = { version = "4.5.54", features = ["derive"] }
 interprocess = { version = "2.4.2", features = ["tokio"] }
 listeners = "0.6.0"
