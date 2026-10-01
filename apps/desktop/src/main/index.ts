@@ -71,6 +71,7 @@ import {
   registerMultiWindowDesktopHandlers
 } from './desktop-ipc'
 import { CLI_SESSION_FILE_NAME, PRODUCT_NAME } from './identity'
+import { recoverNodeWindowHosting } from './node-hosting-recovery'
 import { LifecycleController } from './lifecycle-controller'
 import { RENDERER_SCHEME, resolveRendererAsset } from './renderer-protocol'
 import { loadRendererForCurrentLifecycle } from './renderer-load-orchestrator'
@@ -185,6 +186,8 @@ const nodeHostingClaims = new Map<
     sidecar: NodeSidecar
     timer?: NodeJS.Timeout
     pending: boolean
+    recoveryPending: boolean
+    hostingGeneration: number
     registration: Promise<void>
   }
 >()
@@ -195,7 +198,7 @@ function stopNodeHostingForWindow(windowId: string): void {
     nodeHostingClaims.delete(windowId)
     if (claim.timer) clearInterval(claim.timer)
     void claim.sidecar
-      .reconcileHostingForTrustedOwner('revokeHosting', windowId, claim.entry.generation)
+      .reconcileHostingForTrustedOwner('revokeHosting', windowId, claim.hostingGeneration)
       .catch(() => undefined)
   }
   stopNodeAutomationForWindow(windowId, 'Node hosting stopped')
@@ -223,11 +226,19 @@ function startNodeHostingForWindow(
   const previous = nodeHostingClaims.get(entry.windowId)
   if (previous?.entry === entry && previous.sidecar === sidecar) return previous.registration
   if (previous) stopNodeHostingForWindow(entry.windowId)
-  const claim = { entry, sidecar, pending: false } as {
+  const claim = {
+    entry,
+    sidecar,
+    pending: false,
+    recoveryPending: false,
+    hostingGeneration: entry.generation
+  } as {
     entry: WindowRegistryEntry
     sidecar: NodeSidecar
     timer?: NodeJS.Timeout
     pending: boolean
+    recoveryPending: boolean
+    hostingGeneration: number
     registration: Promise<void>
   }
   const current = () =>
@@ -236,8 +247,31 @@ function startNodeHostingForWindow(
     !entry.window.isDestroyed()
   if (!current()) return Promise.reject(new Error('The Node hosting window changed'))
   nodeHostingClaims.set(entry.windowId, claim)
+  const recover = async () => {
+    claim.recoveryPending = true
+    const recovered = await recoverNodeWindowHosting({
+      isCurrent: () => current() && nodeHostingClaims.get(entry.windowId) === claim,
+      stopAutomation: () =>
+        stopNodeAutomationForWindow(entry.windowId, 'Node hosting heartbeat lost'),
+      nextGeneration: () => windowRegistry.reserveHostingGeneration(),
+      registerHosting: async (generation) => {
+        claim.hostingGeneration = generation
+        await sidecar.reconcileHostingForTrustedOwner('registerHosting', entry.windowId, generation)
+      },
+      startAutomation: async () => {
+        const configuration = configurationGetResultSchema.parse(
+          await sidecar.client.getConfiguration()
+        )
+        if (current() && nodeHostingClaims.get(entry.windowId) === claim) {
+          startNodeAutomationForWindow(entry, sidecar, configuration.config.browser.partition)
+        }
+      },
+      logError: (error) => console.error('[node-hosting] recovery attempt failed', error)
+    })
+    if (recovered) claim.recoveryPending = false
+  }
   claim.registration = sidecar
-    .reconcileHostingForTrustedOwner('registerHosting', entry.windowId, entry.generation)
+    .reconcileHostingForTrustedOwner('registerHosting', entry.windowId, claim.hostingGeneration)
     .then(() => {
       if (!current()) {
         if (nodeHostingClaims.get(entry.windowId) === claim)
@@ -252,19 +286,23 @@ function startNodeHostingForWindow(
         }
         if (claim.pending) return
         claim.pending = true
-        void sidecar
-          .reconcileHostingForTrustedOwner('heartbeatHosting', entry.windowId, entry.generation)
-          .then(() => {
-            if (!current() && nodeHostingClaims.get(entry.windowId) === claim)
-              stopNodeHostingForWindow(entry.windowId)
-          })
-          .catch(() => {
-            if (nodeHostingClaims.get(entry.windowId) === claim)
-              stopNodeHostingForWindow(entry.windowId)
-          })
-          .finally(() => {
-            claim.pending = false
-          })
+        const heartbeat = () =>
+          sidecar
+            .reconcileHostingForTrustedOwner(
+              'heartbeatHosting',
+              entry.windowId,
+              claim.hostingGeneration
+            )
+            .then(() => {
+              if (!current() && nodeHostingClaims.get(entry.windowId) === claim)
+                stopNodeHostingForWindow(entry.windowId)
+            })
+            .catch(recover)
+        // Retry the whole recovery even if hosting renewed but configuration
+        // retrieval failed before browser automation could restart.
+        void (claim.recoveryPending ? recover() : heartbeat()).finally(() => {
+          claim.pending = false
+        })
       }, 5_000)
       claim.timer.unref()
     })
@@ -3356,6 +3394,11 @@ async function restartNativeDesktop(
 }
 
 async function startNativeDesktop(userData: string): Promise<void> {
+  if (app.isPackaged && process.platform === 'darwin') {
+    const cliDirectory = join(process.resourcesPath, 'cli')
+    const paths = (process.env.PATH ?? '/usr/bin:/bin:/usr/sbin:/sbin').split(':')
+    process.env.PATH = [cliDirectory, ...paths.filter((path) => path !== cliDirectory)].join(':')
+  }
   const stateDirectory = join(userData, 'state')
   const runtimeDirectory = join(userData, 'runtime')
   await mkdir(stateDirectory, { recursive: true, mode: 0o700 })

@@ -5,7 +5,7 @@ import { URL } from 'node:url'
 
 const target = process.argv[2]
 const targets = {
-  mac: ['--mac', 'dmg', 'zip', '--x64'],
+  mac: ['--mac', 'pkg', 'dmg', 'zip', '--x64'],
   windows: ['--win', 'nsis', '--x64']
 }
 
@@ -44,6 +44,7 @@ if (
 }
 
 const pnpm = process.platform === 'win32' ? 'pnpm.cmd' : 'pnpm'
+if (target === 'mac') run(['--workspace-root', 'build:node'])
 run(['exec', 'electron-vite', 'build'])
 const builderArguments = [
   'exec',

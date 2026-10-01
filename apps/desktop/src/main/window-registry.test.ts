@@ -26,9 +26,7 @@ describe('WindowRegistry', () => {
     registry.rekey('window-before', 'window-after')
     registry.refreshRenderer('window-after')
     await registry.removeWindow(owned.window, 'closed')
-    expect(invalidated.mock.calls).toEqual([
-      ['window-before'], ['window-after'], ['window-after']
-    ])
+    expect(invalidated.mock.calls).toEqual([['window-before'], ['window-after'], ['window-after']])
   })
   it('fails closed and releases a rekeyed binding without dereferencing destroyed WebContents', async () => {
     const registry = new WindowRegistry()
@@ -70,6 +68,16 @@ describe('WindowRegistry', () => {
     )
     expect(() => bounded.refreshRenderer('window-max')).toThrow('generation capacity is exhausted')
     expect(bounded.get('window-max')?.generation).toBe(Number.MAX_SAFE_INTEGER)
+  })
+
+  it('keeps later renderer generations above recovered hosting leases', () => {
+    const registry = new WindowRegistry()
+    const owned = fixture(100)
+    const original = registry.register('window-hosting', owned.window, owned.binding)
+    const hostingGeneration = registry.reserveHostingGeneration()
+    expect(hostingGeneration).toBeGreaterThan(original.generation)
+    expect(registry.get('window-hosting')).toBe(original)
+    expect(registry.refreshRenderer('window-hosting').generation).toBeGreaterThan(hostingGeneration)
   })
 
   it('bounds renderer ownership tombstones and frees capacity after authoritative deletion', () => {

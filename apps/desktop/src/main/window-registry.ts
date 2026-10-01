@@ -172,6 +172,14 @@ export class WindowRegistry {
     return refreshed
   }
 
+  /** A renewed hosting lease must also precede every later renderer generation. */
+  public reserveHostingGeneration(): number {
+    if (this.#nextGeneration === Number.MAX_SAFE_INTEGER) {
+      throw new Error('Window hosting generation capacity is exhausted')
+    }
+    return ++this.#nextGeneration
+  }
+
   public list(): readonly WindowRegistryEntry[] {
     return [...this.#entries.values()]
   }

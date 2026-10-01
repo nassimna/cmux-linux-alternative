@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "bin": {
+    "ternline-cli": "./dist/bin.mjs",
     "agent-workspace-node": "./dist/bin.mjs"
   },
   "scripts": {

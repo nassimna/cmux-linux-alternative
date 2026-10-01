@@ -47,6 +47,11 @@ deb:
     - bubblewrap
     - systemd
 mac:
+  extraResources:
+    - from: ../cli/dist
+      to: cli/dist
+      filter:
+        - '**/*'
   icon: build/icon.svg
   electronUpdaterCompatibility: '>= 2.16'
   category: public.app-category.developer-tools
@@ -54,8 +59,18 @@ mac:
   hardenedRuntime: true
   notarize: true
   target:
+    - pkg
     - dmg
     - zip
+pkg:
+  scripts: ../scripts/mac-pkg
+  installLocation: /Applications
+  isRelocatable: false
+  allowAnywhere: false
+  allowCurrentUserHome: false
+  allowRootDirectory: true
+  mustClose:
+    - dev.agentworkspace.desktop
 win:
   icon: build/icon.svg
   electronUpdaterCompatibility: '>= 2.16'

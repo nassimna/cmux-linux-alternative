@@ -1,10 +1,12 @@
 import { createHash } from 'node:crypto'
 import { createReadStream } from 'node:fs'
-import { cp, lstat, readFile, readdir, realpath } from 'node:fs/promises'
+import { cp, lstat, mkdir, readFile, readdir, realpath, writeFile } from 'node:fs/promises'
 import { join, relative, resolve, sep } from 'node:path'
 import process from 'node:process'
 
 import { flipFuses, FuseV1Options, FuseVersion } from '@electron/fuses'
+
+import { createMacCliLauncher } from './mac-cli-launcher.mjs'
 
 function executablePath(context) {
   const productFilename = context.packager.appInfo.productFilename
@@ -81,6 +83,20 @@ async function includeOptionalLinuxNodeRuntime(context) {
 
 export default async function applyProductionFuses(context) {
   await includeOptionalLinuxNodeRuntime(context)
+  if (context.electronPlatformName === 'darwin') {
+    const productFilename = context.packager.appInfo.productFilename
+    const cliDirectory = join(
+      context.appOutDir,
+      `${productFilename}.app`,
+      'Contents',
+      'Resources',
+      'cli'
+    )
+    await mkdir(cliDirectory, { recursive: true })
+    await writeFile(join(cliDirectory, 'ternline-cli'), createMacCliLauncher(productFilename), {
+      mode: 0o755
+    })
+  }
   await flipFuses(executablePath(context), {
     version: FuseVersion.V1,
     resetAdHocDarwinSignature: context.electronPlatformName === 'darwin' && context.arch === 3,

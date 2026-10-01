@@ -66,87 +66,87 @@ import {
 const HELP = `Ternline CLI
 
 Usage:
-  agent-workspace-cli [--session-file PATH] identify
-  agent-workspace-cli [--session-file PATH] state snapshot
-  agent-workspace-cli [--session-file PATH] settings get
-  agent-workspace-cli [--session-file PATH] closed list
-  agent-workspace-cli [--session-file PATH] closed get --closed-item-id UUID
-  agent-workspace-cli [--session-file PATH] request tab.reopen --params-json JSON
-  agent-workspace-cli [--session-file PATH] request settings.update|settings.resetKey --params-json JSON
-  agent-workspace-cli [--session-file PATH] notification list --window-id UUID [--workspace-id UUID] [--unread-only true|false] [--offset N] [--limit N]
-  agent-workspace-cli [--session-file PATH] notify --title TEXT [--body TEXT] [--level info|warning|error] [--window-id UUID] [--workspace-id UUID] [--pane-id UUID] [--tab-id UUID]
-  agent-workspace-cli [--session-file PATH] hook codex JSON_PAYLOAD
-  agent-workspace-cli [--session-file PATH] hook claude < JSON_PAYLOAD
-  agent-workspace-cli hook install|uninstall|status codex|claude
-  agent-workspace-cli [--session-file PATH] request notification.publish|notification.markRead|notification.markUnread|notification.clear --params-json JSON
-  agent-workspace-cli [--session-file PATH] workspace list
-  agent-workspace-cli [--session-file PATH] workspace organization
-  agent-workspace-cli [--session-file PATH] workspace create --name NAME --working-directory PATH [--terminal-cwd PATH] [--description TEXT] [--color COLOR] [--rows N] [--cols N] [--expected-revision N] [--idempotency-key UUID] [--command PROGRAM ARG...]
-  agent-workspace-cli [--session-file PATH] workspace pin --workspace-id UUID --pinned true|false --expected-revision N [--idempotency-key UUID]
-  agent-workspace-cli [--session-file PATH] workspace reorder --workspace-id UUID --destination-index N --expected-revision N [--idempotency-key UUID]
-  agent-workspace-cli [--session-file PATH] workspace select-many --workspace-id UUID [--workspace-id UUID ...] --focused-workspace-id UUID --expected-revision N [--idempotency-key UUID]
-  agent-workspace-cli [--session-file PATH] workspace close-selected --expected-revision N [--idempotency-key UUID] [--replacement-name NAME --replacement-working-directory PATH [--replacement-description TEXT] [--replacement-color COLOR] [--replacement-terminal-cwd PATH] [--replacement-rows N] [--replacement-cols N] [--replacement-command PROGRAM ARG...]]
-  agent-workspace-cli [--session-file PATH] group create|rename --group-id UUID --name NAME --expected-revision N [--idempotency-key UUID]
-  agent-workspace-cli [--session-file PATH] group delete --group-id UUID --expected-revision N [--idempotency-key UUID]
-  agent-workspace-cli [--session-file PATH] group move --group-id UUID --destination-index N --expected-revision N [--idempotency-key UUID]
-  agent-workspace-cli [--session-file PATH] group collapse --group-id UUID --collapsed true|false --expected-revision N [--idempotency-key UUID]
-  agent-workspace-cli [--session-file PATH] group assign --workspace-id UUID [--group-id UUID] --expected-revision N [--idempotency-key UUID]
-  agent-workspace-cli [--session-file PATH] layout list
-  agent-workspace-cli [--session-file PATH] layout get --layout-id UUID
-  agent-workspace-cli [--session-file PATH] layout export --layout-id UUID
-  agent-workspace-cli [--session-file PATH] layout save --layout-id UUID --name NAME --workspace-id UUID [--workspace-id UUID ...] --expected-revision N [--idempotency-key UUID]
-  agent-workspace-cli [--session-file PATH] layout delete|apply --layout-id UUID --expected-revision N [--idempotency-key UUID]
-  agent-workspace-cli [--session-file PATH] layout import --layout-id UUID --file PATH --expected-revision N [--idempotency-key UUID]
-  agent-workspace-cli [--session-file PATH] remote target list [--limit N] [--cursor UUID]
-  agent-workspace-cli [--session-file PATH] remote target get --target-id UUID
-  agent-workspace-cli [--session-file PATH] remote target delete --params-json JSON
-  agent-workspace-cli [--session-file PATH] remote session list [--limit N] [--cursor UUID]
-  agent-workspace-cli [--session-file PATH] remote session get --session-id UUID
-  agent-workspace-cli [--session-file PATH] remote session terminal --session-id UUID
-  agent-workspace-cli [--session-file PATH] remote session prepare --params-json JSON
-  agent-workspace-cli [--session-file PATH] remote session activate --params-json JSON
-  agent-workspace-cli [--session-file PATH] remote session detach --params-json JSON
-  agent-workspace-cli [--session-file PATH] remote session close --params-json JSON
-  agent-workspace-cli [--session-file PATH] remote host-key scan --params-json JSON
-  agent-workspace-cli [--session-file PATH] remote host-key decide --params-json JSON
-  agent-workspace-cli [--session-file PATH] remote tmux discover --params-json JSON
-  agent-workspace-cli [--session-file PATH] agent catalog list
-  agent-workspace-cli [--session-file PATH] agent catalog get --session-id UUID
-  agent-workspace-cli [--session-file PATH] agent catalog-register|restore-assess|restore|fork|hibernate-preflight|hibernate-confirm|hibernate-cancel --params-json JSON
-  agent-workspace-cli [--session-file PATH] agent team-create|team-update|team-delete|member-create|member-update|member-move|member-delete|attention-set --params-json JSON
-  agent-workspace-cli [--session-file PATH] remote target-list|target-get|target-create|target-delete|session-list|session-get|session-connect|session-reconnect|session-detach|session-close|host-key-decide|tmux-discover --params-json JSON
-  agent-workspace-cli [--session-file PATH] sidebar recently-closed-list|recently-closed-reopen --params-json JSON
-  agent-workspace-cli [--session-file PATH] request agent.catalog.register --params-json JSON
-  agent-workspace-cli [--session-file PATH] request agent.restore.assess --params-json JSON
-  agent-workspace-cli [--session-file PATH] request agent.session.restore --params-json JSON
-  agent-workspace-cli [--session-file PATH] request agent.session.fork --params-json JSON
-  agent-workspace-cli [--session-file PATH] request workspace.cardSlots.get|workspace.cardSlots.replace|workspace.cardSlots.v2.get|workspace.cardSlots.v2.replace --params-json JSON
-  agent-workspace-cli [--session-file PATH] request workspace.attention.get|attention.acknowledge --params-json JSON
-  agent-workspace-cli [--session-file PATH] request agent.team.create|agent.team.update|agent.team.delete --params-json JSON
-  agent-workspace-cli [--session-file PATH] request agent.team.member.create|agent.team.member.update|agent.team.member.move|agent.team.member.delete --params-json JSON
-  agent-workspace-cli [--session-file PATH] action list [--limit N] [--cursor TOKEN]
-  agent-workspace-cli [--session-file PATH] action invoke --action-id ID --action-version N --idempotency-epoch UUID [--parameters-json JSON] [--idempotency-key UUID] [--correlation-id UUID] [--target-window-id UUID --target-window-generation N]
-  agent-workspace-cli [--session-file PATH] action cancel --invocation-id UUID --correlation-id UUID
-  agent-workspace-cli [--session-file PATH] request action.invoke --params-json JSON
-  agent-workspace-cli [--session-file PATH] request action.cancel --params-json JSON
-  agent-workspace-cli [--session-file PATH] task list|confirm|action --params-json JSON
-  agent-workspace-cli [--session-file PATH] search query|cancel|policy|exclude|forget|rebuild|export-confirm|export --params-json JSON
-  agent-workspace-cli [--session-file PATH] sidebar placement list
-  agent-workspace-cli [--session-file PATH] sidebar placement get --window-id UUID
-  agent-workspace-cli [--session-file PATH] files roots [--limit N] [--cursor UUID]
-  agent-workspace-cli [--session-file PATH] files directory|issue|read|save|markdown|diff --params-json JSON
-  agent-workspace-cli [--session-file PATH] request sidebar.placement.save --params-json JSON
-  agent-workspace-cli [--session-file PATH] textbox list [--limit N] [--cursor UUID]
-  agent-workspace-cli [--session-file PATH] textbox get --document-id UUID
-  agent-workspace-cli [--session-file PATH] request textbox.create|textbox.save|textbox.delete --params-json JSON
-  agent-workspace-cli [--session-file PATH] request CAPABILITY --params-json JSON
-  agent-workspace-cli [--session-file PATH] terminal create --workspace-id UUID --pane-id UUID --cwd PATH [--rows N] [--cols N] [--destination-index N] [--expected-revision N] [--idempotency-key UUID] [--command PROGRAM ARG...]
-  agent-workspace-cli [--session-file PATH] terminal send --terminal-id UUID --data TEXT
-  agent-workspace-cli [--session-file PATH] pane split --workspace-id UUID --target-pane-id UUID --axis horizontal|vertical [--placement before|after] [--ratio R] --expected-revision N [--idempotency-key UUID] terminal --cwd PATH [--rows N] [--cols N] [--command PROGRAM ARG...]
-  agent-workspace-cli [--session-file PATH] pane split --workspace-id UUID --target-pane-id UUID --axis horizontal|vertical [--placement before|after] [--ratio R] --expected-revision N [--idempotency-key UUID] browser --url URL [--profile-partition PARTITION]
-  agent-workspace-cli [--session-file PATH] pane split --workspace-id UUID --target-pane-id UUID --axis horizontal|vertical [--placement before|after] [--ratio R] --expected-revision N [--idempotency-key UUID] existing-tab --tab-id UUID
-  agent-workspace-cli [--session-file PATH] browser-automation list
-  agent-workspace-cli [--session-file PATH] browser-automation create|get|execute|cancel|read|release|destroy --params-json JSON
+  ternline-cli [--session-file PATH] identify
+  ternline-cli [--session-file PATH] state snapshot
+  ternline-cli [--session-file PATH] settings get
+  ternline-cli [--session-file PATH] closed list
+  ternline-cli [--session-file PATH] closed get --closed-item-id UUID
+  ternline-cli [--session-file PATH] request tab.reopen --params-json JSON
+  ternline-cli [--session-file PATH] request settings.update|settings.resetKey --params-json JSON
+  ternline-cli [--session-file PATH] notification list --window-id UUID [--workspace-id UUID] [--unread-only true|false] [--offset N] [--limit N]
+  ternline-cli [--session-file PATH] notify --title TEXT [--body TEXT] [--level info|warning|error] [--window-id UUID] [--workspace-id UUID] [--pane-id UUID] [--tab-id UUID]
+  ternline-cli [--session-file PATH] hook codex JSON_PAYLOAD
+  ternline-cli [--session-file PATH] hook claude < JSON_PAYLOAD
+  ternline-cli hook install|uninstall|status codex|claude
+  ternline-cli [--session-file PATH] request notification.publish|notification.markRead|notification.markUnread|notification.clear --params-json JSON
+  ternline-cli [--session-file PATH] workspace list
+  ternline-cli [--session-file PATH] workspace organization
+  ternline-cli [--session-file PATH] workspace create --name NAME --working-directory PATH [--terminal-cwd PATH] [--description TEXT] [--color COLOR] [--rows N] [--cols N] [--expected-revision N] [--idempotency-key UUID] [--command PROGRAM ARG...]
+  ternline-cli [--session-file PATH] workspace pin --workspace-id UUID --pinned true|false --expected-revision N [--idempotency-key UUID]
+  ternline-cli [--session-file PATH] workspace reorder --workspace-id UUID --destination-index N --expected-revision N [--idempotency-key UUID]
+  ternline-cli [--session-file PATH] workspace select-many --workspace-id UUID [--workspace-id UUID ...] --focused-workspace-id UUID --expected-revision N [--idempotency-key UUID]
+  ternline-cli [--session-file PATH] workspace close-selected --expected-revision N [--idempotency-key UUID] [--replacement-name NAME --replacement-working-directory PATH [--replacement-description TEXT] [--replacement-color COLOR] [--replacement-terminal-cwd PATH] [--replacement-rows N] [--replacement-cols N] [--replacement-command PROGRAM ARG...]]
+  ternline-cli [--session-file PATH] group create|rename --group-id UUID --name NAME --expected-revision N [--idempotency-key UUID]
+  ternline-cli [--session-file PATH] group delete --group-id UUID --expected-revision N [--idempotency-key UUID]
+  ternline-cli [--session-file PATH] group move --group-id UUID --destination-index N --expected-revision N [--idempotency-key UUID]
+  ternline-cli [--session-file PATH] group collapse --group-id UUID --collapsed true|false --expected-revision N [--idempotency-key UUID]
+  ternline-cli [--session-file PATH] group assign --workspace-id UUID [--group-id UUID] --expected-revision N [--idempotency-key UUID]
+  ternline-cli [--session-file PATH] layout list
+  ternline-cli [--session-file PATH] layout get --layout-id UUID
+  ternline-cli [--session-file PATH] layout export --layout-id UUID
+  ternline-cli [--session-file PATH] layout save --layout-id UUID --name NAME --workspace-id UUID [--workspace-id UUID ...] --expected-revision N [--idempotency-key UUID]
+  ternline-cli [--session-file PATH] layout delete|apply --layout-id UUID --expected-revision N [--idempotency-key UUID]
+  ternline-cli [--session-file PATH] layout import --layout-id UUID --file PATH --expected-revision N [--idempotency-key UUID]
+  ternline-cli [--session-file PATH] remote target list [--limit N] [--cursor UUID]
+  ternline-cli [--session-file PATH] remote target get --target-id UUID
+  ternline-cli [--session-file PATH] remote target delete --params-json JSON
+  ternline-cli [--session-file PATH] remote session list [--limit N] [--cursor UUID]
+  ternline-cli [--session-file PATH] remote session get --session-id UUID
+  ternline-cli [--session-file PATH] remote session terminal --session-id UUID
+  ternline-cli [--session-file PATH] remote session prepare --params-json JSON
+  ternline-cli [--session-file PATH] remote session activate --params-json JSON
+  ternline-cli [--session-file PATH] remote session detach --params-json JSON
+  ternline-cli [--session-file PATH] remote session close --params-json JSON
+  ternline-cli [--session-file PATH] remote host-key scan --params-json JSON
+  ternline-cli [--session-file PATH] remote host-key decide --params-json JSON
+  ternline-cli [--session-file PATH] remote tmux discover --params-json JSON
+  ternline-cli [--session-file PATH] agent catalog list
+  ternline-cli [--session-file PATH] agent catalog get --session-id UUID
+  ternline-cli [--session-file PATH] agent catalog-register|restore-assess|restore|fork|hibernate-preflight|hibernate-confirm|hibernate-cancel --params-json JSON
+  ternline-cli [--session-file PATH] agent team-create|team-update|team-delete|member-create|member-update|member-move|member-delete|attention-set --params-json JSON
+  ternline-cli [--session-file PATH] remote target-list|target-get|target-create|target-delete|session-list|session-get|session-connect|session-reconnect|session-detach|session-close|host-key-decide|tmux-discover --params-json JSON
+  ternline-cli [--session-file PATH] sidebar recently-closed-list|recently-closed-reopen --params-json JSON
+  ternline-cli [--session-file PATH] request agent.catalog.register --params-json JSON
+  ternline-cli [--session-file PATH] request agent.restore.assess --params-json JSON
+  ternline-cli [--session-file PATH] request agent.session.restore --params-json JSON
+  ternline-cli [--session-file PATH] request agent.session.fork --params-json JSON
+  ternline-cli [--session-file PATH] request workspace.cardSlots.get|workspace.cardSlots.replace|workspace.cardSlots.v2.get|workspace.cardSlots.v2.replace --params-json JSON
+  ternline-cli [--session-file PATH] request workspace.attention.get|attention.acknowledge --params-json JSON
+  ternline-cli [--session-file PATH] request agent.team.create|agent.team.update|agent.team.delete --params-json JSON
+  ternline-cli [--session-file PATH] request agent.team.member.create|agent.team.member.update|agent.team.member.move|agent.team.member.delete --params-json JSON
+  ternline-cli [--session-file PATH] action list [--limit N] [--cursor TOKEN]
+  ternline-cli [--session-file PATH] action invoke --action-id ID --action-version N --idempotency-epoch UUID [--parameters-json JSON] [--idempotency-key UUID] [--correlation-id UUID] [--target-window-id UUID --target-window-generation N]
+  ternline-cli [--session-file PATH] action cancel --invocation-id UUID --correlation-id UUID
+  ternline-cli [--session-file PATH] request action.invoke --params-json JSON
+  ternline-cli [--session-file PATH] request action.cancel --params-json JSON
+  ternline-cli [--session-file PATH] task list|confirm|action --params-json JSON
+  ternline-cli [--session-file PATH] search query|cancel|policy|exclude|forget|rebuild|export-confirm|export --params-json JSON
+  ternline-cli [--session-file PATH] sidebar placement list
+  ternline-cli [--session-file PATH] sidebar placement get --window-id UUID
+  ternline-cli [--session-file PATH] files roots [--limit N] [--cursor UUID]
+  ternline-cli [--session-file PATH] files directory|issue|read|save|markdown|diff --params-json JSON
+  ternline-cli [--session-file PATH] request sidebar.placement.save --params-json JSON
+  ternline-cli [--session-file PATH] textbox list [--limit N] [--cursor UUID]
+  ternline-cli [--session-file PATH] textbox get --document-id UUID
+  ternline-cli [--session-file PATH] request textbox.create|textbox.save|textbox.delete --params-json JSON
+  ternline-cli [--session-file PATH] request CAPABILITY --params-json JSON
+  ternline-cli [--session-file PATH] terminal create --workspace-id UUID --pane-id UUID --cwd PATH [--rows N] [--cols N] [--destination-index N] [--expected-revision N] [--idempotency-key UUID] [--command PROGRAM ARG...]
+  ternline-cli [--session-file PATH] terminal send --terminal-id UUID --data TEXT
+  ternline-cli [--session-file PATH] pane split --workspace-id UUID --target-pane-id UUID --axis horizontal|vertical [--placement before|after] [--ratio R] --expected-revision N [--idempotency-key UUID] terminal --cwd PATH [--rows N] [--cols N] [--command PROGRAM ARG...]
+  ternline-cli [--session-file PATH] pane split --workspace-id UUID --target-pane-id UUID --axis horizontal|vertical [--placement before|after] [--ratio R] --expected-revision N [--idempotency-key UUID] browser --url URL [--profile-partition PARTITION]
+  ternline-cli [--session-file PATH] pane split --workspace-id UUID --target-pane-id UUID --axis horizontal|vertical [--placement before|after] [--ratio R] --expected-revision N [--idempotency-key UUID] existing-tab --tab-id UUID
+  ternline-cli [--session-file PATH] browser-automation list
+  ternline-cli [--session-file PATH] browser-automation create|get|execute|cancel|read|release|destroy --params-json JSON
 
 On Linux and macOS, --session-file is optional when the desktop published its private Node
 discovery record. AGENT_WORKSPACE_NODE_SESSION_FILE can override that path. The record must be
@@ -1266,6 +1266,6 @@ void main().catch((error: unknown) => {
     error instanceof ServerError && /^[a-z][a-z0-9_]{0,63}$/u.test(error.code)
       ? `[${error.code}] `
       : ''
-  process.stderr.write(`agent-workspace-cli: ${code}${message}\n`)
+  process.stderr.write(`ternline-cli: ${code}${message}\n`)
   process.exitCode = 1
 })
