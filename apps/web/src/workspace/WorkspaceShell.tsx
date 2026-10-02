@@ -1022,7 +1022,7 @@ export function WorkspaceShell({ workspace }: ShellProps): React.JSX.Element {
       ref={shellRef}
       style={{ '--sidebar-width-preference': `${String(sidebarWidth)}px` } as React.CSSProperties}
     >
-      <header className="titlebar">
+      <header className="titlebar" data-platform={platform}>
         <span className="mark" aria-hidden="true" />
         <span className="app-title">{messages.workspaceShell.titlebar.applicationTitle}</span>
         <span className="workspace-title">

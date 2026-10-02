@@ -1108,6 +1108,11 @@ button {
   background: var(--aw-color-surface-raised);
 }
 
+.titlebar[data-platform='macos'] {
+  /* Leave room for the native buttons in Electron's hiddenInset title bar. */
+  padding-left: 88px;
+}
+
 .app-title {
   flex: 0 0 auto;
   color: var(--aw-color-text-primary);
