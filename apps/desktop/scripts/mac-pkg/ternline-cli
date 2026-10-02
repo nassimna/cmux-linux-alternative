@@ -1,3 +1,0 @@
-#!/bin/sh
-# Ternline installer command-line launcher
-exec /Applications/Ternline.app/Contents/Resources/cli/ternline-cli "$@"

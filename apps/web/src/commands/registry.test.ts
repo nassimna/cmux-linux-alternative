@@ -14,6 +14,25 @@ import { browserMessages } from '@agent-workspace/contracts/desktop/browser-mess
 import { messages } from '../messages'
 
 describe('CommandRegistry', () => {
+  it('enables the appropriate CLI action only when the Mac bridge reports its state', async () => {
+    const invoke = vi.fn()
+    expect(await defaultCommandRegistry.execute('cli.install', { invoke })).toMatchObject({
+      status: 'unavailable'
+    })
+    expect(
+      await defaultCommandRegistry.execute('cli.install', { invoke, cli: { installed: false } })
+    ).toMatchObject({ status: 'executed' })
+    expect(
+      await defaultCommandRegistry.execute('cli.uninstall', { invoke, cli: { installed: false } })
+    ).toMatchObject({ status: 'unavailable' })
+    expect(
+      await defaultCommandRegistry.execute('cli.uninstall', { invoke, cli: { installed: true } })
+    ).toMatchObject({ status: 'executed' })
+    expect(
+      await defaultCommandRegistry.execute('cli.install', { invoke, cli: { installed: true } })
+    ).toMatchObject({ status: 'unavailable' })
+    expect(invoke.mock.calls).toEqual([['cli.install'], ['cli.uninstall']])
+  })
   it('contains every required default command exactly once', () => {
     expect(DEFAULT_COMMANDS.map((command) => command.id)).toEqual([
       'workspace.new',
@@ -32,6 +51,8 @@ describe('CommandRegistry', () => {
       'pane.splitDown',
       'sidebar.toggle',
       'commandPalette.toggle',
+      'cli.install',
+      'cli.uninstall',
       'terminal.search',
       'browser.openSplit',
       'browser.back',
@@ -201,6 +222,8 @@ describe('CommandRegistry', () => {
       ['pane.splitDown', messages.commands.pane.splitDown],
       ['sidebar.toggle', messages.commands.sidebar.toggle],
       ['commandPalette.toggle', messages.commands.commandPalette.toggle],
+      ['cli.install', messages.commands.cli.install],
+      ['cli.uninstall', messages.commands.cli.uninstall],
       ['terminal.search', messages.commands.terminal.search],
       ['notifications.toggle', messages.commands.notifications.toggle],
       ['notifications.latestUnread', messages.commands.notifications.latestUnread],

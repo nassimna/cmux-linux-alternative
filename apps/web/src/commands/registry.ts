@@ -312,6 +312,24 @@ export const DEFAULT_COMMANDS: readonly CommandDefinition[] = [
     handler: handler('commandPalette.toggle')
   },
   {
+    id: 'cli.install',
+    title: messages.commands.cli.install.title,
+    description: messages.commands.cli.install.description,
+    category: 'terminal',
+    aliases: messages.commands.cli.install.aliases,
+    isAvailable: (context) => context.cli?.installed === false,
+    handler: handler('cli.install')
+  },
+  {
+    id: 'cli.uninstall',
+    title: messages.commands.cli.uninstall.title,
+    description: messages.commands.cli.uninstall.description,
+    category: 'terminal',
+    aliases: messages.commands.cli.uninstall.aliases,
+    isAvailable: (context) => context.cli?.installed === true,
+    handler: handler('cli.uninstall')
+  },
+  {
     id: 'terminal.search',
     title: messages.commands.terminal.search.title,
     description: messages.commands.terminal.search.description,

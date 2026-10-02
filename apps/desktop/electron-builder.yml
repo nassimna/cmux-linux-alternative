@@ -59,18 +59,8 @@ mac:
   hardenedRuntime: true
   notarize: true
   target:
-    - pkg
     - dmg
     - zip
-pkg:
-  scripts: ../scripts/mac-pkg
-  installLocation: /Applications
-  isRelocatable: false
-  allowAnywhere: false
-  allowCurrentUserHome: false
-  allowRootDirectory: true
-  mustClose:
-    - dev.agentworkspace.desktop
 win:
   icon: build/icon.svg
   electronUpdaterCompatibility: '>= 2.16'

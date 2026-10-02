@@ -48,7 +48,6 @@ stable/
   agent-workspace-<version>-x86_64.AppImage
   agent-workspace-<version>-x86_64.deb
   agent-workspace-<version>-x86_64.rpm
-  agent-workspace-<version>-macos-x64.pkg
   agent-workspace-<version>-macos-x64.dmg
   agent-workspace-<version>-macos-x64.zip
   agent-workspace-<version>-windows-x64-setup.exe

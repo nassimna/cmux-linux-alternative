@@ -5,7 +5,7 @@ import { URL } from 'node:url'
 
 const target = process.argv[2]
 const targets = {
-  mac: ['--mac', 'pkg', 'dmg', 'zip', '--x64'],
+  mac: ['--mac', 'dmg', 'zip', '--x64'],
   windows: ['--win', 'nsis', '--x64']
 }
 

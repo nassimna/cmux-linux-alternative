@@ -278,6 +278,17 @@ const desktopBridge = Object.freeze({
   downloadUpdate: async () =>
     parseDesktopUpdateState(await ipcRenderer.invoke(DESKTOP_IPC.updateDownload)),
   installUpdate: async () => invokeVoid(DESKTOP_IPC.updateInstall),
+  ...(process.platform === 'darwin'
+    ? {
+        isCliInstalledInPath: async () => {
+          const result: unknown = await ipcRenderer.invoke(DESKTOP_IPC.cliPathInstalled)
+          if (typeof result !== 'boolean') throw new Error('Invalid CLI installation state')
+          return result
+        },
+        installCliInPath: async () => invokeVoid(DESKTOP_IPC.cliPathInstall),
+        uninstallCliInPath: async () => invokeVoid(DESKTOP_IPC.cliPathUninstall)
+      }
+    : {}),
   setApplicationMenuState: async (state) =>
     invokeVoid(DESKTOP_IPC.applicationMenuUpdate, parseApplicationMenuState(state)),
   onLifecycleState: (listener) => {

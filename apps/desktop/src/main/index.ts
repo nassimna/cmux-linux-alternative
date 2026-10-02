@@ -71,6 +71,8 @@ import {
   registerMultiWindowDesktopHandlers
 } from './desktop-ipc'
 import { CLI_SESSION_FILE_NAME, PRODUCT_NAME } from './identity'
+import { MacCliPathInstaller } from './mac-cli-path-installer'
+import { registerMacCliPathHandlers } from './mac-cli-path-ipc'
 import { recoverNodeWindowHosting } from './node-hosting-recovery'
 import { LifecycleController } from './lifecycle-controller'
 import { RENDERER_SCHEME, resolveRendererAsset } from './renderer-protocol'
@@ -989,6 +991,13 @@ registerMultiWindowDesktopHandlers(
   }
 )
 registerSenderBoundApplicationMenuHandlers(senderBoundIpc, applicationMenu)
+registerMacCliPathHandlers(senderBoundIpc, {
+  supported: () => app.isPackaged && process.platform === 'darwin',
+  installer: new MacCliPathInstaller({
+    sourcePath: join(process.resourcesPath, 'cli', 'ternline-cli')
+  }),
+  showMessageBox: (window, options) => dialog.showMessageBox(window, options)
+})
 
 protocol.registerSchemesAsPrivileged([
   {

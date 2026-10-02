@@ -3,25 +3,27 @@
 ## macOS
 
 The Mac package includes `ternline-cli` and uses the application's embedded Node runtime.
-No separate Node installation is needed. Use the `.pkg` installer for the app and external CLI:
-it installs `/Applications/Ternline.app` and `/usr/local/bin/ternline-cli` together. macOS asks
-for administrator authorization during installation. An unrelated or modified command at that
-path is preserved and prevents installation. Quit Ternline before updating it through Installer.
+No separate Node installation is needed. Open the `.dmg` and drag Ternline to Applications.
+The `.zip` also contains the same app bundle.
 
-Open Ternline after installation. The command works inside Ternline and in external terminals
-whose PATH includes `/usr/local/bin` (the standard macOS shell configuration):
+Open Ternline after installation. The command works automatically inside Ternline:
 
 ```sh
 ternline-cli identify
 ternline-cli --help
 ```
 
-Keep Ternline running for commands that control it. The CLI discovers the private local session
-automatically on macOS. The app and installer do not edit shell startup files.
+For external terminals, open the command palette (⌘⇧P), search **Install ternline-cli**, and run
+the action. It creates `/usr/local/bin/ternline-cli` as a symlink to the bundled command. macOS
+requests administrator authorization only if needed to write there. External shells must have
+`/usr/local/bin` on PATH (the standard macOS configuration). The **Uninstall ternline-cli** action
+removes this external command while keeping the bundled CLI available inside Ternline.
 
-The `.dmg` and `.zip` packages remain available for drag-and-drop installation. Their bundled
-CLI works automatically inside Ternline through the app's terminal environment; external
-terminals can invoke the bundled command directly:
+Installation preserves unrelated commands and shell startup files. A launcher installed by the
+previous Ternline `.pkg` can be replaced by the new symlink. Keep Ternline running for commands
+that control it; the CLI discovers the private local session automatically on macOS.
+
+External terminals can also invoke the bundled command directly without installing the symlink:
 
 ```sh
 "/Applications/Ternline.app/Contents/Resources/cli/ternline-cli" identify

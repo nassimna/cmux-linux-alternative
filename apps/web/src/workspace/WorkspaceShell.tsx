@@ -229,6 +229,26 @@ export function WorkspaceShell({ workspace }: ShellProps): React.JSX.Element {
   const [recentCommands, setRecentCommands] = useState<readonly string[]>([])
   const [, setWindowTopology] = useState<WindowListResult | null>(null)
   const [commandError, setCommandError] = useState<string | null>(null)
+  const [cliInstalledInPath, setCliInstalledInPath] = useState<boolean | undefined>()
+  const refreshCliInstallation = useCallback(async () => {
+    const installed = await window.desktopBridge.isCliInstalledInPath?.()
+    setCliInstalledInPath(installed)
+  }, [])
+  useEffect(() => {
+    if (!window.desktopBridge.isCliInstalledInPath) return
+    let current = true
+    void window.desktopBridge
+      .isCliInstalledInPath()
+      .then((installed) => {
+        if (current) setCliInstalledInPath(installed)
+      })
+      .catch(() => {
+        if (current) setCliInstalledInPath(undefined)
+      })
+    return () => {
+      current = false
+    }
+  }, [projection.paletteOpen])
   const [publicActions, setPublicActions] = useState<readonly ActionDefinition[]>([])
   const [publicActionRegistryRevision, setPublicActionRegistryRevision] = useState(0)
   const [processTitles, setProcessTitles] = useState<Record<string, string>>({})
@@ -645,6 +665,18 @@ export function WorkspaceShell({ workspace }: ShellProps): React.JSX.Element {
         openSettings()
         return
       }
+      if (commandId === 'cli.install' || commandId === 'cli.uninstall') {
+        try {
+          if (commandId === 'cli.install' && window.desktopBridge.installCliInPath)
+            await window.desktopBridge.installCliInPath()
+          else if (commandId === 'cli.uninstall' && window.desktopBridge.uninstallCliInPath)
+            await window.desktopBridge.uninstallCliInPath()
+          else throw new Error('CLI installation is unavailable')
+        } finally {
+          await refreshCliInstallation()
+        }
+        return
+      }
       if (commandId === 'notifications.toggle') {
         setNotificationNavigationError(null)
         setNotificationsOpen((open) => !open)
@@ -828,6 +860,7 @@ export function WorkspaceShell({ workspace }: ShellProps): React.JSX.Element {
       multiWindowEnabled,
       refreshWindowTopology,
       runMutation,
+      refreshCliInstallation,
       selectedBrowserState,
       selectedPane,
       selectedTab,
@@ -849,6 +882,7 @@ export function WorkspaceShell({ workspace }: ShellProps): React.JSX.Element {
         }
       },
       capabilities: projection.identity?.capabilities ?? [],
+      ...(cliInstalledInPath === undefined ? {} : { cli: { installed: cliInstalledInPath } }),
       browser: selectedBrowserState
         ? {
             canBack: selectedBrowserState.canBack,
@@ -865,6 +899,7 @@ export function WorkspaceShell({ workspace }: ShellProps): React.JSX.Element {
     }),
     [
       invoke,
+      cliInstalledInPath,
       projection,
       refreshWindowTopology,
       selectedBrowserState,
@@ -4260,7 +4295,14 @@ export function CommandPalette({
     [onInvokePublicAction, publicActions]
   )
   const matches = searchCommands(
-    [...DEFAULT_COMMANDS, ...publicCommands.map(({ command }) => command)],
+    [
+      ...DEFAULT_COMMANDS.filter((command) => {
+        if (command.id === 'cli.install') return context.cli?.installed === false
+        if (command.id === 'cli.uninstall') return context.cli?.installed === true
+        return true
+      }),
+      ...publicCommands.map(({ command }) => command)
+    ],
     query,
     recentCommandIds,
     context

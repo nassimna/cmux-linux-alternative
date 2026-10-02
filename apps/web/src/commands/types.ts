@@ -15,6 +15,8 @@ export const COMMAND_IDS = [
   'pane.splitDown',
   'sidebar.toggle',
   'commandPalette.toggle',
+  'cli.install',
+  'cli.uninstall',
   'terminal.search',
   'browser.openSplit',
   'browser.back',
@@ -185,6 +187,7 @@ export interface CommandContext {
   /** Invokes the application's shared action path for the command. */
   readonly invoke: (commandId: CommandId) => void | Promise<void>
   readonly capabilities?: readonly string[]
+  readonly cli?: { readonly installed: boolean }
   readonly browser?: {
     readonly canBack: boolean
     readonly canForward: boolean

@@ -30,6 +30,26 @@ describe('notification preload bridge', () => {
     electron.invoke.mockReset()
   })
 
+  it.runIf(process.platform === 'darwin')(
+    'exposes fixed CLI actions and validates installation state',
+    async () => {
+      electron.invoke.mockResolvedValueOnce(false)
+      await expect(electron.exposed?.isCliInstalledInPath?.()).resolves.toBe(false)
+      expect(electron.invoke).toHaveBeenLastCalledWith(DESKTOP_IPC.cliPathInstalled)
+
+      electron.invoke.mockResolvedValueOnce('false')
+      await expect(electron.exposed?.isCliInstalledInPath?.()).rejects.toThrow(
+        'Invalid CLI installation state'
+      )
+
+      electron.invoke.mockResolvedValue(undefined)
+      await electron.exposed?.installCliInPath?.()
+      expect(electron.invoke).toHaveBeenLastCalledWith(DESKTOP_IPC.cliPathInstall)
+      await electron.exposed?.uninstallCliInPath?.()
+      expect(electron.invoke).toHaveBeenLastCalledWith(DESKTOP_IPC.cliPathUninstall)
+    }
+  )
+
   it('normalizes list defaults and validates results before returning them', async () => {
     electron.invoke.mockResolvedValue({
       revision: 42,

@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { execFile as execFileCallback } from 'node:child_process'
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import process from 'node:process'
 import { promisify } from 'node:util'
@@ -45,12 +45,12 @@ test('native Linux packages declare the secure custom-action containment prerequ
 
 test('macOS uses the updater-compatible signed distribution targets', async () => {
   const configuration = await readBuilderConfiguration()
-  const mac = section(configuration, 'mac', 'pkg')
+  const mac = section(configuration, 'mac', 'win')
   assert.match(mac, /icon: build\/icon\.svg/u)
   assert.match(mac, /electronUpdaterCompatibility: ['"]>= 2\.16['"]/u)
   assert.match(mac, /hardenedRuntime: true/u)
   assert.match(mac, /notarize: true/u)
-  assert.match(mac, /^\s+- pkg$/mu)
+  assert.doesNotMatch(mac, /^\s+- pkg$/mu)
   assert.match(mac, /^\s+- dmg$/mu)
   assert.match(mac, /^\s+- zip$/mu)
   assert.match(mac, /macos-\$\{arch\}/u)
@@ -58,25 +58,13 @@ test('macOS uses the updater-compatible signed distribution targets', async () =
 
 test('macOS packages build and include the CLI for both architectures', async () => {
   const configuration = await readBuilderConfiguration()
-  const mac = section(configuration, 'mac', 'pkg')
+  const mac = section(configuration, 'mac', 'win')
   assert.match(mac, /from: \.\.\/cli\/dist/u)
   assert.match(mac, /to: cli\/dist/u)
   const packageJson = JSON.parse(await readFile(resolve(desktopDirectory, 'package.json'), 'utf8'))
   for (const command of ['package:mac', 'package:mac:dir']) {
     assert.match(packageJson.scripts[command], /^pnpm --workspace-root build:node &&/u)
   }
-})
-
-test('the Mac installer fixes the app location and installs into the system domain', async () => {
-  const configuration = await readBuilderConfiguration()
-  const pkg = section(configuration, 'pkg', 'win')
-  assert.match(pkg, /scripts: \.\.\/scripts\/mac-pkg/u)
-  assert.match(pkg, /installLocation: \/Applications/u)
-  assert.match(pkg, /isRelocatable: false/u)
-  assert.match(pkg, /allowAnywhere: false/u)
-  assert.match(pkg, /allowCurrentUserHome: false/u)
-  assert.match(pkg, /allowRootDirectory: true/u)
-  assert.match(pkg, /mustClose:\n\s+- dev\.agentworkspace\.desktop/u)
 })
 
 test(
@@ -101,8 +89,12 @@ printf '%s\\n' "$@"
       )
       const launcher = resolve(cliDirectory, 'ternline-cli')
       await writeFile(launcher, createMacCliLauncher(product), { mode: 0o755 })
+      const external = resolve(directory, 'external-ternline-cli')
+      const relative = resolve(directory, 'relative-ternline-cli')
+      await symlink(launcher, external)
+      await symlink('external-ternline-cli', relative)
       const { stdout } = await promisify(execFileCallback)(
-        launcher,
+        relative,
         ['identify', 'a b', '$(false)'],
         {
           env: {

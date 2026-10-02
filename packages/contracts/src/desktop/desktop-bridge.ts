@@ -876,6 +876,9 @@ export interface DesktopBridge {
   checkForUpdate?(): Promise<DesktopUpdateState>
   downloadUpdate?(): Promise<DesktopUpdateState>
   installUpdate?(): Promise<void>
+  isCliInstalledInPath?(): Promise<boolean>
+  installCliInPath?(): Promise<void>
+  uninstallCliInPath?(): Promise<void>
   setApplicationMenuState?(state: ApplicationMenuState): Promise<void>
   onApplicationMenuCommand?(listener: (commandId: ApplicationMenuCommandId) => void): () => void
   onLifecycleState?(listener: (state: DesktopLifecycleState) => void): () => void
@@ -1085,6 +1088,9 @@ export const DESKTOP_IPC = {
   updateStateChanged: 'update:stateChanged',
   applicationMenuUpdate: 'applicationMenu:update',
   applicationMenuCommand: 'applicationMenu:command',
+  cliPathInstalled: 'cliPath:installed',
+  cliPathInstall: 'cliPath:install',
+  cliPathUninstall: 'cliPath:uninstall',
   multiWindowEvent: 'multiWindow:event',
   desktopBindingRebind: 'desktop:bindingRebind',
   browserViewsRebind: 'browser:viewsRebind',

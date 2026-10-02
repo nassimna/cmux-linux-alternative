@@ -41,6 +41,10 @@ export interface RendererCommandMessages {
   }
   readonly sidebar: { readonly toggle: CommandDefinitionMessages }
   readonly commandPalette: { readonly toggle: CommandDefinitionMessages }
+  readonly cli: {
+    readonly install: CommandDefinitionMessages
+    readonly uninstall: CommandDefinitionMessages
+  }
   readonly notifications: {
     readonly toggle: CommandDefinitionMessages
     readonly latestUnread: CommandDefinitionMessages
@@ -189,6 +193,18 @@ export const messages = {
         title: 'Latest unread',
         description: 'Jump to the latest unread notification.',
         aliases: ['newest notification', 'unread']
+      }
+    },
+    cli: {
+      install: {
+        title: 'Install ternline-cli',
+        description: 'Make ternline-cli available in external terminals.',
+        aliases: ['cli', 'command line', 'shell command', 'install command']
+      },
+      uninstall: {
+        title: 'Uninstall ternline-cli',
+        description: 'Remove the external terminal command. Keep the bundled CLI.',
+        aliases: ['cli', 'command line', 'shell command', 'uninstall command']
       }
     },
     settings: {
