@@ -5,6 +5,14 @@ export interface TerminalWriteSink {
   write(data: string | Uint8Array, callback?: () => void): void
 }
 
+const MAX_WRITE_BATCH_BYTES = 256 * 1024
+
+interface TerminalWriteBatch {
+  chunks: TerminalOutputChunk[]
+  byteLength: number
+  result: Promise<void>
+}
+
 export class TerminalReconciler {
   private disposed = false
   private lastSequence = 0
@@ -12,6 +20,7 @@ export class TerminalReconciler {
   private pendingWriteResolutions = new Set<() => void>()
   private resyncRequested = false
   private writes: Promise<void> = Promise.resolve()
+  private pendingBatch: TerminalWriteBatch | undefined
 
   public constructor(
     private readonly sink: TerminalWriteSink,
@@ -23,11 +32,25 @@ export class TerminalReconciler {
   }
 
   public async restore(snapshot: TerminalAttachResult): Promise<void> {
+    // Output received after a restore must not join a batch queued before the reset.
+    this.pendingBatch = undefined
     return this.schedule(() => this.restoreNow(snapshot))
   }
 
-  public async applyChunk(chunk: TerminalOutputChunk): Promise<void> {
-    return this.schedule(() => this.applyChunkNow(chunk))
+  public applyChunk(chunk: TerminalOutputChunk): Promise<void> {
+    let batch = this.pendingBatch
+    if (!batch || batch.byteLength + chunk.byteLength > MAX_WRITE_BATCH_BYTES) {
+      const chunks: TerminalOutputChunk[] = []
+      const result = this.schedule(async () => {
+        if (this.pendingBatch?.chunks === chunks) this.pendingBatch = undefined
+        await this.applyChunksNow(chunks)
+      })
+      batch = { chunks, byteLength: 0, result }
+      this.pendingBatch = batch
+    }
+    batch.chunks.push(chunk)
+    batch.byteLength += chunk.byteLength
+    return batch.result
   }
 
   public whenIdle(): Promise<void> {
@@ -82,18 +105,45 @@ export class TerminalReconciler {
     }
   }
 
-  private async applyChunkNow(chunk: TerminalOutputChunk): Promise<void> {
-    if (chunk.sequence <= this.lastSequence) {
-      return
+  private async applyChunksNow(chunks: TerminalOutputChunk[]): Promise<void> {
+    let sequence = this.lastSequence
+    const parts: Uint8Array[] = []
+    let byteLength = 0
+    for (const chunk of chunks) {
+      if (chunk.sequence <= sequence) continue
+      if (chunk.sequence !== sequence + 1) {
+        this.requestResync()
+        continue
+      }
+      const decoded = this.decodeChunk(chunk)
+      if (!decoded) continue
+      parts.push(decoded)
+      byteLength += decoded.byteLength
+      sequence = chunk.sequence
     }
-    if (chunk.sequence !== this.lastSequence + 1) {
-      this.requestResync()
-      return
+    if (parts.length === 0) return
+
+    // One parser callback per bounded burst, rather than one event-loop turn per PTY chunk.
+    const data = parts.length === 1 ? parts[0]! : new Uint8Array(byteLength)
+    if (parts.length > 1) {
+      let offset = 0
+      for (const part of parts) {
+        data.set(part, offset)
+        offset += part.byteLength
+      }
     }
-    await this.writeChunk(chunk)
+    await this.enqueueWrite(data)
+    this.lastSequence = sequence
   }
 
   private async writeChunk(chunk: TerminalOutputChunk): Promise<void> {
+    const decoded = this.decodeChunk(chunk)
+    if (!decoded) return
+    await this.enqueueWrite(decoded)
+    this.lastSequence = chunk.sequence
+  }
+
+  private decodeChunk(chunk: TerminalOutputChunk): Uint8Array | undefined {
     let decoded: Uint8Array
     try {
       decoded = decodeBase64(chunk.data)
@@ -105,8 +155,7 @@ export class TerminalReconciler {
       this.requestResync()
       return
     }
-    await this.enqueueWrite(decoded)
-    this.lastSequence = chunk.sequence
+    return decoded
   }
 
   private enqueueWrite(data: string | Uint8Array): Promise<void> {
