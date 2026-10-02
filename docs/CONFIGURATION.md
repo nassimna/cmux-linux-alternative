@@ -16,7 +16,7 @@ migrated by the current service, but new manual edits should use the current sch
 | Notifications      | system notifications `true`; include body `false`                                            | Persisted and applied live. Bodies remain excluded by default.                                                                                                                                                                                                                                                                                                                 |
 | Keyboard shortcuts | empty override map                                                                           | Persisted and dispatched live. A string overrides a command; `null` clears its shortcut. See [Shortcuts](SHORTCUTS.md).                                                                                                                                                                                                                                                        |
 | Agent integration  | enabled/notifications/browser all `true`                                                     | Persisted schema fields, but the settings controls have no runtime owner. Hook installation is a separate explicit CLI action.                                                                                                                                                                                                                                                 |
-| Updates            | channel `stable`                                                                             | Persisted and applied to the updater. `stable` and `beta` select only preconfigured trusted roots; the renderer cannot set a URL.                                                                                                                                                                                                                                              |
+| Updates            | channel `stable`; automatic `false`                                                          | Persisted and applied to the updater. Automatic checks and background downloads are opt-in; restart requires a user action. `stable` and `beta` select trusted release channels; the renderer cannot set a URL.                                                                                                                                                                |
 | Logging            | level `info`                                                                                 | Persisted and applied immediately to subsequent service log events. Values are `error`, `warn`, `info`, `debug`, and `trace`. The saved level controls subsequent service logging after a successful update.                                                                                                                                                                   |
 
 Terminal copy-on-select and per-terminal screen-reader mode are renderer-local controls and are not
@@ -28,7 +28,8 @@ sensitive unknown keys are rejected rather than silently normalized.
 
 ## Update environment
 
-Runtime updates remain disabled unless both variables are supplied to the packaged desktop:
+Packaged applications default to the public GitHub Releases feed. To use a generic HTTPS feed
+instead, supply both override variables to the packaged desktop:
 
 ```text
 AGENT_WORKSPACE_UPDATE_STABLE_URL
@@ -37,8 +38,9 @@ AGENT_WORKSPACE_UPDATE_BETA_URL
 
 They must be distinct HTTPS base URLs with no credentials, query, fragment, localhost name, or IP
 literal. Changing the saved channel never changes these trust roots. Build-time update metadata is
-opt-in through `AGENT_WORKSPACE_UPDATE_BUILD_URL` and
-`AGENT_WORKSPACE_UPDATE_BUILD_CHANNEL`; normal `pnpm package:linux` output is feed-free. See
+available for generic hosts through `AGENT_WORKSPACE_UPDATE_BUILD_URL` and
+`AGENT_WORKSPACE_UPDATE_BUILD_CHANNEL`; normal `pnpm package:linux` output contains GitHub updater
+metadata and does not publish it. See
 [Desktop updates](UPDATES.md).
 
 ## Development-only environment

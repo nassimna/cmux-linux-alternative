@@ -49,7 +49,7 @@ const DEFAULTS: Snapshot = {
   notifications: { systemEnabled: true, includeBody: false },
   keyboardShortcuts: { overrides: {} },
   agentIntegration: { enabled: true, notificationsEnabled: true, browserEnabled: true },
-  updates: { channel: 'stable' },
+  updates: { channel: 'stable', automatic: false },
   logging: { level: 'info' }
 }
 

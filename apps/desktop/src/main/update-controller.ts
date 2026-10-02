@@ -1,6 +1,7 @@
 import { isIP } from 'node:net'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
+import type { UpdateConfiguration } from '@agent-workspace/protocol-client'
 
 import type {
   DesktopUpdateChannel,
@@ -13,10 +14,8 @@ import { desktopMessages } from '@agent-workspace/contracts/desktop/desktop-mess
 const FEED_URL_MAX_LENGTH = 2_048
 const DEFAULT_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1_000
 
-export interface UpdateFeedConfiguration {
-  stable: string
-  beta: string
-}
+export type UpdateFeedConfiguration =
+  { stable: string; beta: string } | { provider: 'github'; owner: string; repo: string }
 
 export interface UpdateInfoLike {
   version: string
@@ -32,7 +31,17 @@ export interface ElectronUpdaterAdapter {
   allowDowngrade: boolean
   allowPrerelease: boolean
   channel: string | null
-  setFeedURL(options: { provider: 'generic'; url: string; channel: string }): void
+  setFeedURL(
+    options:
+      | { provider: 'generic'; url: string; channel: string }
+      | {
+          provider: 'github'
+          owner: string
+          repo: string
+          channel: string
+          releaseType: 'release' | 'prerelease'
+        }
+  ): void
   checkForUpdates(): Promise<unknown>
   downloadUpdate(): Promise<unknown>
   quitAndInstall(isSilent?: boolean, isForceRunAfter?: boolean): void
@@ -66,9 +75,10 @@ export interface UpdateControllerOptions {
 
 export class UpdateController {
   private channel: DesktopUpdateChannel = 'stable'
+  private automatic = false
   private state: DesktopUpdateState
   private inFlight: Promise<DesktopUpdateState> | null = null
-  private pendingChannel: DesktopUpdateChannel | null = null
+  private pendingConfiguration: UpdateConfiguration | null = null
   private installInProgress = false
   private readonly listeners = new Set<(state: DesktopUpdateState) => void>()
   private interval: IntervalHandle | undefined
@@ -127,18 +137,27 @@ export class UpdateController {
     return parseDesktopUpdateState(this.state)
   }
 
-  applyChannel(channel: DesktopUpdateChannel): DesktopUpdateState {
-    if (this.disposed || this.channel === channel) return this.getState()
+  applyConfiguration(configuration: UpdateConfiguration): DesktopUpdateState {
+    const { channel } = configuration
+    const automatic = configuration.automatic === true
+    if (this.disposed) return this.getState()
     if (this.inFlight) {
-      this.pendingChannel = channel
+      this.pendingConfiguration = configuration
       return this.getState()
     }
+    if (this.channel === channel && this.automatic === automatic) return this.getState()
+    const channelChanged = this.channel !== channel
     this.channel = channel
-    this.pendingChannel = null
+    this.automatic = automatic
+    this.pendingConfiguration = null
     this.stopPeriodicChecks()
-    this.state = this.availabilityState()
+    if (channelChanged) this.state = this.availabilityState()
     if (this.canOperate()) this.configureUpdater()
     this.emit()
+    if (automatic) {
+      if (this.state.status === 'available') void this.download()
+      else void this.check()
+    }
     return this.getState()
   }
 
@@ -228,10 +247,13 @@ export class UpdateController {
       .finally(() => {
         if (this.inFlight === result) {
           this.inFlight = null
-          const pendingChannel = this.pendingChannel
-          if (pendingChannel) this.applyChannel(pendingChannel)
+          const pendingConfiguration = this.pendingConfiguration
+          this.pendingConfiguration = null
+          if (pendingConfiguration) this.applyConfiguration(pendingConfiguration)
+          if (this.automatic && this.state.status === 'available') void this.download()
         }
       })
+      .then(() => this.getState())
     this.inFlight = result
     return result
   }
@@ -271,14 +293,21 @@ export class UpdateController {
   private configureUpdater(): void {
     const feeds = this.options.feeds
     if (!feeds) return
-    this.options.updater.channel = this.channel
+    const updaterChannel =
+      'provider' in feeds && this.channel === 'stable' ? 'latest' : this.channel
+    this.options.updater.channel = updaterChannel
     this.options.updater.allowPrerelease = this.channel === 'beta'
     this.options.updater.allowDowngrade = false
-    this.options.updater.setFeedURL({
-      provider: 'generic',
-      url: feeds[this.channel],
-      channel: this.channel
-    })
+    this.options.updater.setFeedURL(
+      'provider' in feeds
+        ? {
+            ...feeds,
+            channel: updaterChannel,
+            releaseType: this.channel === 'beta' ? 'prerelease' : 'release'
+          }
+        : { provider: 'generic', url: feeds[this.channel], channel: this.channel }
+    )
+    if (!this.automatic) return
     const setIntervalFn = this.options.setInterval ?? ((callback, ms) => setInterval(callback, ms))
     this.interval = setIntervalFn(() => {
       if (

@@ -667,7 +667,8 @@ export const agentIntegrationConfigurationSchema = z.strictObject({
 })
 
 export const updateConfigurationSchema = z.strictObject({
-  channel: z.enum(['stable', 'beta'])
+  channel: z.enum(['stable', 'beta']),
+  automatic: z.boolean().optional()
 })
 
 export const loggingConfigurationSchema = z.strictObject({

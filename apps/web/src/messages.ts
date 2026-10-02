@@ -669,6 +669,13 @@ export const messages = {
       beta: 'Beta'
     },
     updater: {
+      automatic: 'Automatically check and download updates',
+      automaticDescription: 'Updates download in the background. You choose when to restart.',
+      restartDescription: 'Restarting closes local terminals and may interrupt running agents.',
+      open: 'Open update settings',
+      button: 'Updates',
+      availableButton: 'Update available',
+      readyButton: 'Update ready',
       unconfigured:
         'Updates are disabled because trusted stable and beta feeds are not configured.',
       development: 'Updates are unavailable in development builds.',
@@ -681,7 +688,7 @@ export const messages = {
       downloaded: 'The update is downloaded and ready to install.',
       check: 'Check for updates',
       download: 'Download update',
-      install: 'Install and restart',
+      install: 'Restart to update',
       actionFailed: 'The update action could not be completed.'
     }
   },

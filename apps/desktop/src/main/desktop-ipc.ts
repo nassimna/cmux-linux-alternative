@@ -4,6 +4,7 @@ import { createHash, randomUUID } from 'node:crypto'
 import { basename, dirname, join } from 'node:path'
 
 import { dialog, ipcMain, shell, type BrowserWindow, type IpcMainInvokeEvent } from 'electron'
+import type { UpdateConfiguration } from '@agent-workspace/protocol-client'
 
 import {
   actionInvocationSnapshotSchema,
@@ -323,7 +324,7 @@ export interface DesktopLifecycleHandlerDependencies {
   pathExists?: (path: string) => Promise<boolean>
   downloadsDirectory: string
   scheduleQuit?: (quit: () => void) => void
-  configurationChanged?: (channel: 'stable' | 'beta') => void
+  configurationChanged?: (updates: UpdateConfiguration) => void
   isNodeCoreEnabled?: () => boolean
   isNodeLifecycleEnabled?: () => boolean
   isNodeConfigurationEnabled?: () => boolean
@@ -545,13 +546,13 @@ function collectDesktopLifecycleHandlers(
       const result = configurationGetResultSchema.parse(
         await dependencies.updateNodeConfiguration(params)
       )
-      dependencies.configurationChanged?.(result.config.updates.channel)
+      dependencies.configurationChanged?.(result.config.updates)
       return result
     }
     requireRustFallback(entry.binding, DESKTOP_IPC.configurationUpdate)
     const client = requireReadyClient(controller, entry.binding)
     const result = configurationGetResultSchema.parse(await client.updateConfiguration(params))
-    dependencies.configurationChanged?.(result.config.updates.channel)
+    dependencies.configurationChanged?.(result.config.updates)
     return result
   })
   host.handle(DESKTOP_IPC.applicationQuit, (event) => {
