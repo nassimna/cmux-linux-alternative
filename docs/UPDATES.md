@@ -9,35 +9,36 @@ restart. Linux update installation and native signing have not been qualified en
 ## Feed configuration
 
 Packaged applications default to the public `nassimna/cmux-linux-alternative` GitHub Releases
-provider. Stable uses the updater's `latest` channel; beta uses `beta` and permits prereleases.
+provider. Stable uses the updater's `latest` channel. Beta and Alpha use their matching channels and permit
+prereleases; choose **Alpha** in Settings to receive this release series.
 Normal package builds generate updater metadata without uploading it. The release workflow
 collects each platform’s manifests and blockmaps alongside the installable packages. macOS
 metadata includes both Intel and Apple Silicon artifacts. Existing releases
 without this metadata cannot serve an in-app update.
 
-Release versions must increase in the root and desktop package manifests before packaging. Beta
-releases use `-beta.N`; the beta update channel excludes `-alpha.N` tags.
-Publish stable versions as production releases and beta versions as prereleases; the stable
-channel does not use prereleases. GitHub Actions must be enabled to run the release workflow.
+Release versions must match the root and desktop package manifests before packaging. Unsigned
+alpha releases use `-alpha.N` and are published as prereleases. The Beta channel excludes Alpha
+tags; the Stable channel excludes all prereleases. GitHub Actions must be enabled to run the release workflow.
 
 To override GitHub with generic HTTPS hosting, supply both trusted feed roots in the
 packaged application's runtime environment:
 
 - `AGENT_WORKSPACE_UPDATE_STABLE_URL`
 - `AGENT_WORKSPACE_UPDATE_BETA_URL`
+- `AGENT_WORKSPACE_UPDATE_ALPHA_URL` (optional; required to select Alpha with generic hosting)
 
 The values must be different HTTPS base URLs without credentials, query strings,
 fragments, localhost names, or IP-literal hosts. They are read only by the main
-process. The renderer selects `stable` or `beta`; it cannot provide a URL or
+process. The renderer selects `stable`, `beta` or `alpha`; it cannot provide a URL or
 provider configuration.
 
 For generic hosting, package generation requires a channel-specific URL and channel. Use the
-platform's explicit update script to replace the default GitHub provider, and use `beta` with
-the beta root for a beta build:
+platform's explicit update script to replace the default GitHub provider, and use `alpha` with
+the alpha root for an alpha build:
 
 ```sh
-AGENT_WORKSPACE_UPDATE_BUILD_URL=https://<trusted-host>/desktop/stable/ \
-AGENT_WORKSPACE_UPDATE_BUILD_CHANNEL=stable \
+AGENT_WORKSPACE_UPDATE_BUILD_URL=https://<trusted-host>/desktop/alpha/ \
+AGENT_WORKSPACE_UPDATE_BUILD_CHANNEL=alpha \
 pnpm --filter @agent-workspace/desktop package:linux:updates
 ```
 
@@ -65,8 +66,10 @@ stable/
   agent-workspace-<version>-macos-x64.dmg
   agent-workspace-<version>-macos-x64.zip
   agent-workspace-<version>-windows-x64-setup.exe
-beta/
-  beta-linux.yml
+alpha/
+  alpha-linux.yml
+  alpha-mac.yml
+  alpha.yml
   agent-workspace-<version>-x86_64.AppImage
   agent-workspace-<version>-x86_64.deb
   agent-workspace-<version>-x86_64.rpm

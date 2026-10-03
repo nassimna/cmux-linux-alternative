@@ -8,8 +8,8 @@ builds the Signal website with matching, versioned download URLs.
 ## Prepare and qualify
 
 1. Set the same semantic version in the root and desktop manifests, including the desktop
-   checksum and verification scripts. Use a `-beta.N` suffix for unsigned prereleases; the app's
-   beta update channel does not select alpha releases.
+   checksum and verification scripts. Use an `-alpha.N` suffix for unsigned prereleases and select the app's
+   Alpha update channel to receive them.
 2. Add a non-empty versioned section to `CHANGELOG.md` and keep `[Unreleased]` for future work.
 3. Run affected tests and `pnpm release:validate --version x.y.z --mode candidate --tag vx.y.z`.
 4. Dispatch **Release** from the PR branch with `version: VERSION` and `publish: false` to build
@@ -41,7 +41,7 @@ The release contains:
 - Linux x64 AppImage, deb, and rpm.
 - macOS arm64 and x64 DMG/zip pairs.
 - Windows x64 NSIS EXE.
-- Platform beta updater manifests and their blockmaps.
+- Platform alpha updater manifests and their blockmaps.
 - Deterministic `SHA256SUMS` and a `release-manifest.json` identifying the version and source commit.
 
 Publication rejects colliding artifact names and verifies every expected installer is present.

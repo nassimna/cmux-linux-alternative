@@ -28,6 +28,10 @@ test('CI retains Node quality gates while release owns native packaging', async 
   assert.match(release, /pnpm build:node/u)
   assert.match(release, /inspect-node-preview\.sh/u)
   assert.match(release, /verify-native-package\.mjs/u)
+  assert.match(release, /publish\.channel=alpha/u)
+  for (const manifest of ['alpha-linux.yml', 'alpha-mac.yml', 'alpha.yml']) {
+    assert.ok(release.includes(manifest))
+  }
   assert.doesNotMatch(release, /cargo|rustup|build:service/u)
 })
 

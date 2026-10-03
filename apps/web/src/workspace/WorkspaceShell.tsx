@@ -4536,7 +4536,11 @@ const SETTINGS_SECTIONS: readonly {
     keywords: 'alerts system body unread'
   },
   { id: 'shortcuts', label: messages.settings.keyboard, keywords: 'keys commands hotkeys' },
-  { id: 'updates', label: messages.settings.updates, keywords: 'version stable beta download' },
+  {
+    id: 'updates',
+    label: messages.settings.updates,
+    keywords: 'version stable beta alpha download'
+  },
   { id: 'remote', label: 'Remote sessions', keywords: 'ssh tmux host key credential' },
   {
     id: 'advanced',

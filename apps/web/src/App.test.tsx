@@ -2167,15 +2167,15 @@ describe('App', () => {
     })
     bridge.checkForUpdate = vi.fn().mockResolvedValue({
       status: 'available',
-      channel: 'beta',
+      channel: 'alpha',
       packageType: 'appimage',
-      version: '1.2.3-beta.1'
+      version: '1.2.3-alpha.1'
     })
     bridge.downloadUpdate = vi.fn().mockResolvedValue({
       status: 'downloaded',
-      channel: 'beta',
+      channel: 'alpha',
       packageType: 'appimage',
-      version: '1.2.3-beta.1'
+      version: '1.2.3-alpha.1'
     })
     bridge.installUpdate = vi.fn().mockResolvedValue(undefined)
     bridge.onUpdateState = vi.fn(() => () => undefined)
@@ -2189,7 +2189,8 @@ describe('App', () => {
     })
     expect(automatic).not.toBeChecked()
     fireEvent.click(automatic)
-    fireEvent.change(channel, { target: { value: 'beta' } })
+    fireEvent.change(channel, { target: { value: 'alpha' } })
+    expect(channel).toHaveValue('alpha')
     fireEvent.click(
       within(channel.closest('.configuration-section') as HTMLElement).getByRole('button', {
         name: 'Save section'
@@ -2198,7 +2199,7 @@ describe('App', () => {
     await waitFor(() =>
       expect(bridge.updateConfiguration).toHaveBeenCalledWith({
         expectedRevision: 4,
-        update: { updates: { channel: 'beta', automatic: true } }
+        update: { updates: { channel: 'alpha', automatic: true } }
       })
     )
 

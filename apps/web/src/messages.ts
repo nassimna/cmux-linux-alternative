@@ -666,7 +666,8 @@ export const messages = {
       debug: 'Debug',
       trace: 'Trace',
       stable: 'Stable',
-      beta: 'Beta'
+      beta: 'Beta',
+      alpha: 'Alpha'
     },
     updater: {
       automatic: 'Automatically check and download updates',
@@ -677,7 +678,7 @@ export const messages = {
       availableButton: 'Update available',
       readyButton: 'Update ready',
       unconfigured:
-        'Updates are disabled because trusted stable and beta feeds are not configured.',
+        'Updates are disabled because a trusted feed is not configured for this channel.',
       development: 'Updates are unavailable in development builds.',
       unsupported: 'This installation format cannot be updated by the desktop updater.',
       idle: 'Ready to check for updates.',

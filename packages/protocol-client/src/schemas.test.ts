@@ -769,7 +769,7 @@ describe('protocol schemas', () => {
     expect(
       configurationUpdateParamsSchema.safeParse({
         expectedRevision: 4,
-        update: { updates: { channel: 'beta' } }
+        update: { updates: { channel: 'alpha' } }
       }).success
     ).toBe(true)
     expect(

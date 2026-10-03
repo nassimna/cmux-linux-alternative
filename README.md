@@ -5,7 +5,7 @@
 Ternline is an independent, clean-room desktop workspace for terminal-driven development
 sessions. It does not copy another product's source, assets, identity, or trademarks. The desktop, server, CLI, and shared contracts are TypeScript. Native packages target Linux, macOS, and Windows; the Linux package carries a pinned Node runtime.
 
-This is pre-alpha software. Milestones 0–5 are established on the documented Linux reference host.
+This is alpha software. Milestones 0–5 are established on the documented Linux reference host.
 Milestone 6 release-candidate work is implemented in substantial part but remains in validation;
 unsigned prereleases are distributed through [GitHub Releases](https://github.com/nassimna/cmux-linux-alternative/releases) and the [website](https://nassimna.github.io/cmux-linux-alternative/). There is no signed stable release or public support guarantee.
 
@@ -19,7 +19,7 @@ unsigned prereleases are distributed through [GitHub Releases](https://github.co
 - Visible workspace pins and saved SSH workspaces that launch OpenSSH with an existing alias, key,
   or host configuration.
 - Searchable command palette, editable shortcuts, keyboard navigation, appearance/terminal/
-  notification settings, and explicit stable/beta update controls.
+  notification settings, and explicit stable/beta/alpha update controls.
 - Authenticated local protocol and packaged JSON CLI for workspace list/create, terminal
   create/send, pane split, identify, notifications, and reversible agent hooks.
 - Native Linux x64 AppImage/deb/rpm, macOS Intel and Apple Silicon DMG/zip, and Windows x64 NSIS
