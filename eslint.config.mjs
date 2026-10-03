@@ -7,6 +7,7 @@ export default tseslint.config(
   {
     ignores: [
       '**/dist/**',
+      '**/.astro/**',
       '**/node_modules/**',
       '**/out/**',
       '**/release/**',

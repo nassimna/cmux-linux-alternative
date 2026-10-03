@@ -27,7 +27,9 @@
     "test": "pnpm test:js",
     "test:js": "pnpm test:release && pnpm -r --if-present test",
     "typecheck": "pnpm -r --if-present typecheck",
-    "validate": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm test && pnpm build"
+    "validate": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm test && pnpm build",
+    "dev:website": "pnpm --filter @ternline/website dev",
+    "build:website": "pnpm --filter @ternline/website build"
   },
   "devDependencies": {
     "@eslint/js": "catalog:",
@@ -36,6 +38,7 @@
     "globals": "catalog:",
     "prettier": "catalog:",
     "typescript": "catalog:",
-    "typescript-eslint": "catalog:"
+    "typescript-eslint": "catalog:",
+    "prettier-plugin-astro": "1.1.0"
   }
 }
