@@ -19,14 +19,22 @@ builds the Signal website with matching, versioned download URLs.
    requires the workflow ref to be that exact tag.
 
 Builds use the frozen lockfile, cached pnpm downloads, pinned actions, and Node 22.22.3.
-Release concurrency prevents overlapping runs for the same ref. PR CI runs Node validation;
+Release concurrency prevents overlapping runs for the same ref. PR CI runs Node validation and
+focused Windows runtime contracts on Windows 2022;
 expensive distro-package and security inventories remain scheduled or manual.
 
 ## Artifacts and checksums
 
 Each native build first launches the packaged app with a new, isolated user-data directory,
 waits for the authenticated Node service, and exercises the packaged CLI and a real PTY. Windows
-checks the installed NSIS package. Linux also inspects AppImage/deb/rpm contents and hashes.
+checks the installed NSIS package. All platforms exercise browser automation and workspace
+persistence across restart. Linux also inspects AppImage/deb/rpm contents and hashes.
+
+Windows private writers set their own process token's default object owner to the current user,
+so SQLite-created journals, WAL and SHM files retain the same owner-only proof as explicitly
+created state files. Existing paths with unsafe permissions, reparse points or hard links are
+rejected. Native tests cover these files, lock release on process death, private child IPC, and
+Windows terminal path restoration without allowing traversal outside the workspace.
 
 The release contains:
 
