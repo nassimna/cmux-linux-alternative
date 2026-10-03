@@ -72,7 +72,7 @@ jobs:
           pnpm package:linux
           mkdir -p security-evidence
       - name: Create SPDX JSON SBOM
-        uses: anchore/sbom-action@f8bdd1d8ac5e901a77a92f111440fdb1b593736b # v0.20.6
+        uses: anchore/sbom-action@3ad7283483fc7af8ff2b4ea19663c2d5ca935e26 # v0.24.2
         with:
           path: release
           syft-version: 1.48.0
@@ -81,7 +81,7 @@ jobs:
           upload-artifact: false
           upload-release-assets: false
       - name: Create CycloneDX JSON SBOM
-        uses: anchore/sbom-action@f8bdd1d8ac5e901a77a92f111440fdb1b593736b # v0.20.6
+        uses: anchore/sbom-action@3ad7283483fc7af8ff2b4ea19663c2d5ca935e26 # v0.24.2
         with:
           path: release
           syft-version: 1.48.0
