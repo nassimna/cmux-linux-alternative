@@ -95,7 +95,9 @@ jobs:
           for f in \
             release/*.AppImage \
             release/*.deb \
-            release/*.rpm; do
+            release/*.rpm \
+            release/*-linux.yml \
+            release/*.blockmap; do
             cp "$f" dist-artifacts/
           done
           echo "Collected:"; ls -la dist-artifacts

@@ -2106,7 +2106,7 @@ describe('App', () => {
     await waitFor(() => expect(logLevel).toHaveValue('debug'))
   })
 
-  it('persists the update channel and requires separate update action clicks', async () => {
+  it('opens updates from the titlebar, persists automatic updates and requires explicit restart', async () => {
     const bridge = createBridge()
     bridge.getUpdateState = vi.fn().mockResolvedValue({
       status: 'idle',
@@ -2129,10 +2129,14 @@ describe('App', () => {
     bridge.onUpdateState = vi.fn(() => () => undefined)
     window.desktopBridge = bridge
     render(<App />)
-    fireEvent.click(await screen.findByRole('button', { name: 'Open settings' }))
-    fireEvent.click(screen.getByRole('button', { name: 'Updates' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Open update settings' }))
 
     const channel = await screen.findByRole('combobox', { name: 'Update channel' })
+    const automatic = screen.getByRole('checkbox', {
+      name: 'Automatically check and download updates'
+    })
+    expect(automatic).not.toBeChecked()
+    fireEvent.click(automatic)
     fireEvent.change(channel, { target: { value: 'beta' } })
     fireEvent.click(
       within(channel.closest('.configuration-section') as HTMLElement).getByRole('button', {
@@ -2142,7 +2146,7 @@ describe('App', () => {
     await waitFor(() =>
       expect(bridge.updateConfiguration).toHaveBeenCalledWith({
         expectedRevision: 4,
-        update: { updates: { channel: 'beta' } }
+        update: { updates: { channel: 'beta', automatic: true } }
       })
     )
 
@@ -2152,7 +2156,10 @@ describe('App', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Download update' }))
     expect(bridge.downloadUpdate).toHaveBeenCalledOnce()
     expect(bridge.installUpdate).not.toHaveBeenCalled()
-    fireEvent.click(await screen.findByRole('button', { name: 'Install and restart' }))
+    expect(
+      await screen.findByText('Restarting closes local terminals and may interrupt running agents.')
+    ).toBeInTheDocument()
+    fireEvent.click(await screen.findByRole('button', { name: 'Restart to update' }))
     expect(bridge.installUpdate).toHaveBeenCalledOnce()
   })
 

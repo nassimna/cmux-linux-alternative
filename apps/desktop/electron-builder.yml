@@ -1,5 +1,9 @@
 appId: dev.agentworkspace.desktop
 productName: Ternline
+publish:
+  provider: github
+  owner: nassimna
+  repo: cmux-linux-alternative
 asar: true
 afterPack: ./scripts/after-pack.mjs
 directories:

@@ -106,14 +106,16 @@ export function ConfigurationSettings({
     if (!open) return
     const bridge = window.desktopBridge
     let active = true
+    let receivedEvent = false
     const remove = bridge.onUpdateState?.((state) => {
+      receivedEvent = true
       if (active) setUpdateState(state)
     })
     if (bridge.getUpdateState) {
       void bridge
         .getUpdateState()
         .then((state) => {
-          if (active) setUpdateState(state)
+          if (active && !receivedEvent) setUpdateState(state)
         })
         .catch(() => {
           if (active) setStatus(messages.settings.updater.actionFailed)
@@ -538,7 +540,7 @@ export function ConfigurationSettings({
 
         <SettingsSection
           activeSection={activeSection}
-          note={messages.settings.deferred.updates}
+          note={messages.settings.updater.automaticDescription}
           section="updates"
           title={messages.settings.updates}
         >
@@ -548,7 +550,10 @@ export function ConfigurationSettings({
               onChange={(event) =>
                 updateDraft((current) => ({
                   ...current,
-                  updates: { channel: event.currentTarget.value as 'stable' | 'beta' }
+                  updates: {
+                    ...current.updates,
+                    channel: event.currentTarget.value as 'stable' | 'beta'
+                  }
                 }))
               }
               value={draft.updates.channel}
@@ -557,11 +562,22 @@ export function ConfigurationSettings({
               <option value="beta">{messages.settings.options.beta}</option>
             </select>
           </Field>
+          <CheckField
+            checked={draft.updates.automatic === true}
+            label={messages.settings.updater.automatic}
+            onChange={(automatic) =>
+              updateDraft((current) => ({
+                ...current,
+                updates: { ...current.updates, automatic }
+              }))
+            }
+          />
           <SectionSave
             busy={saving === 'updates'}
             onClick={() =>
               void saveSection('updates', (current) => ({
                 updates: {
+                  ...current.updates,
                   channel: (updateChannelSelectRef.current?.value ??
                     current.updates.channel) as ConfigurationSnapshot['updates']['channel']
                 }
@@ -572,6 +588,11 @@ export function ConfigurationSettings({
             <div className="configuration-update-status" role="status">
               {updateStateMessage(updateState)}
             </div>
+          ) : null}
+          {updateState?.status === 'downloaded' ? (
+            <p className="configuration-update-status">
+              {messages.settings.updater.restartDescription}
+            </p>
           ) : null}
           <div className="configuration-update-actions">
             {updateState &&

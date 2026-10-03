@@ -2566,7 +2566,7 @@ describe('desktop IPC boundary', () => {
       config: { revision: 8 }
     })
     expect(client.updateConfiguration).toHaveBeenCalledWith(params)
-    expect(configurationChanged).toHaveBeenCalledWith('stable')
+    expect(configurationChanged).toHaveBeenCalledWith({ channel: 'stable' })
     await expect(
       electron.handlers.get(DESKTOP_IPC.configurationUpdate)?.(event, {
         ...params,

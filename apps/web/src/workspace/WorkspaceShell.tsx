@@ -77,6 +77,7 @@ import type {
 import { displayTabTitle } from '@agent-workspace/contracts/desktop/browser-messages'
 import type {
   DesktopActionInvokeRequest,
+  DesktopUpdateState,
   DesktopWorkspacePathOpener,
   DesktopWorkspacePathOpenerId,
   WorkspaceGitStatus,
@@ -222,6 +223,28 @@ export function WorkspaceShell({ workspace }: ShellProps): React.JSX.Element {
   }, [])
   const [windowMove, setWindowMove] = useState<WindowMoveDialogState | null>(null)
   const [notificationsOpen, setNotificationsOpen] = useState(false)
+  const [initialSettingsSection, setInitialSettingsSection] =
+    useState<SettingsSectionId>('appearance')
+  const [updateState, setUpdateState] = useState<DesktopUpdateState | null>(null)
+  useEffect(() => {
+    const bridge = window.desktopBridge
+    let active = true
+    let receivedEvent = false
+    const remove = bridge.onUpdateState?.((state) => {
+      receivedEvent = true
+      if (active) setUpdateState(state)
+    })
+    void bridge
+      .getUpdateState?.()
+      .then((state) => {
+        if (active && !receivedEvent) setUpdateState(state)
+      })
+      .catch(() => undefined)
+    return () => {
+      active = false
+      remove?.()
+    }
+  }, [])
   const [preserveNotificationTargetFocus, setPreserveNotificationTargetFocus] = useState(false)
   const [notificationNavigationError, setNotificationNavigationError] = useState<string | null>(
     null
@@ -270,14 +293,18 @@ export function WorkspaceShell({ workspace }: ShellProps): React.JSX.Element {
     if (persist) persistSidebarWidth(next)
   }
 
-  const openSettings = useCallback(() => {
-    const activeElement = document.activeElement
-    settingsReturnFocusRef.current =
-      activeElement instanceof HTMLElement && activeElement !== document.body
-        ? activeElement
-        : settingsTriggerRef.current
-    projection.setSettingsOpen(true)
-  }, [projection])
+  const openSettings = useCallback(
+    (section: SettingsSectionId = 'appearance') => {
+      const activeElement = document.activeElement
+      settingsReturnFocusRef.current =
+        activeElement instanceof HTMLElement && activeElement !== document.body
+          ? activeElement
+          : settingsTriggerRef.current
+      setInitialSettingsSection(section)
+      projection.setSettingsOpen(true)
+    },
+    [projection]
+  )
 
   const selectedPane = workspace?.panes.find((pane) => pane.id === workspace.selectedPaneId)
   const selectedTab = workspace?.tabs.find((tab) => tab.id === selectedPane?.selectedTabId)
@@ -1072,12 +1099,25 @@ export function WorkspaceShell({ workspace }: ShellProps): React.JSX.Element {
           </IconButton>
           <IconButton
             aria-label={messages.workspaceShell.titlebar.openSettings}
-            onClick={openSettings}
+            onClick={() => openSettings()}
             ref={settingsTriggerRef}
             tooltip={commandTooltip('settings.open', messages.workspaceShell.titlebar.openSettings)}
           >
             <Settings size={14} />
           </IconButton>
+          <Button
+            aria-label={messages.settings.updater.open}
+            className="titlebar-update-button"
+            onClick={() => openSettings('updates')}
+            size="small"
+          >
+            <ArrowDown size={14} />
+            {updateState?.status === 'downloaded'
+              ? messages.settings.updater.readyButton
+              : updateState?.status === 'available'
+                ? messages.settings.updater.availableButton
+                : messages.settings.updater.button}
+          </Button>
           <span className="service-version">
             {messages.workspaceShell.titlebar.version(
               projection.identity
@@ -1314,6 +1354,7 @@ export function WorkspaceShell({ workspace }: ShellProps): React.JSX.Element {
           await projection.refresh()
           return true
         }}
+        initialSection={initialSettingsSection}
         key={projection.settingsOpen ? 'settings-open' : 'settings-closed'}
         onOpenChange={(open) => {
           projection.setSettingsOpen(open)
@@ -4479,6 +4520,7 @@ const SETTINGS_SECTIONS: readonly {
 ] as const
 
 export function SettingsDialog({
+  initialSection = 'appearance',
   configurationV2,
   configurationReadOnly,
   nodePreview,
@@ -4492,6 +4534,7 @@ export function SettingsDialog({
   remoteWorkspaceContext,
   shortcuts
 }: {
+  initialSection?: SettingsSectionId
   configurationV2: boolean
   configurationReadOnly?: boolean
   nodePreview?: boolean
@@ -4505,7 +4548,7 @@ export function SettingsDialog({
   remoteWorkspaceContext: RemoteWorkspaceContext | null
   shortcuts: readonly ShortcutSetting[]
 }): React.JSX.Element {
-  const [activeSection, setActiveSection] = useState<SettingsSectionId>('appearance')
+  const [activeSection, setActiveSection] = useState<SettingsSectionId>(initialSection)
   const [settingsQuery, setSettingsQuery] = useState('')
   const [configurationDirty, setConfigurationDirty] = useState(false)
   const [confirmDiscard, setConfirmDiscard] = useState(false)

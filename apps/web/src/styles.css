@@ -1172,6 +1172,15 @@ button {
   margin-left: 7px;
 }
 
+.titlebar-actions .titlebar-update-button {
+  display: inline-flex;
+  width: auto;
+  gap: 6px;
+  padding: 0 8px;
+  color: var(--aw-color-text-secondary);
+  border-color: var(--aw-color-border-default);
+}
+
 .workspace-sidebar {
   gap: 0;
   padding: 0;

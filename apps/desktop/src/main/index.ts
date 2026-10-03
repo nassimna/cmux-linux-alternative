@@ -1226,7 +1226,7 @@ async function bindReadyClientNow(
       .catch(() => undefined)
     if (configuration) {
       browserViews.configureBrowserProfile(configuration.config.browser)
-      updateController?.applyChannel(configuration.config.updates.channel)
+      updateController?.applyConfiguration(configuration.config.updates)
       if (nodeCoreDemoReady) nodeAutomationProfile = configuration.config.browser.partition
     }
     if (
@@ -1319,7 +1319,7 @@ async function bindNativeNodeWindow(window: BrowserWindow): Promise<void> {
       await sidecar.client.getConfiguration()
     )
     browserViews.configureBrowserProfile(configuration.config.browser)
-    updateController?.applyChannel(configuration.config.updates.channel)
+    updateController?.applyConfiguration(configuration.config.updates)
     if (windowRegistry.findByWindow(window) !== entry || window.isDestroyed()) {
       throw new Error('Native Node window changed before binding')
     }
@@ -3479,7 +3479,7 @@ async function startNativeDesktop(userData: string): Promise<void> {
       getNodeConfiguration: () => requireNativeSidecar().client.getConfiguration(),
       updateNodeConfiguration: (params) =>
         requireNativeSidecar().client.updateConfiguration(params),
-      configurationChanged: (channel) => updateController?.applyChannel(channel)
+      configurationChanged: (updates) => updateController?.applyConfiguration(updates)
     }
   )
   try {
@@ -3573,7 +3573,11 @@ async function start(): Promise<void> {
   const userData = app.getPath('userData')
   let feeds = null
   try {
-    feeds = parseUpdateFeedConfiguration(process.env)
+    feeds = parseUpdateFeedConfiguration(process.env) ?? {
+      provider: 'github' as const,
+      owner: 'nassimna',
+      repo: 'cmux-linux-alternative'
+    }
   } catch {
     console.warn('Desktop update feeds are invalid; updates are disabled')
   }

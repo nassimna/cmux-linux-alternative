@@ -68,6 +68,27 @@ async function fixture(config: unknown, terminals?: TerminalService, logger?: Se
 }
 
 describe('configuration qualification', () => {
+  it('defaults automatic updates off for existing profiles and persists opt-in across reopen', async () => {
+    const { service, directory, state } = await fixture({
+      schemaVersion: 2,
+      revision: 7,
+      updates: { channel: 'stable' }
+    })
+    expect((await service.inspect()).config.updates).toEqual({
+      channel: 'stable',
+      automatic: false
+    })
+    await service.update({
+      expectedRevision: 7,
+      update: { updates: { channel: 'beta', automatic: true } }
+    })
+    const reopened = await ConfigurationQualification.create(
+      join(directory, 'state.db'),
+      state,
+      true
+    )
+    expect((await reopened.inspect()).config.updates).toEqual({ channel: 'beta', automatic: true })
+  })
   it('projects a private schema-1 copy without changing it and reports extension fields', async () => {
     const { service, path } = await fixture({
       schemaVersion: 1,
