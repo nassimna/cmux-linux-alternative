@@ -22,8 +22,8 @@ if (!url || !channel) {
     'AGENT_WORKSPACE_UPDATE_BUILD_URL and AGENT_WORKSPACE_UPDATE_BUILD_CHANNEL are required'
   )
 }
-if (!['stable', 'beta'].includes(channel)) {
-  throw new Error('AGENT_WORKSPACE_UPDATE_BUILD_CHANNEL must be stable or beta')
+if (!['stable', 'beta', 'alpha'].includes(channel)) {
+  throw new Error('AGENT_WORKSPACE_UPDATE_BUILD_CHANNEL must be stable, beta or alpha')
 }
 let parsedUrl
 try {

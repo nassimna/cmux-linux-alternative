@@ -33,6 +33,11 @@ describe('update feed configuration', () => {
     { AGENT_WORKSPACE_UPDATE_STABLE_URL: feeds.stable },
     {
       AGENT_WORKSPACE_UPDATE_STABLE_URL: feeds.stable,
+      AGENT_WORKSPACE_UPDATE_BETA_URL: feeds.beta,
+      AGENT_WORKSPACE_UPDATE_ALPHA_URL: feeds.stable
+    },
+    {
+      AGENT_WORKSPACE_UPDATE_STABLE_URL: feeds.stable,
       AGENT_WORKSPACE_UPDATE_BETA_URL: feeds.stable
     },
     {
@@ -257,24 +262,53 @@ describe('update controller', () => {
     expect(controller.getState().status).toBe('downloaded')
   })
 
-  it('uses the trusted GitHub stable and beta release channels', () => {
-    const feed = { provider: 'github' as const, owner: 'nassimna', repo: 'cmux-linux-alternative' }
-    const { controller, updater } = createController({ feeds: feed })
-    expect(updater.setFeedURL).toHaveBeenLastCalledWith({
-      ...feed,
-      channel: 'latest',
-      releaseType: 'release'
+  it('requires an explicit generic Alpha root before checking that channel', async () => {
+    const { controller, updater } = createController()
+    controller.applyConfiguration({ channel: 'alpha' })
+    expect((await controller.check()).status).toBe('unconfigured')
+    expect(updater.checkForUpdates).not.toHaveBeenCalled()
+
+    const alphaFeeds = parseUpdateFeedConfiguration({
+      AGENT_WORKSPACE_UPDATE_STABLE_URL: feeds.stable,
+      AGENT_WORKSPACE_UPDATE_BETA_URL: feeds.beta,
+      AGENT_WORKSPACE_UPDATE_ALPHA_URL: 'https://updates.test.invalid/alpha/'
     })
-    expect(updater.allowPrerelease).toBe(false)
-    controller.applyConfiguration({ channel: 'beta' })
-    expect(updater.setFeedURL).toHaveBeenLastCalledWith({
-      ...feed,
-      channel: 'beta',
-      releaseType: 'prerelease'
+    const configured = createController({ feeds: alphaFeeds })
+    configured.controller.applyConfiguration({ channel: 'alpha' })
+    expect(configured.updater.setFeedURL).toHaveBeenLastCalledWith({
+      provider: 'generic',
+      url: 'https://updates.test.invalid/alpha/',
+      channel: 'alpha'
     })
-    expect(updater.allowPrerelease).toBe(true)
-    expect(updater.allowDowngrade).toBe(false)
+    await configured.controller.check()
+    expect(configured.updater.checkForUpdates).toHaveBeenCalledOnce()
   })
+
+  it.each(['beta', 'alpha'] as const)(
+    'uses the trusted GitHub stable and %s release channels',
+    (channel) => {
+      const feed = {
+        provider: 'github' as const,
+        owner: 'nassimna',
+        repo: 'cmux-linux-alternative'
+      }
+      const { controller, updater } = createController({ feeds: feed })
+      expect(updater.setFeedURL).toHaveBeenLastCalledWith({
+        ...feed,
+        channel: 'latest',
+        releaseType: 'release'
+      })
+      expect(updater.allowPrerelease).toBe(false)
+      controller.applyConfiguration({ channel })
+      expect(updater.setFeedURL).toHaveBeenLastCalledWith({
+        ...feed,
+        channel,
+        releaseType: 'prerelease'
+      })
+      expect(updater.allowPrerelease).toBe(true)
+      expect(updater.allowDowngrade).toBe(false)
+    }
+  )
 })
 
 describe('Linux package detection', () => {

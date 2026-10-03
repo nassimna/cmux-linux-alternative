@@ -40,6 +40,11 @@ try {
   const headers = { authorization: `Bearer ${session.token}` }
   await request(new URL('v1/system/identify', session.baseUrl), headers)
   await request(new URL('v1/state/snapshot', session.baseUrl), headers)
+  const configuration = await request(new URL('v1/configuration', session.baseUrl), headers)
+  await request(new URL('v1/configuration/update', session.baseUrl), headers, {
+    expectedRevision: configuration.config.revision,
+    update: { updates: { channel: 'alpha' } }
+  })
   await runCli(['identify'])
   if (platform === 'windows') {
     const launcher = join(dirname(executable), 'resources', 'cli', 'ternline-cli.cmd')
@@ -85,7 +90,13 @@ try {
     'TERNLINE_NATIVE_BROWSER_OK'
   ])
   await stop(application)
-  await launch(session.token)
+  const restarted = await launch(session.token)
+  const restoredConfiguration = await request(new URL('v1/configuration', restarted.baseUrl), {
+    authorization: `Bearer ${restarted.token}`
+  })
+  if (restoredConfiguration.config.updates.channel !== 'alpha') {
+    throw new Error('Alpha update selection did not persist across application restart.')
+  }
   const restored = JSON.parse(await runCli(['workspace', 'list']))
   if (!restored.snapshot.workspaces.some((workspace) => workspace.id === created.workspaceId)) {
     throw new Error('Workspace did not persist across packaged application restart.')
@@ -148,9 +159,15 @@ async function waitForSession(path, previousToken) {
   throw new Error(`Timed out waiting for native session file: ${String(lastError)}`)
 }
 
-async function request(url, headers) {
-  const response = await fetch(url, { headers, signal: AbortSignal.timeout(5_000) })
+async function request(url, headers, body) {
+  const response = await fetch(url, {
+    headers: { ...headers, 'content-type': 'application/json' },
+    method: body ? 'POST' : 'GET',
+    body: body ? JSON.stringify(body) : undefined,
+    signal: AbortSignal.timeout(5_000)
+  })
   if (!response.ok) throw new Error(`${url} returned ${response.status}.`)
+  return response.json()
 }
 
 async function runCli(args) {

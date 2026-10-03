@@ -75,7 +75,7 @@ jobs:
             throw new Error('Release version must be a semantic version.')
           }
           if (packageJson.version !== requested) throw new Error('Release version must match package.json.')
-          if (!/-beta\.[0-9]+$/u.test(requested)) throw new Error('Unsigned releases must use -beta.N.')
+          if (!/-alpha\.[0-9]+$/u.test(requested)) throw new Error('Unsigned releases must use -alpha.N.')
           const tag = `v${requested}`
           if (process.env.REQUESTED_PUBLISH === 'true' && process.env.REF_NAME !== tag) {
             throw new Error('Publication requires the matching existing tag ref.')
@@ -114,7 +114,7 @@ jobs:
           pnpm --filter @agent-workspace/desktop exec electron-builder
           ${{ matrix.builder }} --publish never
           -c.directories.output=../../release-${{ matrix.label }}
-          -c.publish.channel=beta
+          -c.publish.channel=alpha
           -c.mac.identity=null
           -c.mac.notarize=false
       - name: Verify Linux packages
@@ -168,7 +168,7 @@ jobs:
           mkdir -p dist-artifacts
           find "release-${{ matrix.label }}" -maxdepth 1 -type f \( \
             -name '*.AppImage' -o -name '*.deb' -o -name '*.rpm' -o -name '*.dmg' -o \
-            -name '*.zip' -o -name '*.exe' -o -name 'beta*.yml' -o -name '*.blockmap' \
+            -name '*.zip' -o -name '*.exe' -o -name 'alpha*.yml' -o -name '*.blockmap' \
           \) -print0 | xargs -0 -r -I{} cp {} dist-artifacts/
           test -n "$(find dist-artifacts -type f -print -quit)"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -212,10 +212,10 @@ jobs:
           version = ENV.fetch('REQUESTED_VERSION', '')
           version = ENV.fetch('GITHUB_REF_NAME', '').sub(/^v/, '') if version.empty?
           required = {
-            'linux' => ["agent-workspace-#{version}-x86_64.AppImage", "agent-workspace-#{version}-x86_64.deb", "agent-workspace-#{version}-x86_64.rpm", 'beta-linux.yml'],
-            'macos-arm64' => ["agent-workspace-#{version}-macos-arm64.dmg", "agent-workspace-#{version}-macos-arm64.zip", 'beta-mac.yml'],
-            'macos-x64' => ["agent-workspace-#{version}-macos-x64.dmg", "agent-workspace-#{version}-macos-x64.zip", 'beta-mac.yml'],
-            'windows' => ["agent-workspace-#{version}-windows-x64-setup.exe", 'beta.yml']
+            'linux' => ["agent-workspace-#{version}-x86_64.AppImage", "agent-workspace-#{version}-x86_64.deb", "agent-workspace-#{version}-x86_64.rpm", 'alpha-linux.yml'],
+            'macos-arm64' => ["agent-workspace-#{version}-macos-arm64.dmg", "agent-workspace-#{version}-macos-arm64.zip", 'alpha-mac.yml'],
+            'macos-x64' => ["agent-workspace-#{version}-macos-x64.dmg", "agent-workspace-#{version}-macos-x64.zip", 'alpha-mac.yml'],
+            'windows' => ["agent-workspace-#{version}-windows-x64-setup.exe", 'alpha.yml']
           }
           FileUtils.mkdir_p('release-assets')
           names = {}
@@ -224,7 +224,7 @@ jobs:
             files.each do |name|
               source = File.join('staged', label, name)
               abort("Missing #{source}") unless File.file?(source)
-              if name == 'beta-mac.yml'
+              if name == 'alpha-mac.yml'
                 mac_files << source
                 next
               end
@@ -250,7 +250,7 @@ jobs:
           template = documents.first
           template['files'] = documents.flat_map { |document| document.fetch('files') }
           abort('Duplicate macOS updater file') unless template['files'].map { |file| file.fetch('url') }.uniq.length == template['files'].length
-          File.write('release-assets/beta-mac.yml', YAML.dump(template))
+          File.write('release-assets/alpha-mac.yml', YAML.dump(template))
           RUBY
         env:
           REQUESTED_VERSION: ${{ inputs.version }}
@@ -305,4 +305,4 @@ jobs:
           if gh release view "$tag" >/dev/null 2>&1; then echo "Release $tag already exists" >&2; exit 1; fi
           gh release create "$tag" release-assets/* --verify-tag --prerelease \
             --title "Ternline ${tag}" \
-            --notes 'Unsigned pre-alpha desktop packages for Linux, macOS, and Windows. Verify downloads against SHA256SUMS.'
+            --notes 'Unsigned alpha desktop packages for Linux, macOS, and Windows. Verify downloads against SHA256SUMS.'

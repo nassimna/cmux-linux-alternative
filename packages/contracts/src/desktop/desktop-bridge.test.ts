@@ -102,6 +102,9 @@ describe('desktop lifecycle parser', () => {
 
 describe('desktop update parser', () => {
   it('accepts bounded states without exposing provider data', () => {
+    expect(
+      parseDesktopUpdateState({ status: 'idle', channel: 'alpha', packageType: 'nsis' })
+    ).toMatchObject({ channel: 'alpha' })
     expect(parseDesktopUpdateState({ status: 'unconfigured', channel: 'stable' })).toEqual({
       status: 'unconfigured',
       channel: 'stable'

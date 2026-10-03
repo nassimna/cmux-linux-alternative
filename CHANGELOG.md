@@ -7,10 +7,11 @@ will become binding at version 1.0.
 
 ## [Unreleased]
 
-## [0.2.0-beta.1] - 2026-10-03
+## [0.2.0-alpha.1] - 2026-10-03
 
 ### Added
 
+- Alpha update channel with matching native update metadata and retained manual channel selection.
 - Node/TypeScript desktop runtime with persistent workspaces, real terminals, isolated browser
   views, saved SSH connections, and a packaged CLI for external agents and automation.
 - Signal website with the real, sanitized application screenshot, platform download choices,

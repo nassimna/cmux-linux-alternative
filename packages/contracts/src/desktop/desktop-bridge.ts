@@ -620,7 +620,7 @@ export function parseWorkspaceRuntimeMetadata(value: unknown): WorkspaceRuntimeM
   return { gitBranch: branch, gitStatus, listeningPorts }
 }
 
-export type DesktopUpdateChannel = 'stable' | 'beta'
+export type DesktopUpdateChannel = 'stable' | 'beta' | 'alpha'
 export type DesktopUpdatePackageType = 'appimage' | 'deb' | 'mac' | 'nsis' | 'rpm'
 
 export type DesktopUpdateState =
@@ -713,7 +713,8 @@ function requireExactUpdateKeys(record: Record<string, unknown>, keys: readonly 
 }
 
 function parseUpdateChannel(value: unknown): DesktopUpdateChannel {
-  if (value !== 'stable' && value !== 'beta') throw new Error('Invalid desktop update channel')
+  if (value !== 'stable' && value !== 'beta' && value !== 'alpha')
+    throw new Error('Invalid desktop update channel')
   return value
 }
 

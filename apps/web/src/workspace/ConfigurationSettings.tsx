@@ -552,7 +552,7 @@ export function ConfigurationSettings({
                   ...current,
                   updates: {
                     ...current.updates,
-                    channel: event.currentTarget.value as 'stable' | 'beta'
+                    channel: event.currentTarget.value as 'stable' | 'beta' | 'alpha'
                   }
                 }))
               }
@@ -560,6 +560,7 @@ export function ConfigurationSettings({
             >
               <option value="stable">{messages.settings.options.stable}</option>
               <option value="beta">{messages.settings.options.beta}</option>
+              <option value="alpha">{messages.settings.options.alpha}</option>
             </select>
           </Field>
           <CheckField

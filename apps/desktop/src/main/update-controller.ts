@@ -15,7 +15,8 @@ const FEED_URL_MAX_LENGTH = 2_048
 const DEFAULT_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1_000
 
 export type UpdateFeedConfiguration =
-  { stable: string; beta: string } | { provider: 'github'; owner: string; repo: string }
+  | { stable: string; beta: string; alpha?: string }
+  | { provider: 'github'; owner: string; repo: string }
 
 export interface UpdateInfoLike {
   version: string
@@ -263,7 +264,12 @@ export class UpdateController {
     if (!isUpdatePackageSupported(this.options.platform, this.options.packageType)) {
       return { status: 'unsupported', channel: this.channel }
     }
-    if (!this.options.feeds) return { status: 'unconfigured', channel: this.channel }
+    if (
+      !this.options.feeds ||
+      (!('provider' in this.options.feeds) && !this.options.feeds[this.channel])
+    ) {
+      return { status: 'unconfigured', channel: this.channel }
+    }
     return this.baseState('idle')
   }
 
@@ -296,16 +302,16 @@ export class UpdateController {
     const updaterChannel =
       'provider' in feeds && this.channel === 'stable' ? 'latest' : this.channel
     this.options.updater.channel = updaterChannel
-    this.options.updater.allowPrerelease = this.channel === 'beta'
+    this.options.updater.allowPrerelease = this.channel !== 'stable'
     this.options.updater.allowDowngrade = false
     this.options.updater.setFeedURL(
       'provider' in feeds
         ? {
             ...feeds,
             channel: updaterChannel,
-            releaseType: this.channel === 'beta' ? 'prerelease' : 'release'
+            releaseType: this.channel !== 'stable' ? 'prerelease' : 'release'
           }
-        : { provider: 'generic', url: feeds[this.channel], channel: this.channel }
+        : { provider: 'generic', url: feeds[this.channel]!, channel: this.channel }
     )
     if (!this.automatic) return
     const setIntervalFn = this.options.setInterval ?? ((callback, ms) => setInterval(callback, ms))
@@ -356,15 +362,20 @@ export function parseUpdateFeedConfiguration(
 ): UpdateFeedConfiguration | null {
   const stable = env.AGENT_WORKSPACE_UPDATE_STABLE_URL
   const beta = env.AGENT_WORKSPACE_UPDATE_BETA_URL
-  if (stable === undefined && beta === undefined) return null
+  const alpha = env.AGENT_WORKSPACE_UPDATE_ALPHA_URL
+  if (stable === undefined && beta === undefined && alpha === undefined) return null
   if (stable === undefined || beta === undefined) {
     throw new Error('Both update feed roots must be configured')
   }
   const parsed = {
     stable: parseFeedUrl(stable, options.allowLocalTestFeeds === true),
-    beta: parseFeedUrl(beta, options.allowLocalTestFeeds === true)
+    beta: parseFeedUrl(beta, options.allowLocalTestFeeds === true),
+    ...(alpha === undefined
+      ? {}
+      : { alpha: parseFeedUrl(alpha, options.allowLocalTestFeeds === true) })
   }
-  if (parsed.stable === parsed.beta) throw new Error('Update feed roots must be separate')
+  if (new Set(Object.values(parsed)).size !== Object.values(parsed).length)
+    throw new Error('Update feed roots must be separate')
   return parsed
 }
 
