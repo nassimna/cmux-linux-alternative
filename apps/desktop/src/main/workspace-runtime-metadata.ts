@@ -4,7 +4,7 @@ import {
   MAX_WORKSPACE_RUNTIME_METADATA_CHARS,
   type WorkspaceGitStatus,
   type WorkspaceRuntimeMetadata
-} from '../shared/desktop-bridge'
+} from '@agent-workspace/contracts/desktop/desktop-bridge'
 
 const GIT_TIMEOUT_MS = 1_000
 const GIT_MAX_BUFFER_BYTES = 4 * 1024

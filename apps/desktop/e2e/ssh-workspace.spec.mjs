@@ -13,7 +13,6 @@ import { createPackagedElectronHarness } from './helpers/packaged-electron-harne
 
 const desktopDirectory = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const repositoryDirectory = resolve(desktopDirectory, '../..')
-const serviceBinary = join(repositoryDirectory, 'target/debug/agent-workspace-service')
 const dialogHarnessEntry = join(desktopDirectory, 'e2e/helpers/dialog-harness-main.cjs')
 const evidenceDirectory =
   process.env.AGENT_WORKSPACE_EVIDENCE_DIR ??
@@ -39,10 +38,6 @@ async function auditDialog(page) {
 
 test.beforeAll(async () => {
   test.setTimeout(120_000)
-  execFileSync('cargo', ['build', '-p', 'agent-workspace-service'], {
-    cwd: repositoryDirectory,
-    stdio: 'pipe'
-  })
   execFileSync('pnpm', ['--filter', '@agent-workspace/desktop', 'build'], {
     cwd: repositoryDirectory,
     stdio: 'pipe'
@@ -91,7 +86,7 @@ test('keeps output responsive and manages a saved SSH workspace', async () => {
     await mkdir(binDirectory)
     await writeFile(sshExecutable, '#!/bin/sh\nprintf "SSH_ARGS:%s\\n" "$*"\nsleep 30\n')
     await chmod(sshExecutable, 0o700)
-    harness = await createPackagedElectronHarness(profileDirectory, serviceBinary)
+    harness = await createPackagedElectronHarness(profileDirectory)
     let page = await launch()
     await page.locator('.xterm-helper-textarea').focus()
     await page.keyboard.type('seq 1 20000; printf "OUTPUT_COMPLETE\\n"')
@@ -191,6 +186,71 @@ test('keeps output responsive and manages a saved SSH workspace', async () => {
     )
   } finally {
     await closeElectronApplication(application).catch(() => undefined)
+    await rm(profileDirectory, { force: true, recursive: true, maxRetries: 3, retryDelay: 100 })
+  }
+})
+
+test('Add tab uses the saved SSH connection and subsequent edits', async () => {
+  test.setTimeout(60_000)
+  const profileDirectory = await mkdtemp(join(homedir(), '.cache/aw-ssh-tab-'))
+  const binDirectory = join(profileDirectory, 'bin')
+  let application
+  try {
+    await mkdir(binDirectory)
+    const sshExecutable = join(binDirectory, 'ssh')
+    await writeFile(sshExecutable, '#!/bin/sh\nprintf "SSH_ARGS:%s\\n" "$*"\nsleep 30\n')
+    await chmod(sshExecutable, 0o700)
+    const harness = await createPackagedElectronHarness(profileDirectory)
+    const environment = { ...process.env }
+    delete environment.ELECTRON_RUN_AS_NODE
+    application = await electron.launch({
+      args: [dialogHarnessEntry, `--user-data-dir=${profileDirectory}`, '--disable-gpu'],
+      cwd: desktopDirectory,
+      executablePath: harness.executablePath,
+      env: {
+        ...environment,
+        ...harness.electronEnvironment,
+        AGENT_WORKSPACE_E2E_DIALOG_RESPONSES: '{}',
+        HOME: profileDirectory,
+        PATH: `${binDirectory}:${process.env.PATH}`,
+        TMPDIR: harness.runtimeDirectory,
+        XDG_RUNTIME_DIR: harness.runtimeDirectory,
+        ZDOTDIR: profileDirectory
+      }
+    })
+    const page = await application.firstWindow()
+    expect(await application.evaluate(({ app }) => app.getPath('userData'))).toBe(profileDirectory)
+    await expect(page.locator('.terminal-pane')).toHaveAttribute('data-process-id', /^\d+$/)
+    await application.evaluate(({ BrowserWindow }) => {
+      BrowserWindow.getAllWindows()[0]?.setContentSize(1200, 800)
+    })
+    await page.setViewportSize({ width: 1200, height: 800 })
+    await page.getByRole('button', { name: 'Create SSH workspace' }).click()
+    await page.getByRole('textbox', { name: 'Workspace name' }).fill('Demo SSH')
+    await page.getByRole('textbox', { name: 'SSH host or alias' }).fill('demo-host')
+    await page.getByRole('textbox', { name: 'Username (optional)' }).fill('deploy')
+    await page.getByRole('button', { name: 'Create and pin' }).click()
+    await expect(page.locator('.xterm-rows').last()).toContainText('SSH_ARGS:deploy@demo-host')
+    await page.getByRole('button', { name: 'Add tab' }).click()
+    await page.getByRole('menuitem', { name: 'Terminal', exact: true }).click()
+    await expect(page.getByRole('tab')).toHaveCount(2)
+    await expect(page.locator('.xterm-rows').last()).toContainText('SSH_ARGS:deploy@demo-host')
+    await page.screenshot({ path: join(evidenceDirectory, 'ssh-add-tab-desktop.png') })
+    await page.locator('.workspace-card').filter({ hasText: 'Demo SSH' }).click({ button: 'right' })
+    await page.getByRole('menuitem', { name: 'Edit SSH connection' }).click()
+    await page.getByRole('textbox', { name: 'SSH host or alias' }).fill('edited-host')
+    await page.getByRole('button', { name: 'Save connection' }).click()
+    await page.getByRole('button', { name: 'Add tab' }).click()
+    await page.getByRole('menuitem', { name: 'Terminal', exact: true }).click()
+    await expect(page.getByRole('tab')).toHaveCount(3)
+    await expect(page.locator('.xterm-rows').last()).toContainText('SSH_ARGS:deploy@edited-host')
+    await application.evaluate(({ BrowserWindow }) => {
+      BrowserWindow.getAllWindows()[0]?.setContentSize(900, 700)
+    })
+    await page.setViewportSize({ width: 900, height: 700 })
+    await page.screenshot({ path: join(evidenceDirectory, 'ssh-add-tab-narrow.png') })
+  } finally {
+    await application?.close().catch(() => undefined)
     await rm(profileDirectory, { force: true, recursive: true, maxRetries: 3, retryDelay: 100 })
   }
 })

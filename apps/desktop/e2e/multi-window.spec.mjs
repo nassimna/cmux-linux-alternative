@@ -16,12 +16,6 @@ const desktopDirectory = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const repositoryDirectory = resolve(desktopDirectory, '../..')
 const mainEntry = join(desktopDirectory, 'out/main/index.js')
 const preloadEntry = join(desktopDirectory, 'out/preload/index.cjs')
-const serviceBinary = join(
-  repositoryDirectory,
-  'target',
-  'debug',
-  process.platform === 'win32' ? 'agent-workspace-service.exe' : 'agent-workspace-service'
-)
 const rendererUrl = 'agent-workspace://renderer/index.html'
 
 test.beforeAll(() => {
@@ -29,10 +23,6 @@ test.beforeAll(() => {
   if (process.platform === 'linux' && !process.env.DISPLAY && !process.env.WAYLAND_DISPLAY) {
     throw new Error('Electron multi-window E2E needs an X11 or Wayland display.')
   }
-  execFileSync('cargo', ['build', '-p', 'agent-workspace-service'], {
-    cwd: repositoryDirectory,
-    stdio: 'inherit'
-  })
   execFileSync('pnpm', ['--filter', '@agent-workspace/desktop', 'build'], {
     cwd: repositoryDirectory,
     stdio: 'inherit'
@@ -51,7 +41,7 @@ test('owns, transfers, denies, and restores two packaged desktop windows', async
   let application
 
   try {
-    const harness = await createPackagedElectronHarness(profileDirectory, serviceBinary)
+    const harness = await createPackagedElectronHarness(profileDirectory)
     application = await launchApplication(profileDirectory, harness, errors)
     const primary = await readyPage(application, errors)
     await installRendererTrace(primary)

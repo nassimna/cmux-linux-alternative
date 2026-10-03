@@ -1,206 +1,308 @@
-name: Release (downloadable packages)
-
-# Builds unsigned, downloadable packages for Linux and macOS (Intel + Apple
-# Silicon), then publishes them to a single GitHub Release.
-#
-# Trigger either by:
-#   - pushing a tag like v0.1.0, or
-#   - running this workflow manually (Actions tab) with a tag input.
-#
-# The builds are UNSIGNED. macOS shows a Gatekeeper "unidentified developer"
-# warning (right-click -> Open to bypass). Add Apple signing secrets later to
-# remove it. Windows is intentionally not built (the Rust backend is Unix-only).
+name: Release desktop packages
 
 on:
   push:
-    tags:
-      - 'v*'
+    tags: ['v*']
   workflow_dispatch:
     inputs:
-      tag:
-        description: Release tag to create (e.g. v0.1.0)
+      version:
+        description: Exact package version without the v prefix
         required: true
         type: string
-      prerelease:
-        description: Mark the GitHub Release as a prerelease
-        required: false
-        default: true
+      publish:
+        description: Publish after every native qualification passes
+        required: true
+        default: false
         type: boolean
 
 permissions:
   contents: read
 
 concurrency:
-  group: release-${{ github.event.inputs.tag || github.ref_name }}
+  group: release-${{ github.event_name == 'workflow_dispatch' && inputs.version || github.ref_name }}
   cancel-in-progress: false
 
 env:
+  NODE_VERSION: 22.23.3
   PNPM_VERSION: 10.34.5
-  NODE_VERSION: 22.20.0
-  RUST_VERSION: 1.96.0
 
 jobs:
-  build:
-    name: Build ${{ matrix.label }}
+  package:
+    name: Package ${{ matrix.label }}
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 60
-    # Linux is required for a release; macOS/Windows are best-effort while the
-    # backend is ported off Linux-only syscalls. Their assets auto-append to the
-    # same release once they start building green.
-    continue-on-error: ${{ matrix.label != 'linux-x64' }}
+    timeout-minutes: 75
     strategy:
       fail-fast: false
       matrix:
         include:
           - label: linux-x64
             os: ubuntu-latest
-          - label: macos-x64
-            os: macos-13 # Intel host: native x86_64 Rust sidecar for the x64 app
+            builder: --linux AppImage deb rpm --x64
           - label: macos-arm64
-            os: macos-14 # Apple Silicon host: native arm64 Rust sidecar for the arm64 app
+            os: macos-15
+            builder: --mac dmg zip --arm64
+          - label: macos-x64
+            os: macos-15-intel
+            builder: --mac dmg zip --x64
+          - label: windows-x64
+            os: windows-2022
+            builder: --win nsis --x64
     steps:
-      - name: Check out repository
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-
-      - name: Install pnpm
-        uses: pnpm/action-setup@008330803749db0355799c700092d9a85fd074e9 # v6.0.9
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.0
         with:
           version: ${{ env.PNPM_VERSION }}
-
-      - name: Install Node.js
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
+      - name: Validate release version and tag
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          REF_NAME: ${{ github.ref_name }}
+          REQUESTED_VERSION: ${{ inputs.version }}
+          REQUESTED_PUBLISH: ${{ inputs.publish }}
+        run: |
+          node --input-type=module <<'EOF'
+          import { readFile, appendFile } from 'node:fs/promises'
 
-      - name: Install Rust toolchain
-        run: rustup toolchain install ${{ env.RUST_VERSION }} --profile minimal
-
-      - name: Cache Rust builds
-        uses: Swatinem/rust-cache@23869a5bd66c73db3c0ac40331f3206eb23791dc # v2.9.1
-
-      - name: Install rpm tooling (Linux rpm target)
+          const packageJson = JSON.parse(await readFile('package.json', 'utf8'))
+          const requested = process.env.EVENT_NAME === 'workflow_dispatch'
+            ? process.env.REQUESTED_VERSION
+            : process.env.REF_NAME?.replace(/^v/u, '')
+          if (!/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/u.test(requested ?? '')) {
+            throw new Error('Release version must be a semantic version.')
+          }
+          if (packageJson.version !== requested) throw new Error('Release version must match package.json.')
+          if (!/-beta\.[0-9]+$/u.test(requested)) throw new Error('Unsigned releases must use -beta.N.')
+          const tag = `v${requested}`
+          if (process.env.REQUESTED_PUBLISH === 'true' && process.env.REF_NAME !== tag) {
+            throw new Error('Publication requires the matching existing tag ref.')
+          }
+          if (process.env.EVENT_NAME === 'push' && process.env.REF_NAME !== tag) {
+            throw new Error('Tag must exactly match package.json.')
+          }
+          await appendFile(process.env.GITHUB_ENV, `RELEASE_VERSION=${requested}\nRELEASE_TAG=${tag}\n`)
+          EOF
+      - name: Install Linux package tooling
         if: matrix.label == 'linux-x64'
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends rpm
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Build native service sidecar
-        run: pnpm build:service
-
-      - name: Build renderer bundle
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends rpm cpio xvfb
+      - run: pnpm install --frozen-lockfile
+      - name: Validate release notes and package versions
+        shell: bash
+        run: node scripts/release/validate-release.mjs --version "$RELEASE_VERSION" --mode candidate
+      - name: Run native persistence and session tests
+        run: >-
+          pnpm --filter @agent-workspace/server exec vitest run
+          src/persistence/live-owner-lock.test.ts
+          src/persistence/windows-private-state.test.ts
+          src/http/child-ipc-stream.test.ts
+          src/http/node-session-file.test.ts
+      - name: Build Node service and CLI
+        run: pnpm build:node
+      - name: Stage Linux Node runtime
+        if: matrix.label == 'linux-x64'
+        run: node scripts/stage-linux-node-runtime.mjs
+      - name: Build desktop renderer
         run: pnpm --filter @agent-workspace/desktop exec electron-vite build
-
-      - name: Package Linux (AppImage, deb, rpm)
+      - name: Package unsigned desktop application
+        shell: bash
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+        run: >-
+          pnpm --filter @agent-workspace/desktop exec electron-builder
+          ${{ matrix.builder }} --publish never
+          -c.directories.output=../../release-${{ matrix.label }}
+          -c.publish.channel=beta
+          -c.mac.identity=null
+          -c.mac.notarize=false
+      - name: Verify Linux packages
         if: matrix.label == 'linux-x64'
-        run: >-
-          pnpm --filter @agent-workspace/desktop exec electron-builder
-          --linux AppImage deb rpm --x64 --publish never
-
-      - name: Package macOS Intel (dmg, zip)
-        if: matrix.label == 'macos-x64'
-        run: >-
-          pnpm --filter @agent-workspace/desktop exec electron-builder
-          --mac dmg zip --x64 --publish never
-          -c.mac.identity=null -c.mac.hardenedRuntime=false -c.mac.notarize=false
-
-      - name: Package macOS Apple Silicon (dmg, zip)
-        if: matrix.label == 'macos-arm64'
-        run: >-
-          pnpm --filter @agent-workspace/desktop exec electron-builder
-          --mac dmg zip --arm64 --publish never
-          -c.mac.identity=null -c.mac.hardenedRuntime=false -c.mac.notarize=false
-
-      - name: Collect installable artifacts
+        run: |
+          node apps/desktop/scripts/release-artifacts.mjs create --release-dir release-linux-x64 --version "$RELEASE_VERSION"
+          for type in AppImage deb rpm; do
+            artifact="release-linux-x64/agent-workspace-${RELEASE_VERSION}-x86_64.${type}"
+            scripts/release/inspect-node-preview.sh "$artifact" "$type"
+          done
+          scripts/release/verify-downloaded-artifacts.sh release-linux-x64 "$RELEASE_VERSION"
+      - name: Exercise packaged Linux service, CLI, and PTY
+        if: matrix.label == 'linux-x64'
+        run: |
+          sudo chown root:root release-linux-x64/linux-unpacked/chrome-sandbox
+          sudo chmod 4755 release-linux-x64/linux-unpacked/chrome-sandbox
+          xvfb-run -a node scripts/release/verify-native-package.mjs \
+            --platform linux \
+            --executable release-linux-x64/linux-unpacked/agent-workspace \
+            --cli release-linux-x64/linux-unpacked/resources/node-linux/bin/node \
+            --cli-entry release-linux-x64/linux-unpacked/resources/node-linux/bin/agent-workspace-node.mjs \
+            --profile-root "$RUNNER_TEMP"
+      - name: Exercise packaged macOS service, CLI, and PTY
+        if: startsWith(matrix.label, 'macos-')
+        run: |
+          application=$(find "release-${{ matrix.label }}" -name '*.app' -type d -print -quit)
+          test -n "$application"
+          node scripts/release/verify-native-package.mjs \
+            --platform macos \
+            --executable "$application/Contents/MacOS/Ternline" \
+            --cli "$application/Contents/Resources/cli/ternline-cli" \
+            --profile-root "$RUNNER_TEMP"
+      - name: Exercise packaged Windows service, CLI, and PTY
+        if: matrix.label == 'windows-x64'
+        shell: pwsh
+        run: |
+          $installer = Get-ChildItem 'release-windows-x64' -Filter '*.exe' | Select-Object -First 1
+          if ($null -eq $installer) { throw 'Windows installer was not produced.' }
+          $destination = Join-Path $env:RUNNER_TEMP 'ternline-release'
+          $installation = Start-Process -FilePath $installer.FullName -ArgumentList '/S', "/D=$destination" -Wait -PassThru
+          if ($installation.ExitCode -ne 0) { throw 'Windows installation failed.' }
+          node scripts/release/verify-native-package.mjs `
+            --platform windows `
+            --executable (Join-Path $destination 'agent-workspace.exe') `
+            --cli (Join-Path $destination 'agent-workspace.exe') `
+            --cli-entry (Join-Path $destination 'resources/app.asar/cli/dist/bin.mjs') `
+            --profile-root $env:RUNNER_TEMP
+      - name: Collect release files
         shell: bash
         run: |
           mkdir -p dist-artifacts
-          shopt -s nullglob
-          for f in \
-            release/*.AppImage \
-            release/*.deb \
-            release/*.rpm \
-            release/*.dmg \
-            release/*.zip \
-            release/*-setup.exe; do
-            cp "$f" dist-artifacts/
-          done
-          echo "Collected:"; ls -la dist-artifacts
-
-      - name: Upload build artifacts
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+          find "release-${{ matrix.label }}" -maxdepth 1 -type f \( \
+            -name '*.AppImage' -o -name '*.deb' -o -name '*.rpm' -o -name '*.dmg' -o \
+            -name '*.zip' -o -name '*.exe' -o -name 'beta*.yml' -o -name '*.blockmap' \
+          \) -print0 | xargs -0 -r -I{} cp {} dist-artifacts/
+          test -n "$(find dist-artifacts -type f -print -quit)"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: package-${{ matrix.label }}
-          path: dist-artifacts/*
+          name: release-${{ matrix.label }}
+          path: dist-artifacts
           if-no-files-found: error
           retention-days: 7
 
   publish:
-    name: Publish GitHub Release
-    needs: build
+    name: Publish prerelease
+    needs: package
+    if: github.event_name == 'push' || inputs.publish
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     permissions:
       contents: write
     steps:
-      - name: Resolve release tag
-        id: meta
-        run: |
-          if [[ -n "${{ github.event.inputs.tag }}" ]]; then
-            echo "tag=${{ github.event.inputs.tag }}" >> "$GITHUB_OUTPUT"
-            echo "prerelease=${{ github.event.inputs.prerelease }}" >> "$GITHUB_OUTPUT"
-          else
-            echo "tag=${{ github.ref_name }}" >> "$GITHUB_OUTPUT"
-            echo "prerelease=true" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Download all build artifacts
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
-          pattern: package-*
-          path: staged
-          merge-multiple: true
-
-      - name: Generate checksums
-        working-directory: staged
+          name: release-linux-x64
+          path: staged/linux
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: release-macos-arm64
+          path: staged/macos-arm64
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: release-macos-x64
+          path: staged/macos-x64
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: release-windows-x64
+          path: staged/windows
+      - name: Aggregate exact release assets
         run: |
-          ls -la
-          sha256sum * > SHA256SUMS
-          echo "----- SHA256SUMS -----"; cat SHA256SUMS
+          ruby <<'RUBY'
+          require 'fileutils'
+          require 'yaml'
+          version = ENV.fetch('REQUESTED_VERSION', '')
+          version = ENV.fetch('GITHUB_REF_NAME', '').sub(/^v/, '') if version.empty?
+          required = {
+            'linux' => ["agent-workspace-#{version}-x86_64.AppImage", "agent-workspace-#{version}-x86_64.deb", "agent-workspace-#{version}-x86_64.rpm", 'beta-linux.yml'],
+            'macos-arm64' => ["agent-workspace-#{version}-macos-arm64.dmg", "agent-workspace-#{version}-macos-arm64.zip", 'beta-mac.yml'],
+            'macos-x64' => ["agent-workspace-#{version}-macos-x64.dmg", "agent-workspace-#{version}-macos-x64.zip", 'beta-mac.yml'],
+            'windows' => ["agent-workspace-#{version}-windows-x64-setup.exe", 'beta.yml']
+          }
+          FileUtils.mkdir_p('release-assets')
+          names = {}
+          mac_files = []
+          required.each do |label, files|
+            files.each do |name|
+              source = File.join('staged', label, name)
+              abort("Missing #{source}") unless File.file?(source)
+              if name == 'beta-mac.yml'
+                mac_files << source
+                next
+              end
+              abort("Duplicate release asset #{name}") if names[name]
+              names[name] = true
+              FileUtils.cp(source, File.join('release-assets', name))
+            end
+            Dir.glob(File.join('staged', label, '*.blockmap')).each do |source|
+              name = File.basename(source)
+              abort("Duplicate release asset #{name}") if names[name]
+              names[name] = true
+              FileUtils.cp(source, File.join('release-assets', name))
+            end
+          end
+          documents = mac_files.map { |path| YAML.safe_load_file(path, permitted_classes: [], aliases: false) }
+          documents.each do |document|
+            abort('macOS updater version mismatch') unless document.fetch('version') == version
+            document.fetch('files').each do |file|
+              abort('macOS updater asset missing') unless names[file.fetch('url')]
+              abort('macOS updater hash missing') unless file.fetch('sha512').is_a?(String)
+            end
+          end
+          template = documents.first
+          template['files'] = documents.flat_map { |document| document.fetch('files') }
+          abort('Duplicate macOS updater file') unless template['files'].map { |file| file.fetch('url') }.uniq.length == template['files'].length
+          File.write('release-assets/beta-mac.yml', YAML.dump(template))
+          RUBY
+        env:
+          REQUESTED_VERSION: ${{ inputs.version }}
+      - name: Validate exact release files
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          REF_NAME: ${{ github.ref_name }}
+          REQUESTED_VERSION: ${{ inputs.version }}
+        run: |
+          node --input-type=module <<'EOF'
+          import { readFile, readdir, writeFile } from 'node:fs/promises'
 
-      - name: Create or update GitHub Release
+          const packageJson = JSON.parse(await readFile('package.json', 'utf8'))
+          const version = process.env.EVENT_NAME === 'workflow_dispatch'
+            ? process.env.REQUESTED_VERSION
+            : process.env.REF_NAME.replace(/^v/u, '')
+          if (packageJson.version !== version) throw new Error('Release version must match package.json.')
+          const files = await readdir('release-assets')
+          const required = [
+            `agent-workspace-${version}-x86_64.AppImage`,
+            `agent-workspace-${version}-macos-arm64.dmg`,
+            `agent-workspace-${version}-macos-x64.dmg`,
+            `agent-workspace-${version}-windows-x64-setup.exe`
+          ]
+          for (const file of required) if (!files.includes(file)) throw new Error(`Missing ${file}.`)
+          const tag = `v${version}`
+          const repository = process.env.GITHUB_REPOSITORY
+          await writeFile('release-assets/release-manifest.json', JSON.stringify({
+            version,
+            tag,
+            sourceSha: process.env.GITHUB_SHA,
+            prerelease: true,
+            downloads: {
+              linux: `https://github.com/${repository}/releases/download/${tag}/agent-workspace-${version}-x86_64.AppImage`,
+              macos: `https://github.com/${repository}/releases/download/${tag}/agent-workspace-${version}-macos-arm64.dmg`,
+              windows: `https://github.com/${repository}/releases/download/${tag}/agent-workspace-${version}-windows-x64-setup.exe`
+            }
+          }, null, 2))
+          EOF
+      - name: Create combined checksums
+        working-directory: release-assets
+        run: find . -maxdepth 1 -type f ! -name SHA256SUMS -printf '%f\n' | sort | xargs sha256sum > SHA256SUMS
+      - name: Create prerelease
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: ${{ steps.meta.outputs.tag }}
-          PRERELEASE: ${{ steps.meta.outputs.prerelease }}
+          EVENT_NAME: ${{ github.event_name }}
+          REF_NAME: ${{ github.ref_name }}
+          REQUESTED_VERSION: ${{ inputs.version }}
         run: |
-          notes=$(cat <<'EOF'
-          Downloadable desktop packages for **Agent Workspace**.
-
-          | Platform | File |
-          | --- | --- |
-          | Linux (AppImage) | `agent-workspace-*-x86_64.AppImage` |
-          | Linux (Debian/Ubuntu) | `agent-workspace-*-x86_64.deb` |
-          | Linux (Fedora/RHEL) | `agent-workspace-*-x86_64.rpm` |
-          | macOS Intel | `agent-workspace-*-macos-x64.dmg` |
-          | macOS Apple Silicon | `agent-workspace-*-macos-arm64.dmg` |
-
-          Verify downloads against `SHA256SUMS`.
-
-          > **Note:** These builds are **unsigned**. On macOS, right-click the app and choose
-          > **Open** to bypass the Gatekeeper "unidentified developer" prompt.
-          EOF
-          )
-          prerelease_flag=()
-          if [[ "$PRERELEASE" == "true" ]]; then prerelease_flag+=(--prerelease); fi
-          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            gh release upload "$TAG" staged/* --repo "$GITHUB_REPOSITORY" --clobber
-          else
-            gh release create "$TAG" staged/* \
-              --repo "$GITHUB_REPOSITORY" \
-              --target "$GITHUB_SHA" \
-              --title "Agent Workspace ${TAG}" \
-              --notes "$notes" \
-              "${prerelease_flag[@]}"
-          fi
+          version=${REQUESTED_VERSION:-${REF_NAME#v}}
+          tag="v${version}"
+          if gh release view "$tag" >/dev/null 2>&1; then echo "Release $tag already exists" >&2; exit 1; fi
+          gh release create "$tag" release-assets/* --verify-tag --prerelease \
+            --title "Ternline ${tag}" \
+            --notes 'Unsigned pre-alpha desktop packages for Linux, macOS, and Windows. Verify downloads against SHA256SUMS.'

@@ -1,7 +1,7 @@
 import { execFile, execFileSync } from 'node:child_process'
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { basename, dirname, join, resolve } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 import process from 'node:process'
 import { promisify } from 'node:util'
 import { fileURLToPath } from 'node:url'
@@ -14,10 +14,7 @@ const execFileAsync = promisify(execFile)
 const desktopDirectory = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const repositoryDirectory = resolve(desktopDirectory, '../..')
 const mainEntry = join(desktopDirectory, 'out/main/index.js')
-const executable = (name) =>
-  join(repositoryDirectory, 'target', 'debug', process.platform === 'win32' ? `${name}.exe` : name)
-const serviceBinary = executable('agent-workspace-service')
-const cliBinary = executable('agent-workspace-cli')
+const cliBinary = join(repositoryDirectory, 'target/node-linux/bin/agent-workspace-node.mjs')
 const rendererUrl = 'agent-workspace://renderer/index.html'
 const startupReadyTimeoutMs = 20_000
 const primaryModifier = process.platform === 'darwin' ? 'Meta' : 'Control'
@@ -25,11 +22,9 @@ const evidenceDirectory =
   process.env.AGENT_WORKSPACE_EVIDENCE_DIR ?? join(tmpdir(), 'agent-workspace-m3-validation')
 const benignExternalConsoleError = /(?:font(?:config)?|gpu|mesa|dri3|webgl)/i
 
-async function harnessServiceProcessId(runtimeDirectory) {
+async function harnessServiceProcessId(serverPath) {
   const { stdout } = await execFileAsync('ps', ['-eo', 'pid=,args='])
-  const matches = stdout
-    .split('\n')
-    .filter((line) => line.includes(runtimeDirectory) && line.includes(basename(serviceBinary)))
+  const matches = stdout.split('\n').filter((line) => line.includes(serverPath))
   if (matches.length !== 1) {
     throw new Error(`Expected one harness service process, found ${String(matches.length)}`)
   }
@@ -46,10 +41,6 @@ test.beforeAll(async () => {
     throw new Error('Electron E2E needs an X11 or Wayland display.')
   }
   await mkdir(evidenceDirectory, { recursive: true })
-  execFileSync('cargo', ['build', '-p', 'agent-workspace-service', '-p', 'agent-workspace-cli'], {
-    cwd: repositoryDirectory,
-    stdio: 'inherit'
-  })
   execFileSync('pnpm', ['--filter', '@agent-workspace/desktop', 'build'], {
     cwd: repositoryDirectory,
     stdio: 'inherit'
@@ -66,8 +57,8 @@ test('CLI identify, notification attention, exact tab jump, and read transition'
   let pausedServiceProcessId
 
   try {
-    const harness = await createPackagedElectronHarness(profileDirectory, serviceBinary)
-    const sessionFile = join(harness.runtimeDirectory, 'agent-workspace', 'cli-session.json')
+    const harness = await createPackagedElectronHarness(profileDirectory)
+    const sessionFile = join(profileDirectory, 'runtime', 'node-cli-session.json')
     electronApplication = await electron.launch({
       args: [mainEntry, `--user-data-dir=${profileDirectory}`, '--disable-gpu'],
       cwd: desktopDirectory,
@@ -328,7 +319,7 @@ test('CLI identify, notification attention, exact tab jump, and read transition'
 
     if (process.platform === 'linux') {
       expect(await page.evaluate(() => Object.isFrozen(globalThis.desktopBridge))).toBe(true)
-      pausedServiceProcessId = await harnessServiceProcessId(harness.runtimeDirectory)
+      pausedServiceProcessId = await harnessServiceProcessId(harness.serverPath)
       process.kill(pausedServiceProcessId, 'SIGSTOP')
     }
 

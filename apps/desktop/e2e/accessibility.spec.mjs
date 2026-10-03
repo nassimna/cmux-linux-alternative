@@ -17,10 +17,7 @@ const execFileAsync = promisify(execFile)
 const desktopDirectory = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const repositoryDirectory = resolve(desktopDirectory, '../..')
 const mainEntry = join(desktopDirectory, 'out/main/index.js')
-const executable = (name) =>
-  join(repositoryDirectory, 'target', 'debug', process.platform === 'win32' ? `${name}.exe` : name)
-const serviceBinary = executable('agent-workspace-service')
-const cliBinary = executable('agent-workspace-cli')
+const cliBinary = join(repositoryDirectory, 'target/node-linux/bin/agent-workspace-node.mjs')
 const rendererUrl = 'agent-workspace://renderer/index.html'
 const primaryModifier = process.platform === 'darwin' ? 'Meta' : 'Control'
 const evidenceDirectory =
@@ -116,10 +113,6 @@ test.beforeAll(async () => {
     throw new Error('Electron accessibility E2E needs an X11 or Wayland display.')
   }
   await mkdir(evidenceDirectory, { recursive: true })
-  execFileSync('cargo', ['build', '-p', 'agent-workspace-service', '-p', 'agent-workspace-cli'], {
-    cwd: repositoryDirectory,
-    stdio: 'inherit'
-  })
   execFileSync('pnpm', ['--filter', '@agent-workspace/desktop', 'build'], {
     cwd: repositoryDirectory,
     stdio: 'inherit'
@@ -133,8 +126,8 @@ test('representative renderer states meet the accessibility baseline', async () 
   let electronApplication
 
   try {
-    const harness = await createPackagedElectronHarness(profileDirectory, serviceBinary)
-    const sessionFile = join(harness.runtimeDirectory, 'agent-workspace', 'cli-session.json')
+    const harness = await createPackagedElectronHarness(profileDirectory)
+    const sessionFile = join(profileDirectory, 'runtime', 'node-cli-session.json')
     electronApplication = await electron.launch({
       args: [mainEntry, `--user-data-dir=${profileDirectory}`, '--disable-gpu'],
       cwd: desktopDirectory,
@@ -418,7 +411,7 @@ test('screen-reader controls remain keyboard reachable in a narrow terminal pane
   let electronApplication
 
   try {
-    const harness = await createPackagedElectronHarness(profileDirectory, serviceBinary)
+    const harness = await createPackagedElectronHarness(profileDirectory)
     electronApplication = await electron.launch({
       args: [mainEntry, `--user-data-dir=${profileDirectory}`, '--disable-gpu'],
       cwd: desktopDirectory,
@@ -482,7 +475,7 @@ test('zoom reflow and forced colors preserve keyboard operation and visible focu
   let electronApplication
 
   try {
-    const harness = await createPackagedElectronHarness(profileDirectory, serviceBinary)
+    const harness = await createPackagedElectronHarness(profileDirectory)
     electronApplication = await electron.launch({
       args: [mainEntry, `--user-data-dir=${profileDirectory}`, '--disable-gpu'],
       cwd: desktopDirectory,

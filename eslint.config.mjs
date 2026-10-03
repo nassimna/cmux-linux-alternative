@@ -7,6 +7,7 @@ export default tseslint.config(
   {
     ignores: [
       '**/dist/**',
+      '**/.astro/**',
       '**/node_modules/**',
       '**/out/**',
       '**/release/**',
@@ -24,7 +25,13 @@ export default tseslint.config(
       parserOptions: {
         project: [
           './apps/desktop/tsconfig.node.json',
-          './apps/desktop/tsconfig.web.json',
+          './apps/web/tsconfig.json',
+          './apps/web/tsconfig.node.json',
+          './apps/server/tsconfig.json',
+          './apps/cli/tsconfig.json',
+          './apps/website/tsconfig.json',
+          './packages/client-runtime/tsconfig.json',
+          './packages/contracts/tsconfig.json',
           './packages/protocol-client/tsconfig.json'
         ],
         tsconfigRootDir: import.meta.dirname
@@ -39,7 +46,10 @@ export default tseslint.config(
     files: [
       '**/*.config.{js,mjs,ts}',
       'apps/desktop/src/main/**/*.ts',
-      'apps/desktop/src/preload/**/*.ts'
+      'apps/desktop/src/preload/**/*.ts',
+      'apps/server/src/**/*.ts',
+      'apps/cli/src/**/*.ts',
+      'apps/server/scripts/**/*.{js,mjs}'
     ],
     languageOptions: {
       globals: globals.node

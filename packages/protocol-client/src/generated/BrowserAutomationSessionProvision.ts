@@ -7,4 +7,4 @@ import type { BrowserAutomationTargetBinding } from "./BrowserAutomationTargetBi
  * ephemeral session until Electron main creates the isolated page, and is
  * returned in the provider acknowledgement.
  */
-export type BrowserAutomationSessionProvision = { automationSessionId: string, generation: number, mode: BrowserAutomationSessionMode, profileKey: string, requestedTarget?: BrowserAutomationTargetBinding, createdAtMs: number, expiresAtMs: number, };
+export type BrowserAutomationSessionProvision = { automationSessionId: string, generation: number, mode: BrowserAutomationSessionMode, profileKey: string, requestedTarget?: BrowserAutomationTargetBinding, requestedTabId?: string | undefined, createdAtMs: number, expiresAtMs: number, };

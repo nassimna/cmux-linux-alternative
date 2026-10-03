@@ -6,19 +6,16 @@ import { fileURLToPath } from 'node:url'
 import process from 'node:process'
 
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..')
-const includedRoots = ['.cargo', '.github', 'apps', 'crates', 'integrations', 'packages', 'scripts']
+const includedRoots = ['.github', 'apps', 'crates', 'integrations', 'packages', 'scripts']
 const includedRootFiles = [
   '.editorconfig',
   '.npmrc',
   '.prettierignore',
-  'Cargo.lock',
-  'Cargo.toml',
   'eslint.config.mjs',
   'package.json',
   'pnpm-lock.yaml',
   'pnpm-workspace.yaml',
   'prettier.config.mjs',
-  'rust-toolchain.toml',
   'tsconfig.base.json'
 ]
 const ignoredDirectoryNames = new Set([

@@ -48,7 +48,7 @@ try {
     }
     $tree = @(Get-DescendantProcesses -RootProcessId $process.Id)
     $service = $tree | Where-Object {
-      $_.CommandLine -match 'resources[\\/]bin[\\/]agent-workspace-service\.exe(?:\s|"|$)'
+      $_.CommandLine -match 'resources[\\/]node-linux[\\/]server[\\/]dist[\\/]bin\.mjs(?:\s|"|$)'
     } | Select-Object -First 1
     $renderer = $tree | Where-Object { $_.CommandLine -match '(?:^|\s)--type=renderer(?:\s|$)' } |
       Select-Object -First 1

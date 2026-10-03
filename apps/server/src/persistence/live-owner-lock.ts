@@ -1,0 +1,178 @@
+import { spawnSync } from 'node:child_process'
+import { closeSync, constants, fstatSync, lstatSync, openSync, realpathSync } from 'node:fs'
+import { dirname, isAbsolute, resolve } from 'node:path'
+import koffi from 'koffi'
+import {
+  acquireWindowsPrivateLock,
+  assertWindowsPrivatePath
+} from '@agent-workspace/client-runtime'
+
+type WindowsFence = { close(): void }
+
+/** Process ownership fence for the live state database. */
+export class LiveOwnerLock {
+  private closed = false
+
+  private constructor(
+    private readonly transferFd: number | WindowsFence,
+    private readonly ownerFd: number | WindowsFence,
+    private readonly databasePath: string,
+    private readonly databaseDevice: number,
+    private readonly databaseInode: number,
+    private readonly windowsIdentity?: string
+  ) {}
+
+  static acquire(databasePath: string): LiveOwnerLock {
+    if (process.platform === 'win32') {
+      if (!isAbsolute(databasePath) || resolve(databasePath) !== databasePath)
+        throw new Error('Live state path must be canonical')
+      const identity = assertWindowsPrivatePath(databasePath)
+      const transfer = acquireWindowsPrivateLock(`${databasePath}.writer-transfer.lock`)
+      try {
+        const owner = acquireWindowsPrivateLock(`${databasePath}.live-owner.lock`)
+        const lock = new LiveOwnerLock(transfer, owner, databasePath, 0, 0, identity)
+        try {
+          lock.assertDatabaseUnchanged()
+          return lock
+        } catch (error) {
+          owner.close()
+          throw error
+        }
+      } catch (error) {
+        transfer.close()
+        throw error
+      }
+    }
+    if (
+      (process.platform !== 'linux' && process.platform !== 'darwin') ||
+      !process.getuid ||
+      !isAbsolute(databasePath)
+    ) {
+      throw new Error('Live ownership requires an absolute Unix state path')
+    }
+    if (resolve(databasePath) !== databasePath) {
+      throw new Error('Live state path must be canonical')
+    }
+    const directory = dirname(databasePath)
+    const parent = lstatSync(directory)
+    if (
+      !parent.isDirectory() ||
+      parent.isSymbolicLink() ||
+      parent.uid !== process.getuid() ||
+      (parent.mode & 0o777) !== 0o700 ||
+      realpathSync(directory) !== directory
+    ) {
+      throw new Error('Live state directory must be private and canonical')
+    }
+    const database = lstatSync(databasePath)
+    if (
+      !database.isFile() ||
+      database.isSymbolicLink() ||
+      database.nlink !== 1 ||
+      database.uid !== process.getuid() ||
+      (database.mode & 0o777) !== 0o600 ||
+      realpathSync(databasePath) !== databasePath
+    ) {
+      throw new Error('Live state database must be a private canonical regular file')
+    }
+    const transferFd = acquireFence(`${databasePath}.writer-transfer.lock`, 'writer transfer')
+    try {
+      const ownerFd = acquireFence(`${databasePath}.live-owner.lock`, 'live owner')
+      try {
+        const lock = new LiveOwnerLock(
+          transferFd,
+          ownerFd,
+          databasePath,
+          database.dev,
+          database.ino
+        )
+        lock.assertDatabaseUnchanged()
+        return lock
+      } catch (error) {
+        closeSync(ownerFd)
+        throw error
+      }
+    } catch (error) {
+      closeSync(transferFd)
+      throw error
+    }
+  }
+
+  /** Call immediately before opening the live database under this fence. */
+  assertDatabaseUnchanged(): void {
+    if (this.closed) throw new Error('Live owner lock is closed')
+    if (process.platform === 'win32') {
+      if (assertWindowsPrivatePath(this.databasePath) !== this.windowsIdentity)
+        throw new Error('Live state database changed while acquiring ownership')
+      return
+    }
+    const database = lstatSync(this.databasePath)
+    if (
+      !database.isFile() ||
+      database.isSymbolicLink() ||
+      database.nlink !== 1 ||
+      database.uid !== process.getuid!() ||
+      (database.mode & 0o777) !== 0o600 ||
+      database.dev !== this.databaseDevice ||
+      database.ino !== this.databaseInode
+    ) {
+      throw new Error('Live state database changed while acquiring ownership')
+    }
+  }
+
+  assertDatabasePath(path: string): void {
+    if (path !== this.databasePath) throw new Error('Live owner lock belongs to another database')
+    this.assertDatabaseUnchanged()
+  }
+
+  close(): void {
+    if (this.closed) return
+    this.closed = true
+    if (typeof this.ownerFd === 'number') closeSync(this.ownerFd)
+    else this.ownerFd.close()
+    if (typeof this.transferFd === 'number') closeSync(this.transferFd)
+    else this.transferFd.close()
+  }
+}
+
+function acquireFence(path: string, name: string): number {
+  const fd = openSync(path, constants.O_RDWR | constants.O_CREAT | constants.O_NOFOLLOW, 0o600)
+  try {
+    const opened = fstatSync(fd)
+    const named = lstatSync(path)
+    if (
+      !opened.isFile() ||
+      opened.nlink !== 1 ||
+      opened.uid !== process.getuid?.() ||
+      (opened.mode & 0o777) !== 0o600 ||
+      opened.dev !== named.dev ||
+      opened.ino !== named.ino
+    ) {
+      throw new Error(`${name} lock file is unsafe`)
+    }
+    // BSD flock must run in the owner process; a lockf helper loses its process lock on exit.
+    const status =
+      process.platform === 'darwin'
+        ? (
+            koffi.load('/usr/lib/libSystem.B.dylib').func('int flock(int, int)') as (
+              fd: number,
+              operation: number
+            ) => number
+          )(fd, 6)
+        : spawnSync('/usr/bin/flock', ['-n', '3'], {
+            stdio: ['ignore', 'ignore', 'pipe', fd],
+            timeout: 5_000
+          }).status
+    if (status !== 0) {
+      throw new Error(`Live state is already owned or the ${name} fence is unavailable`)
+    }
+    const current = lstatSync(path)
+    if (opened.dev !== current.dev || opened.ino !== current.ino) {
+      throw new Error(`${name} lock path changed during acquisition`)
+    }
+    return fd
+  } catch (error) {
+    closeSync(fd)
+    throw error
+  }
+}

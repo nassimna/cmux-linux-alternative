@@ -2,7 +2,7 @@
 import { describe, expect, it, vi } from 'vitest'
 
 import type { ControlClient } from './control-client'
-import { desktopMessages } from '../shared/desktop-messages'
+import { desktopMessages } from '@agent-workspace/contracts/desktop/desktop-messages'
 import { LifecycleController, type LifecycleSupervisor } from './lifecycle-controller'
 import { ServiceRecoveryRequiredError, type UnexpectedServiceExit } from './service-supervisor'
 

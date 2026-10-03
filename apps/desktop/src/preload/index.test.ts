@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { DESKTOP_IPC, type DesktopBridge } from '../shared/desktop-bridge'
-import projection from '../../../../crates/protocol/fixtures/milestone2-projection.json'
+import { DESKTOP_IPC, type DesktopBridge } from '@agent-workspace/contracts/desktop/desktop-bridge'
+import projection from '../../../../packages/protocol-client/fixtures/milestone2-projection.json'
 
 const electron = vi.hoisted(() => ({
   exposed: undefined as DesktopBridge | undefined,
@@ -29,6 +29,26 @@ describe('notification preload bridge', () => {
   beforeEach(() => {
     electron.invoke.mockReset()
   })
+
+  it.runIf(process.platform === 'darwin')(
+    'exposes fixed CLI actions and validates installation state',
+    async () => {
+      electron.invoke.mockResolvedValueOnce(false)
+      await expect(electron.exposed?.isCliInstalledInPath?.()).resolves.toBe(false)
+      expect(electron.invoke).toHaveBeenLastCalledWith(DESKTOP_IPC.cliPathInstalled)
+
+      electron.invoke.mockResolvedValueOnce('false')
+      await expect(electron.exposed?.isCliInstalledInPath?.()).rejects.toThrow(
+        'Invalid CLI installation state'
+      )
+
+      electron.invoke.mockResolvedValue(undefined)
+      await electron.exposed?.installCliInPath?.()
+      expect(electron.invoke).toHaveBeenLastCalledWith(DESKTOP_IPC.cliPathInstall)
+      await electron.exposed?.uninstallCliInPath?.()
+      expect(electron.invoke).toHaveBeenLastCalledWith(DESKTOP_IPC.cliPathUninstall)
+    }
+  )
 
   it('normalizes list defaults and validates results before returning them', async () => {
     electron.invoke.mockResolvedValue({

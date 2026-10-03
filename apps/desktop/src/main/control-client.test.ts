@@ -5,7 +5,7 @@ import { join } from 'node:path'
 
 import { describe, expect, it, vi } from 'vitest'
 
-import projection from '../../../../crates/protocol/fixtures/milestone2-projection.json'
+import projection from '../../../../packages/protocol-client/fixtures/milestone2-projection.json'
 
 import { ControlClient, decodeControlFrames } from './control-client'
 

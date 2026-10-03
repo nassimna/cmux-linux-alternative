@@ -4,4 +4,4 @@ import type { PaneSnapshot } from "./PaneSnapshot";
 import type { PaneTreeNode } from "./PaneTreeNode";
 import type { TabSnapshot } from "./TabSnapshot";
 
-export type WorkspaceSnapshot = { id: string, name: string, description: string | null, color: string | null, workingDirectory: string, layout: PaneTreeNode, selectedPaneId: string, panes: Array<PaneSnapshot>, tabs: Array<TabSnapshot>, attention: AttentionSummary, createdAt: number, updatedAt: number, };
+export type WorkspaceSnapshot = { id: string, name: string, description: string | null, color: string | null, workingDirectory: string, environment?: { [key: string]: string } | undefined, layout: PaneTreeNode, selectedPaneId: string, panes: Array<PaneSnapshot>, tabs: Array<TabSnapshot>, attention: AttentionSummary, createdAt: number, updatedAt: number, };

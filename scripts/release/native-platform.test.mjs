@@ -12,20 +12,23 @@ const repositoryDirectory = resolve(dirname(fileURLToPath(import.meta.url)), '..
 const read = (path) => readFile(resolve(repositoryDirectory, path), 'utf8')
 const execFileAsync = promisify(execFile)
 
-test('CI exercises native Electron, installer, and updater paths', async () => {
-  const workflow = await read('.github/workflows/ci.yml')
-  assert.match(workflow, /macos-native:/u)
-  assert.match(workflow, /windows-native:/u)
-  assert.match(workflow, /runs-on: macos-14/u)
-  assert.match(workflow, /runs-on: windows-latest/u)
-  assert.equal(
-    workflow.match(/pnpm --filter @agent-workspace\/desktop test:e2e/gu)?.length,
-    3
-  )
-  assert.match(workflow, /electron-builder --mac dmg zip/u)
-  assert.match(workflow, /electron-builder --win nsis/u)
-  assert.match(workflow, /launch-probe-macos\.sh/u)
-  assert.match(workflow, /launch-probe\.ps1/u)
+test('CI retains Node quality gates while release owns native packaging', async () => {
+  const [ci, release] = await Promise.all([
+    read('.github/workflows/ci.yml'),
+    read('.github/workflows/release.yml')
+  ])
+  assert.match(ci, /node-version: 22\.23\.3/u)
+  assert.match(ci, /pnpm validate/u)
+  assert.doesNotMatch(ci, /pnpm package:linux/u)
+  assert.doesNotMatch(ci, /cargo|rustup|build:service/u)
+  assert.match(release, /linux-x64/u)
+  assert.match(release, /macos-arm64/u)
+  assert.match(release, /macos-x64/u)
+  assert.match(release, /windows-x64/u)
+  assert.match(release, /pnpm build:node/u)
+  assert.match(release, /inspect-node-preview\.sh/u)
+  assert.match(release, /verify-native-package\.mjs/u)
+  assert.doesNotMatch(release, /cargo|rustup|build:service/u)
 })
 
 test('Linux package workflows retain default lanes and add one software-rendered AppImage lane', async () => {
@@ -165,7 +168,7 @@ test('Linux launch probe preserves a secure Wayland socket and bypasses Xvfb', a
       `#!/usr/bin/env bash
 set -euo pipefail
 printf '%s\\n%s\\n%s\\n' "$XDG_RUNTIME_DIR" "$XDG_SESSION_TYPE" "\${WAYLAND_DISPLAY:-}" > "$PROBE_CAPTURE"
-bash -c 'exec -a "resources/bin/agent-workspace-service" sleep 30' &
+bash -c 'exec -a "resources/node-linux/server/dist/bin.mjs" sleep 30' &
 bash -c 'exec -a "electron --type=renderer" sleep 30' &
 wait
 `
@@ -246,30 +249,11 @@ exit 97
   await chmod(runtime, 0o700)
 })
 
-test('manual native releases enforce and verify signing', async () => {
-  const workflow = await read('.github/workflows/native-release.yml')
-  assert.match(workflow, /workflow_dispatch:/u)
-  assert.match(workflow, /AGENT_WORKSPACE_FORCE_CODE_SIGNING: 'true'/u)
-  assert.match(workflow, /APPLE_APP_SPECIFIC_PASSWORD/u)
-  assert.match(workflow, /MACOS_CSC_LINK/u)
-  assert.match(workflow, /WINDOWS_CSC_LINK/u)
-  assert.match(workflow, /codesign --verify --deep --strict/u)
-  assert.match(workflow, /xcrun stapler validate/u)
-  assert.match(workflow, /hdiutil attach/u)
-  assert.match(workflow, /ditto "\$mount\/Agent Workspace\.app" "\$app"/u)
-  assert.match(workflow, /Get-AuthenticodeSignature/u)
-})
-
-test('native launch probes require both bundled service and renderer readiness', async () => {
-  const [macosProbe, windowsProbe] = await Promise.all([
-    read('scripts/release/launch-probe-macos.sh'),
-    read('scripts/release/launch-probe.ps1')
-  ])
-  for (const probe of [macosProbe, windowsProbe]) {
-    assert.match(probe, /agent-workspace-service/u)
-    assert.match(probe, /--type=renderer/u)
-    assert.match(probe, /packaged launch ready/u)
-  }
+test('Linux launch probe requires the bundled Node server and renderer', async () => {
+  const probe = await read('scripts/release/launch-probe.sh')
+  assert.match(probe, /node-linux/u)
+  assert.match(probe, /--type=renderer/u)
+  assert.match(probe, /packaged launch ready/u)
 })
 
 test('release candidates preserve direct accessibility, visual, and recovery evidence', async () => {

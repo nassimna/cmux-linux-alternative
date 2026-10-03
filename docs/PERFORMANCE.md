@@ -1,3 +1,7 @@
+> **Node cutover:** The measurements and commands below belong to the previous Rust service.
+> They are retained as historical targets only. Rebuild the performance harness against the Node
+> service and run it on the exact Linux candidate before making a Node release claim.
+
 # Performance qualification
 
 This suite produces release-build evidence, not development-build estimates. Its JSON report is

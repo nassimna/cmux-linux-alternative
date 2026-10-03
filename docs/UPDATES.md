@@ -1,13 +1,27 @@
 # Desktop updates
 
-The desktop uses `electron-updater` for explicit, user-approved updates of AppImage, deb, rpm,
-macOS DMG/zip, and Windows NSIS packages. There is no hosted update feed, signing key, or published
-desktop release configured in this repository today.
+The desktop uses `electron-updater` for AppImage, deb, rpm, macOS DMG/zip, and Windows NSIS
+packages. The titlebar's **Updates** button opens update settings directly. Manual checks,
+downloads, and **Restart to update** remain available when automatic updates are disabled.
+Automatic checks and background downloads are opt-in; installation always requires an explicit
+restart. Linux update installation and native signing have not been qualified end to end.
 
 ## Feed configuration
 
-Both trusted feed roots must be present in the packaged application's runtime
-environment or updates remain disabled:
+Packaged applications default to the public `nassimna/cmux-linux-alternative` GitHub Releases
+provider. Stable uses the updater's `latest` channel; beta uses `beta` and permits prereleases.
+Normal package builds generate updater metadata without uploading it. The release workflow
+collects each platform’s manifests and blockmaps alongside the installable packages. macOS
+metadata includes both Intel and Apple Silicon artifacts. Existing releases
+without this metadata cannot serve an in-app update.
+
+Release versions must increase in the root and desktop package manifests before packaging. Beta
+releases use `-beta.N`; the beta update channel excludes `-alpha.N` tags.
+Publish stable versions as production releases and beta versions as prereleases; the stable
+channel does not use prereleases. GitHub Actions must be enabled to run the release workflow.
+
+To override GitHub with generic HTTPS hosting, supply both trusted feed roots in the
+packaged application's runtime environment:
 
 - `AGENT_WORKSPACE_UPDATE_STABLE_URL`
 - `AGENT_WORKSPACE_UPDATE_BETA_URL`
@@ -17,9 +31,9 @@ fragments, localhost names, or IP-literal hosts. They are read only by the main
 process. The renderer selects `stable` or `beta`; it cannot provide a URL or
 provider configuration.
 
-Package generation with update metadata requires a channel-specific generic-provider URL and
-channel. Use the platform's explicit update script rather than its feed-free default package
-script, and use `beta` with the beta root for a beta build:
+For generic hosting, package generation requires a channel-specific URL and channel. Use the
+platform's explicit update script to replace the default GitHub provider, and use `beta` with
+the beta root for a beta build:
 
 ```sh
 AGENT_WORKSPACE_UPDATE_BUILD_URL=https://<trusted-host>/desktop/stable/ \
@@ -66,17 +80,22 @@ signing or secure control of the hosting origin.
 
 ## Runtime behavior
 
-The application periodically checks the selected channel and also offers a
-manual check. It never downloads an update merely because one was found. The
-user must separately approve download and then installation/restart. Release
-notes and feed URLs are not sent to the renderer, and updater errors are reduced
-to bounded messages.
+The saved `updates.automatic` preference defaults to `false`, including for existing profiles.
+Enable **Automatically check and download updates** and save the section to check immediately
+and every six hours, and download available updates in the background. Disabling it stops
+automatic checks; an existing download remains available. Manual checking and downloading still
+work. The titlebar shows **Update available** or **Update ready** when appropriate.
+
+Installation requires **Restart to update**. Window state is flushed before the normal shutdown
+path stops the Node service. Local terminals and running agents may be interrupted; saved
+workspace state does not preserve arbitrary running processes. Release notes and feed URLs are
+not sent to the renderer, and updater errors are reduced to bounded messages.
 
 An AppImage must be launched through its normal AppImage runtime so `APPIMAGE` identifies the
 installed file. Deb and rpm builds use Electron Builder's `resources/package-type` marker and may
 prompt through the host package manager during installation. macOS uses the updater-compatible
 DMG/zip pair, and Windows uses NSIS. Development builds, unpacked directories, platform/package
-mismatches, unknown package types, and installations without both trusted feeds report an
+mismatches, unknown package types, and installations with invalid override feeds report an
 unavailable state instead of attempting network access.
 
 ## Manual feed test

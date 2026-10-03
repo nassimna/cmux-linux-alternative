@@ -333,7 +333,7 @@ import {
   desktopSearchExportConfirmationIssueResultSchema,
   desktopSearchExportParamsSchema,
   desktopSearchExportResultSchema
-} from '../shared/desktop-bridge'
+} from '@agent-workspace/contracts/desktop/desktop-bridge'
 import {
   agentAttentionSetParamsSchema,
   agentAttentionSetResultSchema,
@@ -430,7 +430,7 @@ import {
 } from '@agent-workspace/protocol-client'
 
 import { toNodeSocketPath } from './control-endpoint'
-import type { DomainResyncNotice } from '../shared/desktop-bridge'
+import type { DomainResyncNotice } from '@agent-workspace/contracts/desktop/desktop-bridge'
 
 export class ControlRequestError extends Error {
   readonly code: string

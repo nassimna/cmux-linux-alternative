@@ -8,6 +8,7 @@ export class DesktopWindowBinding implements WindowRegistryBinding {
   #browserViews: BrowserViewManager | undefined
   #disposeReady: (() => Promise<void>) | undefined
   #client: ControlClient | undefined
+  #nodeExclusive = false
   #disposed = false
 
   public constructor(public readonly stateController: WindowStateController) {}
@@ -18,8 +19,13 @@ export class DesktopWindowBinding implements WindowRegistryBinding {
   }
 
   public get client(): ControlClient {
+    if (this.#nodeExclusive) throw new Error('Node-exclusive window has no Rust client')
     if (!this.#client) throw new Error('Window renderer is not ready')
     return this.#client
+  }
+
+  public get isNodeExclusive(): boolean {
+    return this.#nodeExclusive
   }
 
   public replaceReady(
@@ -34,11 +40,21 @@ export class DesktopWindowBinding implements WindowRegistryBinding {
     this.#disposeReady = dispose
   }
 
+  /** Bind a ready renderer after Node becomes its exclusive state owner. */
+  public replaceNodeExclusive(browserViews: BrowserViewManager, dispose: () => Promise<void>): void {
+    if (this.#disposed) throw new Error('Window binding is disposed')
+    if (this.#browserViews) throw new Error('Window renderer is already bound')
+    this.#browserViews = browserViews
+    this.#nodeExclusive = true
+    this.#disposeReady = dispose
+  }
+
   public async clearReady(): Promise<void> {
     const dispose = this.#disposeReady
     this.#disposeReady = undefined
     this.#browserViews = undefined
     this.#client = undefined
+    this.#nodeExclusive = false
     await dispose?.()
     this.stateController.clearClient()
   }

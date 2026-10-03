@@ -12,12 +12,6 @@ import { createPackagedElectronHarness } from './helpers/packaged-electron-harne
 const desktopDirectory = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const repositoryDirectory = resolve(desktopDirectory, '../..')
 const mainEntry = join(desktopDirectory, 'out/main/index.js')
-const serviceBinary = join(
-  repositoryDirectory,
-  'target',
-  'debug',
-  process.platform === 'win32' ? 'agent-workspace-service.exe' : 'agent-workspace-service'
-)
 const rendererUrl = 'agent-workspace://renderer/index.html'
 const rendererOrigin = 'agent-workspace://renderer/'
 const benignExternalConsoleError = /(?:font(?:config)?|gpu|mesa|dri3|webgl)/i
@@ -29,11 +23,6 @@ test.beforeAll(() => {
       'Electron E2E needs a display on Linux; run this command inside an X11/Wayland session or under Xvfb.'
     )
   }
-
-  execFileSync('cargo', ['build', '-p', 'agent-workspace-service'], {
-    cwd: repositoryDirectory,
-    stdio: 'inherit'
-  })
   execFileSync('pnpm', ['--filter', '@agent-workspace/desktop', 'build'], {
     cwd: repositoryDirectory,
     stdio: 'inherit'
@@ -70,7 +59,7 @@ test('renderer reload restores checkpointed output on the exact same PTY without
   }
 
   try {
-    const harness = await createPackagedElectronHarness(profileDirectory, serviceBinary)
+    const harness = await createPackagedElectronHarness(profileDirectory)
     electronApplication = await electron.launch({
       // The app falls back to xterm's DOM renderer when GPU acceleration is disabled. Its
       // `.xterm-rows` projection lets the test assert actual visible screen content.

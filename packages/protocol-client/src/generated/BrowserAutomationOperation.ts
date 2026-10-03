@@ -2,4 +2,22 @@
 import type { BrowserAutomationKey } from "./BrowserAutomationKey";
 import type { BrowserAutomationWaitCondition } from "./BrowserAutomationWaitCondition";
 
-export type BrowserAutomationOperation = { "kind": "navigate", url: string, } | { "kind": "wait", condition: BrowserAutomationWaitCondition, } | { "kind": "query", selector: string, limit: number, } | { "kind": "focus", selector: string, } | { "kind": "click", selector: string, } | { "kind": "typeText", selector: string, text: string, } | { "kind": "key", key: BrowserAutomationKey, } | { "kind": "keyAt", selector: string, key: BrowserAutomationKey, } | { "kind": "screenshot", width: number, height: number, };
+type Locator = { role?: string | undefined; name?: string | undefined; text?: string | undefined };
+type Target = { selector?: string | undefined; locator?: Locator | undefined };
+type Modifiers = Array<"alt" | "control" | "meta" | "shift">;
+export type BrowserAutomationOperation =
+  | {kind:"navigate",url:string}
+  | {kind:"wait",condition:BrowserAutomationWaitCondition}
+  | ({kind:"query",limit:number} & Target)
+  | {kind:"evaluate",expression:string}
+  | {kind:"console" | "errors",clear?:boolean | undefined,after?:number | undefined,level?:string | undefined}
+  | ({kind:"focus" | "click"} & Target)
+  | ({kind:"typeText",text:string,clear?:boolean | undefined} & Target)
+  | {kind:"key",key:BrowserAutomationKey,modifiers?:Modifiers | undefined}
+  | ({kind:"keyAt",key:BrowserAutomationKey,modifiers?:Modifiers | undefined} & Target)
+  | {kind:"screenshot" | "resize" | "recordingStart",width:number,height:number}
+  | {kind:"snapshot" | "networkStart" | "networkStop" | "recordingStop"}
+  | {kind:"scroll",deltaX:number,deltaY:number,selector?:string | undefined}
+  | {kind:"appearance",colorScheme:"light" | "dark" | "system"}
+  | {kind:"networkList",after?:number | undefined}
+  | {kind:"networkGet" | "networkBody",requestId:string};

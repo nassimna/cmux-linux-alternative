@@ -3,12 +3,19 @@
 const { appendFileSync } = require('node:fs')
 const { Buffer } = require('node:buffer')
 const console = require('node:console')
-const { app, dialog } = require('electron')
+const { app, dialog, safeStorage } = require('electron')
 const net = require('node:net')
 const { resolve } = require('node:path')
 const process = require('node:process')
 
 const tracePath = process.env.AGENT_WORKSPACE_E2E_MAIN_TRACE
+if (process.argv.includes('--automation')) {
+  for (const method of ['isEncryptionAvailable', 'encryptString', 'decryptString']) {
+    safeStorage[method] = () => {
+      throw new Error(`Automation mode must not call safeStorage.${method}`)
+    }
+  }
+}
 globalThis.__m5ControlRequests = []
 globalThis.__m5AcknowledgeResponses = []
 globalThis.__m5ProviderDeliveries = []

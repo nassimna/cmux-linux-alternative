@@ -3,4 +3,4 @@ import type { ActionIdempotency } from "./ActionIdempotency";
 import type { BrowserAutomationSessionMode } from "./BrowserAutomationSessionMode";
 import type { BrowserAutomationTargetBinding } from "./BrowserAutomationTargetBinding";
 
-export type BrowserAutomationSessionCreateParams = { mode: BrowserAutomationSessionMode, profileKey: string, target?: BrowserAutomationTargetBinding, idempotency: ActionIdempotency, correlationId: string, };
+export type BrowserAutomationSessionCreateParams = { mode: BrowserAutomationSessionMode, profileKey: string, target?: BrowserAutomationTargetBinding, attachTabId?: string | undefined, attachWindowId?: string | undefined, idempotency: ActionIdempotency, correlationId: string, };

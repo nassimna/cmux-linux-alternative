@@ -21,16 +21,7 @@ const ptyPath = join(scratch, 'pty.json')
 const e2ePath = join(scratch, 'e2e.json')
 
 try {
-  await command(
-    'cargo',
-    ['build', '--release', '-p', 'agent-workspace-service', '-p', 'agent-workspace-cli'],
-    repositoryDirectory
-  )
-  await command(
-    'pnpm',
-    ['--filter', '@agent-workspace/desktop', 'package:linux:dir'],
-    repositoryDirectory
-  )
+  await command('pnpm', ['package:linux:dir'], repositoryDirectory)
   await command(
     'pnpm',
     [

@@ -24,12 +24,6 @@ import { persistRecoveryEvidence } from '../scripts/recovery-evidence.mjs'
 const desktopDirectory = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const repositoryDirectory = resolve(desktopDirectory, '../..')
 const mainEntry = join(desktopDirectory, 'out/main/index.js')
-const serviceBinary = join(
-  repositoryDirectory,
-  'target',
-  'debug',
-  process.platform === 'win32' ? 'agent-workspace-service.exe' : 'agent-workspace-service'
-)
 const rendererUrl = 'agent-workspace://renderer/index.html'
 const rendererOrigin = 'agent-workspace://renderer/'
 const benignExternalConsoleError = /(?:font(?:config)?|gpu|mesa|dri3|webgl)/i
@@ -41,10 +35,6 @@ test.beforeAll(() => {
   if (process.platform === 'linux' && !process.env.DISPLAY && !process.env.WAYLAND_DISPLAY) {
     throw new Error('Electron persistence E2E needs an X11 or Wayland display.')
   }
-  execFileSync('cargo', ['build', '-p', 'agent-workspace-service'], {
-    cwd: repositoryDirectory,
-    stdio: 'inherit'
-  })
   execFileSync('pnpm', ['--filter', '@agent-workspace/desktop', 'build'], {
     cwd: repositoryDirectory,
     stdio: 'inherit'
@@ -61,7 +51,7 @@ test('persists durable workspace, layout, typed configuration, and visible windo
   let electronApplication
 
   try {
-    const harness = await createPackagedElectronHarness(profileDirectory, serviceBinary)
+    const harness = await createPackagedElectronHarness(profileDirectory)
     electronApplication = await launchApplication(profileDirectory, harness, errors)
     let page = await readyPage(electronApplication, errors)
 
@@ -204,7 +194,7 @@ test('unexpected bundled service exit recovers durable metadata with a new termi
   let electronApplication
 
   try {
-    const harness = await createPackagedElectronHarness(profileDirectory, serviceBinary)
+    const harness = await createPackagedElectronHarness(profileDirectory)
     electronApplication = await launchApplication(profileDirectory, harness, errors)
     const page = await readyPage(electronApplication, errors)
     await createWorkspace(page, 'Recovery workspace', profileDirectory)
@@ -231,8 +221,9 @@ test('unexpected bundled service exit recovers durable metadata with a new termi
     const expectedService = join(
       dirname(harness.executablePath),
       'resources',
+      'node-linux',
       'bin',
-      basename(serviceBinary)
+      'node'
     )
     const originalServicePid = await bundledServicePid(electronApplication, expectedService)
     process.kill(originalServicePid, 'SIGKILL')
@@ -287,7 +278,7 @@ test('renderer crash reloads the trusted URL once without restarting the service
   let electronApplication
 
   try {
-    const harness = await createPackagedElectronHarness(profileDirectory, serviceBinary)
+    const harness = await createPackagedElectronHarness(profileDirectory)
     electronApplication = await launchApplication(profileDirectory, harness, errors)
     const page = await readyPage(electronApplication, errors)
     await createWorkspace(page, 'Renderer recovery workspace', profileDirectory)
@@ -352,7 +343,7 @@ test('corrupt database enters private recovery UI without mutating the source', 
   try {
     await mkdir(stateDirectory, { recursive: true })
     await writeFile(databasePath, corruptBytes)
-    const harness = await createPackagedElectronHarness(profileDirectory, serviceBinary)
+    const harness = await createPackagedElectronHarness(profileDirectory)
     electronApplication = await launchApplication(profileDirectory, harness, errors)
     const page = await electronApplication.firstWindow()
     errors.instrument(page)

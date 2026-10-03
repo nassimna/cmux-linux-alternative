@@ -15,9 +15,9 @@ import {
   type ApplicationMenuCommandState,
   type ApplicationMenuShortcut,
   type ApplicationMenuState
-} from '../shared/application-menu'
-import { DESKTOP_IPC } from '../shared/desktop-bridge'
-import { desktopMessages } from '../shared/desktop-messages'
+} from '@agent-workspace/contracts/desktop/application-menu'
+import { DESKTOP_IPC } from '@agent-workspace/contracts/desktop/desktop-bridge'
+import { desktopMessages } from '@agent-workspace/contracts/desktop/desktop-messages'
 import type { SenderBoundIpcRouter } from './sender-bound-ipc-router'
 
 export interface ApplicationMenuStateSink {

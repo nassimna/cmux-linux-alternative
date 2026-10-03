@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { MenuItemConstructorOptions } from 'electron'
 
-import type { ApplicationMenuState } from '../shared/application-menu'
+import type { ApplicationMenuState } from '@agent-workspace/contracts/desktop/application-menu'
 
 const electron = vi.hoisted(() => ({
   handlers: new Map<string, (...args: unknown[]) => unknown>(),
@@ -24,8 +24,8 @@ vi.mock('electron', () => ({
   }
 }))
 
-import { DESKTOP_IPC } from '../shared/desktop-bridge'
-import { desktopMessages } from '../shared/desktop-messages'
+import { DESKTOP_IPC } from '@agent-workspace/contracts/desktop/desktop-bridge'
+import { desktopMessages } from '@agent-workspace/contracts/desktop/desktop-messages'
 import {
   NativeApplicationMenu,
   buildApplicationMenuTemplate,

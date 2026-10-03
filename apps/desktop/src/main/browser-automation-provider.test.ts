@@ -36,9 +36,15 @@ function page(
     owned: true,
     target: binding,
     revalidate: (candidate) => candidate === binding,
+    initialize: () => Promise.resolve(),
+    inspect: () => Promise.resolve(null),
+    stopRecording: () => Promise.resolve({ bytes: Buffer.from('webm'), width: 320, height: 240 }),
     navigate: () => Promise.resolve(),
     waitForLifecycle: () => Promise.resolve(),
     executeClosedScript: () => Promise.resolve(true),
+    evaluate: () => Promise.resolve(null),
+    readDiagnostics: () => ({ entries: [], cursor: 0, dropped: 0 }),
+    dispose: () => undefined,
     insertText: () => Promise.resolve(),
     sendKey: () => undefined,
     capture: () => Promise.resolve(Buffer.from('png')),
@@ -240,6 +246,55 @@ describe('BrowserAutomationProvider', () => {
     provider.start()
     await vi.waitFor(() => expect(acknowledge).toHaveBeenCalledOnce())
     expect(acknowledge.mock.calls[0]![0].state).toBe('canceled')
+    await provider.stop()
+  })
+
+  it('acknowledges a stale attached tab without losing the provider', async () => {
+    let live = true
+    const manager = new BrowserAutomationManager({
+      acquireAttachedPage: (target) =>
+        Promise.resolve({
+          ...page(target),
+          owned: false,
+          revalidate: () => live
+        }),
+      createEphemeralPage: () => Promise.reject(new Error('not used')),
+      confirmAttachment: () => Promise.resolve(true),
+      now: Date.now,
+      schedule: (callback, delayMs) => setTimeout(callback, delayMs),
+      cancelSchedule: (handle) => clearTimeout(handle)
+    })
+    await manager.createSession({ ...session(), mode: 'attach' })
+    live = false
+    const acknowledge = vi.fn(acknowledgement)
+    const onProviderLost = vi.fn()
+    const provider = new BrowserAutomationProvider({
+      identity,
+      transport: {
+        poll: pollRequests([
+          {
+            kind: 'execute',
+            request: {
+              ...execution(),
+              session: { ...session(), mode: 'attach' }
+            }
+          }
+        ]),
+        acknowledge,
+        respondTransfer: () => Promise.resolve()
+      },
+      resolveManager: () => manager,
+      managers: () => [manager],
+      onProviderLost
+    })
+    provider.start()
+    await vi.waitFor(() => expect(acknowledge).toHaveBeenCalledOnce())
+    expect(acknowledge.mock.calls[0]![0]).toMatchObject({
+      operationId: ID_2,
+      state: 'failed',
+      errorCode: 'target_stale'
+    })
+    expect(onProviderLost).not.toHaveBeenCalled()
     await provider.stop()
   })
 

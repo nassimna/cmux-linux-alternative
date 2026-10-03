@@ -7,6 +7,34 @@ will become binding at version 1.0.
 
 ## [Unreleased]
 
+## [0.2.0-beta.1] - 2026-10-03
+
+### Added
+
+- Node/TypeScript desktop runtime with persistent workspaces, real terminals, isolated browser
+  views, saved SSH connections, and a packaged CLI for external agents and automation.
+- Signal website with the real, sanitized application screenshot, platform download choices,
+  and OS/architecture recommendations that retain manual selection.
+- Native release builds for Linux x64 AppImage/deb/rpm, macOS Intel and Apple Silicon DMG/zip,
+  and Windows x64 installers, with packaged-runtime smoke checks and shared release checksums.
+
+### Changed
+
+- PR validation uses the Node toolchain and cached installs. Expensive package qualification
+  runs on demand or on a schedule instead of duplicating every PR build.
+- Release publication waits for every platform job; website publication follows the release.
+
+### Status
+
+- This is an unsigned prerelease. macOS notarization and Windows Authenticode signing are not
+  configured. Hosted smoke checks do not establish physical-device or stable-support guarantees.
+- Linux ARM64 and Windows ARM64 packages are not included in this release.
+
+## [Historical development]
+
+These entries record the earlier Rust implementation and its original qualification; they do not
+qualify the current Node runtime.
+
 ### Added
 
 - Independent Linux-first, cross-platform repository foundation with pnpm and Cargo workspaces,

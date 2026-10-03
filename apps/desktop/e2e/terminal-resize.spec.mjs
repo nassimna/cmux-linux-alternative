@@ -14,7 +14,6 @@ import { createPackagedElectronHarness } from './helpers/packaged-electron-harne
 
 const desktopDirectory = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const repositoryDirectory = resolve(desktopDirectory, '../..')
-const serviceBinary = join(repositoryDirectory, 'target/debug/agent-workspace-service')
 const mainEntry = join(desktopDirectory, 'out/main/index.js')
 const evidenceDirectory = process.env.AGENT_WORKSPACE_EVIDENCE_DIR
 
@@ -34,10 +33,6 @@ test.skip(process.platform !== 'linux', 'The packaged terminal fixture currently
 
 test.beforeAll(async () => {
   test.setTimeout(120_000)
-  execFileSync('cargo', ['build', '-p', 'agent-workspace-service'], {
-    cwd: repositoryDirectory,
-    stdio: 'pipe'
-  })
   execFileSync('pnpm', ['--filter', '@agent-workspace/desktop', 'build'], {
     cwd: repositoryDirectory,
     stdio: 'pipe'
@@ -52,7 +47,7 @@ test('retains output and synchronizes the PTY through narrow and wide resizes', 
   let application
 
   try {
-    const harness = await createPackagedElectronHarness(profileDirectory, serviceBinary)
+    const harness = await createPackagedElectronHarness(profileDirectory)
     const electronEnvironment = { ...process.env }
     delete electronEnvironment.ELECTRON_RUN_AS_NODE
     application = await electron.launch({
@@ -193,7 +188,7 @@ test('forwards narrow and wide resizes to a real SSH session', async () => {
       })
       .toBe(true)
 
-    const harness = await createPackagedElectronHarness(profileDirectory, serviceBinary)
+    const harness = await createPackagedElectronHarness(profileDirectory)
     const electronEnvironment = { ...process.env }
     delete electronEnvironment.ELECTRON_RUN_AS_NODE
     application = await electron.launch({

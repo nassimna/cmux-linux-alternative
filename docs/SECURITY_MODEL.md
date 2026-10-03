@@ -1,13 +1,15 @@
 # Security model
 
-This document records implemented security invariants through Milestone 6 validation. It does not
-replace the [vulnerability-reporting policy](../SECURITY.md) or turn unexecuted workflow definitions
-into audit evidence.
+This document contains historical milestone security requirements. The active
+Node/TypeScript process boundaries are summarized in [Architecture](ARCHITECTURE.md).
+Claims below require fresh verification against the current Linux candidate; old Rust-era
+validation does not establish Node release evidence. See also the
+[vulnerability-reporting policy](../SECURITY.md).
 
 ## Trust boundaries
 
 Terminal output, terminal-provided titles and links, renderer IPC arguments, and local protocol
-frames are untrusted input. The Electron main process and Rust service are privileged components;
+frames are untrusted input. The Electron main process and Node service are privileged components;
 the renderer receives only explicitly bridged capabilities. A local user able to read another
 user's credential or endpoint is outside the intended boundary, so both are restricted to the
 current OS user where the platform supports it.
@@ -67,7 +69,7 @@ current OS user where the platform supports it.
 - Slow clients receive `terminal.resyncRequired` instead of causing unbounded event retention.
 - Protocol validation errors use stable messages and do not include internal stack traces.
 - Domain mutation replay is bounded to 256 entries and 4 MiB per client. Full frame size is checked
-  before JSON parsing, and every Rust DTO has a strict Zod boundary counterpart.
+  before JSON parsing, and wire DTOs have strict Zod boundary validation.
 - Terminal runtime-metadata discovery starts from the service-owned terminal process, includes only
   its transitive descendants, and returns at most 16 sorted, unique TCP listening ports. Process
   IDs, process names, executable paths, socket addresses, and discovery details remain inside the

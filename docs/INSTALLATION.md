@@ -1,44 +1,43 @@
 # Installation
 
-There is no published download or supported stable release today. The repository can build
-x86_64 AppImage, Debian, and RPM candidates, but those artifacts are local qualification output.
-Before publication the project needs a final public identity, a real homepage/repository URL,
-maintainer-owned signing keys, a hosted update origin, and completed release gates. The current
-reserved `.invalid` homepage exists only to let local deb/rpm packaging proceed.
+Choose your platform on the [Ternline website](https://nassimna.github.io/cmux-linux-alternative/),
+or open the [GitHub releases](https://github.com/nassimna/cmux-linux-alternative/releases).
+The website recommends your OS and offers every installer so you can choose another machine or
+architecture. On Macs that do not expose their CPU architecture to the browser, choose Apple
+Silicon or Intel manually using **About This Mac**.
 
-macOS x64 DMG/zip and Windows x64 NSIS definitions are also present for Milestone 7 development.
-Native CI installs and launches those package formats, and a separate manual workflow requires
-signing and notarization credentials. Those workflows have not run in this repository state, so
-there is no qualified macOS or Windows download yet.
+The current release is an unsigned prerelease. It does not include macOS notarization or Windows
+Authenticode signing and may show an operating-system trust prompt. There is no stable support
+guarantee. Only install assets from this project's release page after verifying their checksums.
 
-## End-user prerequisites
+## Packages and prerequisites
 
-Use a current x86_64 Linux desktop with X11 or Wayland and the runtime libraries resolved by the
-package manager. AppImage users may also need FUSE 2 compatibility. The current artifacts have not
-been qualified on ARM64, macOS, or Windows; the native package sections below describe contributor
-qualification only, not supported end-user releases.
+| Platform | Architecture                     | Packages                                           |
+| -------- | -------------------------------- | -------------------------------------------------- |
+| Linux    | x86_64                           | AppImage, Debian/Ubuntu `.deb`, Fedora/RHEL `.rpm` |
+| macOS    | Apple Silicon arm64 or Intel x64 | `.dmg` and updater `.zip`                          |
+| Windows  | x64                              | Per-user NSIS `.exe` installer                     |
 
-Obtain all four files from the same trusted build:
+Linux needs a desktop session and the runtime libraries resolved by the package manager.
+AppImage users may also need FUSE 2 compatibility. Linux ARM64 and Windows ARM64 installers are
+not provided. macOS and Windows package checks run on native hosted runners; they do not qualify
+every physical device or OS version.
 
-```text
-agent-workspace-VERSION-x86_64.AppImage
-agent-workspace-VERSION-x86_64.deb
-agent-workspace-VERSION-x86_64.rpm
-SHA256SUMS
-```
-
-Verify the complete set before installing:
+Download the installer and `SHA256SUMS` from the **same release**. Verify only the downloaded file;
+the manifest also contains installers for the other platforms:
 
 ```sh
-sha256sum --check SHA256SUMS
+sha256sum agent-workspace-VERSION-x86_64.AppImage
+grep 'agent-workspace-VERSION-x86_64.AppImage$' SHA256SUMS
 ```
 
-SHA-256 detects mismatch with the supplied manifest; it is not a substitute for release signing
-or trusted delivery. Current local artifacts are unsigned.
+On macOS use `shasum -a 256 FILE`. On Windows use `Get-FileHash FILE -Algorithm SHA256` in
+PowerShell. Compare the complete hash to the matching filename in `SHA256SUMS`. SHA-256 detects
+mismatch with the supplied manifest; it does not replace code signing or trusted delivery.
 
 ## Install and launch
 
-AppImage:
+Linux AppImage:
 
 ```sh
 chmod +x agent-workspace-VERSION-x86_64.AppImage
@@ -60,15 +59,27 @@ agent-workspace
 ```
 
 Deb/rpm packages install a desktop entry through the package manager. AppImage desktop-menu
-integration depends on the user's AppImage integration tooling and is not performed by the app.
-The package includes an original project icon in the standard Linux hicolor sizes. The icon remains
-temporary until the public project identity is selected.
+integration depends on your AppImage tooling. The package includes the Ternline icon in standard
+Linux hicolor sizes.
+
+On macOS, open the DMG and drag **Ternline** into **Applications**. On Windows, run the EXE and
+choose an installation directory; the installer creates desktop and Start menu shortcuts and
+preserves user data on uninstall. The zip on macOS is used by the updater and is also available
+for manual extraction.
+
+The CLI is available in terminals opened inside Ternline. macOS packages include
+`Ternline.app/Contents/Resources/cli/ternline-cli`; Windows packages include
+`resources/cli/ternline-cli.cmd`. See the [CLI reference](CLI.md) for external-agent setup.
 
 ## User data and runtime files
 
-Electron's Linux user-data root is normally `$XDG_CONFIG_HOME/Agent Workspace`, or
-`~/.config/Agent Workspace` when `XDG_CONFIG_HOME` is unset. The exact root follows Electron's
-`userData` path for the current product name. Important children are:
+Ternline preserves the `Agent Workspace` user-data directory:
+
+- Linux: `$XDG_CONFIG_HOME/Agent Workspace`, or `~/.config/Agent Workspace`.
+- macOS: `~/Library/Application Support/Agent Workspace`.
+- Windows: `%APPDATA%\Agent Workspace`.
+
+Important children are:
 
 ```text
 configuration/desktop.json
@@ -77,9 +88,8 @@ logs/
 secrets/control-token.enc       # only when secure OS storage is available
 ```
 
-The live control socket and CLI session record normally reside under
-`$XDG_RUNTIME_DIR/agent-workspace/`. A per-user temporary-runtime directory is used if
-`XDG_RUNTIME_DIR` is absent. Runtime records are ephemeral; do not back them up or share them.
+The Node CLI session record is `runtime/node-cli-session.json` inside that directory. It contains
+a local connection credential, is ephemeral, and must not be shared or backed up.
 
 ## Uninstall
 
@@ -108,30 +118,18 @@ cannot be undone.
   FUSE mounting, desktop-menu integration, and notification behavior still require real-host
   qualification. Use X11 as a diagnostic comparison if rendering or focus fails.
 - If the CLI cannot find the service, keep the desktop running and see [CLI discovery](CLI.md).
-- If update controls say unavailable, see [desktop updates](UPDATES.md); default packages are
-  intentionally feed-free and both trusted runtime feed roots are required.
+- If update controls say unavailable, see [desktop updates](UPDATES.md). Published packages use
+  GitHub Releases; unpacked or development builds cannot install updates.
 
 ## Building instead of installing
 
-Contributors need Node.js 22.20 or newer, pnpm 10.34.5, Rust 1.96.0, build tools, and Electron's
+Contributors need Node.js 22.23.3, pnpm 10.34.5, a native-addon build toolchain, and Electron's
 Linux development libraries. See [CONTRIBUTING.md](../CONTRIBUTING.md) for build and validation
 commands. Building from source is not equivalent to installing a qualified release.
 
-Build native x64 candidates only on the matching target OS:
-
-```sh
-pnpm package:mac       # macOS: DMG + zip
-pnpm package:windows   # Windows: NSIS installer
-```
-
-Use `package:mac:updates` or `package:windows:updates` with the two documented build environment
-variables to generate channel metadata. Feed-free local candidates are unsigned. Stable candidates
-must use the gated signed-native workflow and pass its signature, native install, and readiness
-probes; see [Releasing](RELEASING.md) and [Desktop updates](UPDATES.md).
-
 ### Install a local Linux build in the application launcher
 
-On an x86_64 Linux development host, build the release sidecars and an AppImage, then install it at
+On an x86_64 Linux development host, build the bundled Node runtime and an AppImage, then install it at
 a stable per-user path with one command:
 
 ```sh

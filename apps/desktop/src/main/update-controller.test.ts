@@ -1,7 +1,7 @@
 import { EventEmitter } from 'node:events'
 
 import { describe, expect, it, vi } from 'vitest'
-import { desktopMessages } from '../shared/desktop-messages'
+import { desktopMessages } from '@agent-workspace/contracts/desktop/desktop-messages'
 
 import {
   detectLinuxPackageType,
@@ -101,7 +101,7 @@ describe('update controller', () => {
     })
   })
 
-  it('isolates stable and beta provider roots and reuses only one periodic loop', () => {
+  it('isolates stable and beta provider roots and reuses only one automatic check loop', async () => {
     const intervals: Array<{ callback: () => void }> = []
     const clearInterval = vi.fn()
     const { controller, updater } = createController({
@@ -118,7 +118,10 @@ describe('update controller', () => {
       channel: 'stable'
     })
 
-    controller.applyChannel('beta')
+    expect(intervals).toHaveLength(0)
+    controller.applyConfiguration({ channel: 'stable', automatic: true })
+    await controller.check()
+    controller.applyConfiguration({ channel: 'beta', automatic: true })
     expect(clearInterval).toHaveBeenCalledOnce()
     expect(updater.setFeedURL).toHaveBeenLastCalledWith({
       provider: 'generic',
@@ -137,7 +140,7 @@ describe('update controller', () => {
 
     const first = controller.check()
     const second = controller.check()
-    controller.applyChannel('beta')
+    controller.applyConfiguration({ channel: 'beta' })
     expect(updater.checkForUpdates).toHaveBeenCalledOnce()
     expect(controller.getState()).toMatchObject({ status: 'checking', channel: 'stable' })
     expect(updater.downloadUpdate).not.toHaveBeenCalled()
@@ -212,6 +215,7 @@ describe('update controller', () => {
     updater.checkForUpdates.mockRejectedValue(
       new Error('https://token:secret@updates.test.invalid/private\nstack')
     )
+    controller.applyConfiguration({ channel: 'stable', automatic: true })
     await controller.check()
     expect(controller.getState()).toEqual({
       status: 'error',
@@ -226,6 +230,50 @@ describe('update controller', () => {
     expect(controller.getState().status).toBe('error')
     expect(clearInterval).toHaveBeenCalledOnce()
     expect(updater.listenerCount('update-available')).toBe(0)
+  })
+
+  it('checks and downloads after opting in, stops polling after opting out, and never restarts automatically', async () => {
+    const setInterval = vi.fn(() => ({ unref: vi.fn() }))
+    const clearInterval = vi.fn()
+    const { controller, updater } = createController({ setInterval, clearInterval })
+    const download = deferred<void>()
+    updater.downloadUpdate.mockReturnValue(download.promise)
+    expect(updater.checkForUpdates).not.toHaveBeenCalled()
+    updater.checkForUpdates.mockImplementation(() => {
+      updater.emit('update-available', { version: '0.2.0' })
+      return Promise.resolve()
+    })
+    controller.applyConfiguration({ channel: 'stable', automatic: true })
+    expect((await controller.check()).status).toBe('downloading')
+    download.resolve()
+    await vi.waitFor(() => expect(controller.getState().status).toBe('downloaded'))
+    expect(updater.checkForUpdates).toHaveBeenCalledOnce()
+    expect(updater.downloadUpdate).toHaveBeenCalledOnce()
+    expect(updater.quitAndInstall).not.toHaveBeenCalled()
+    expect(updater.autoInstallOnAppQuit).toBe(false)
+    expect(setInterval).toHaveBeenCalledOnce()
+    controller.applyConfiguration({ channel: 'stable', automatic: false })
+    expect(clearInterval).toHaveBeenCalledOnce()
+    expect(controller.getState().status).toBe('downloaded')
+  })
+
+  it('uses the trusted GitHub stable and beta release channels', () => {
+    const feed = { provider: 'github' as const, owner: 'nassimna', repo: 'cmux-linux-alternative' }
+    const { controller, updater } = createController({ feeds: feed })
+    expect(updater.setFeedURL).toHaveBeenLastCalledWith({
+      ...feed,
+      channel: 'latest',
+      releaseType: 'release'
+    })
+    expect(updater.allowPrerelease).toBe(false)
+    controller.applyConfiguration({ channel: 'beta' })
+    expect(updater.setFeedURL).toHaveBeenLastCalledWith({
+      ...feed,
+      channel: 'beta',
+      releaseType: 'prerelease'
+    })
+    expect(updater.allowPrerelease).toBe(true)
+    expect(updater.allowDowngrade).toBe(false)
   })
 })
 

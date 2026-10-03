@@ -1,70 +1,67 @@
-# Releasing Agent Workspace
+# Releasing Ternline
 
-Releases are prepared by the manual **Release candidate** workflow. The workflow creates evidence
-and, when explicitly requested from an existing matching tag, a GitHub **draft**. It never publishes
-a release or promotes a stable channel automatically. A maintainer must review and publish the
-draft in GitHub.
+The **Release** workflow builds Linux x64, macOS Intel x64, macOS Apple Silicon arm64, and
+Windows x64 on matching native GitHub runners. It publishes only when all four packaged-runtime
+smoke checks pass. The **Deploy website** workflow follows a successful published release and
+builds the Signal website with matching, versioned download URLs.
 
-macOS and Windows candidates use the separate manual **Signed native release candidates** workflow.
-It is environment-gated, consumes platform signing secrets, forces code signing, verifies macOS
-notarization or the Windows Authenticode result, installs the native package, and launches the
-bundled service and renderer before retaining artifacts. It also never publishes automatically.
+## Prepare and qualify
 
-## Prerequisites and version gate
+1. Set the same semantic version in the root and desktop manifests, including the desktop
+   checksum and verification scripts. Use a `-beta.N` suffix for unsigned prereleases; the app's
+   beta update channel does not select alpha releases.
+2. Add a non-empty versioned section to `CHANGELOG.md` and keep `[Unreleased]` for future work.
+3. Run affected tests and `pnpm release:validate --version x.y.z --mode candidate --tag vx.y.z`.
+4. Dispatch **Release** from the PR branch with `version: VERSION` and `publish: false` to build
+   and test every platform before merging. Inspect its logs and retained smoke evidence.
+5. Merge the qualified source, create the annotated `vVERSION` tag on that commit, and push it.
+   A tag run publishes the prerelease after every platform succeeds. A manual publication also
+   requires the workflow ref to be that exact tag.
 
-1. Update the root and desktop package versions to the same strict semantic version, including the
-   desktop checksum/verify scripts' `--version` values. Do not add a `v` prefix inside the
-   manifests.
-2. Move the release notes from `[Unreleased]` into a non-empty `## [x.y.z] - YYYY-MM-DD` section in
-   `CHANGELOG.md`. Keep an `[Unreleased]` section for subsequent work.
-3. Run `pnpm test:release` and then
-   `pnpm release:validate --version x.y.z --mode candidate --tag vx.y.z`.
-4. Run the repository validation gate and build `pnpm package:linux` on the documented Linux build
-   host. Verify `release/SHA256SUMS` independently.
-5. Create and push the annotated `vx.y.z` tag only after review. Dispatch the workflow against that
-   exact tag. Draft creation is refused when the selected ref is not the matching tag.
+Builds use the frozen lockfile, cached pnpm downloads, pinned actions, and Node 22.23.3.
+Release concurrency prevents overlapping runs for the same ref. PR CI runs Node validation and
+focused Windows runtime contracts on Windows 2022;
+expensive distro-package and security inventories remain scheduled or manual.
 
-The `stable` channel accepts only a plain semantic version. The `beta` channel requires a
-prerelease suffix such as `1.2.0-beta.1` and produces a prerelease draft. Neither channel is
-published automatically.
+## Artifacts and checksums
 
-## Feed-free packages and update metadata
+Each native build first launches the packaged app with a new, isolated user-data directory,
+waits for the authenticated Node service, and exercises the packaged CLI and a real PTY. Windows
+checks the installed NSIS package. All platforms exercise browser automation and workspace
+persistence across restart. Linux also inspects AppImage/deb/rpm contents and hashes.
 
-`pnpm package:linux` is the release workflow default. It produces only the AppImage, deb, rpm, and
-deterministic checksums; it does not embed a fabricated update feed. Channel metadata is a separate,
-explicit build using `package:linux:updates`, `package:mac:updates`, or `package:windows:updates`
-with a real HTTPS build URL and channel. Keep generated update metadata and every artifact it names
-together. Never substitute a placeholder URL for a release. See `docs/UPDATES.md` for the metadata
-qualification procedure.
+Windows private writers set their own process token's default object owner to the current user,
+so SQLite-created journals, WAL and SHM files retain the same owner-only proof as explicitly
+created state files. Existing paths with unsafe permissions, reparse points or hard links are
+rejected. Native tests cover these files, lock release on process death, private child IPC, and
+Windows terminal path restoration without allowing traversal outside the workspace.
 
-## Automated evidence
+The release contains:
 
-The release-candidate workflow starts from a clean checkout, pins Node, pnpm, Rust, container image
-digests, and every third-party action, installs with the frozen lockfile, checks generated protocol
-bindings, runs `pnpm validate`, builds exactly these files, and verifies their checksums:
+- Linux x64 AppImage, deb, and rpm.
+- macOS arm64 and x64 DMG/zip pairs.
+- Windows x64 NSIS EXE.
+- Platform beta updater manifests and their blockmaps.
+- Deterministic `SHA256SUMS` and a `release-manifest.json` identifying the version and source commit.
 
-- `agent-workspace-x.y.z-x86_64.AppImage`
-- `agent-workspace-x.y.z-x86_64.deb`
-- `agent-workspace-x.y.z-x86_64.rpm`
-- `SHA256SUMS`
+Publication rejects colliding artifact names and verifies every expected installer is present.
+The macOS updater manifest combines both architectures and retains their individual hashes.
+Do not replace a published release's assets in place; ship a new version for corrections.
 
-The build receives GitHub's narrow `id-token: write` and `attestations: write` permissions only to
-create GitHub/Sigstore build provenance for those subjects. Release assets are unsigned today;
-SHA-256 and provenance authenticate workflow output but are not a substitute for distribution or
-desktop code signing. A stable release remains blocked until maintainers choose, protect, and
-document signing keys and signing verification.
+## Signing and qualification limits
 
-Pinned Syft 1.48.0 emits both SPDX JSON and CycloneDX JSON SBOMs. The pnpm production license
-inventory is retained with them. `pnpm audit --prod --audit-level high` and pinned Grype 0.116.0
-fail on high or critical findings.
-RustSec fails on actionable Rust advisories. No advisory IDs are ignored by default. Any temporary
-exception requires a reviewed, time-bounded security decision in source; do not make an audit green
-by silently adding an ignore.
+These are unsigned prereleases: signing secrets are not configured. The native build disables
+macOS signing/notarization explicitly. Windows installers have no Authenticode signature.
+Checksums are integrity evidence and do not replace code signing or trusted delivery. A stable
+release requires maintainer-owned signing and notarization credentials and their verification.
 
-Candidate artifacts and security evidence are retained for 90 days. Main/scheduled package smoke
-artifacts are retained for 14 days, and scheduled security/performance evidence for 30 days. GitHub
-attestations follow repository attestation retention. The draft-release job alone receives
-`contents: write`; validation, install, and security jobs are read-only except RustSec check output.
+Hosted startup and CLI/PTY checks do not prove physical-device GPU behavior, desktop notifications,
+installer trust UX, accessibility with assistive technology, an eight-hour soak, or complete
+in-app update installation. Linux ARM64 and Windows ARM64 are outside this release scope.
+
+The manual **Release candidate** workflow retains direct accessibility, visual, recovery, distro,
+and security qualification. Complete the [release qualification record](RELEASE_QUALIFICATION.md)
+with retained evidence; leave unrun checks as `NOT RUN` and do not claim stable qualification.
 
 ## Clean-host matrix and limitations
 
@@ -74,58 +71,33 @@ The exact uploaded bundle is downloaded and checksum-verified before every insta
 | ------------------------------- | ------------------------------------------------------------------------------- |
 | Ubuntu 24.04 container          | inspect deb contents, install dependencies/package, launch installed executable |
 | Fedora 42 container             | inspect rpm contents, install dependencies/package, launch installed executable |
-| Ubuntu 24.04 container          | extract AppImage without FUSE, inspect bundled sidecars, launch `AppRun`        |
+| Ubuntu 24.04 container          | extract AppImage without FUSE, inspect bundled Node runtime, launch `AppRun`    |
 | Ubuntu 24.04 software-rendering | launch the same extracted AppImage with Electron `--disable-gpu`                |
 | Ubuntu 24.04 headless Wayland   | launch the same AppImage against a private Weston/pixman Wayland socket         |
-| Arch Linux container            | extract the same AppImage, inspect sidecars, and launch `AppRun` under X11      |
+| Arch Linux container            | extract the same AppImage, inspect Node runtime, and launch `AppRun` under X11  |
 
-All six inspections require executable `resources/bin/agent-workspace-service` and
-`agent-workspace-cli`. Launch uses Xvfb with isolated `HOME` and XDG directories and waits for a live
+All six inspections require `resources/node-linux/bin/node`, the bundled Node server, and
+the Node CLI. Launch uses Xvfb with isolated `HOME` and XDG directories and waits for a live
 Electron renderer and bundled control service. The headless Wayland row instead uses an owner-only
 runtime directory and a Weston software compositor. Containers test package structure, dependency
 resolution, bounded X11 startup, and headless native-Wayland process readiness. They do not verify
 real Wayland input/focus, a native desktop compositor, GPU acceleration, FUSE mounting, desktop-menu
-integration, notifications through a real user session, distro upgrades, ARM64, macOS, or Windows.
+integration, notifications through a real user session, distro upgrades, ARM64, physical macOS or Windows devices.
 The Arch row is rolling-distribution readiness in a pinned official container, not native host or
 desktop-session qualification; only retained green workflow evidence counts as release evidence.
-Native CI now defines DMG/NSIS install-and-launch probes, but only retained green runs on maintained
-hosts count as qualification evidence.
+The historical Rust performance numbers in this repository do not qualify the Node runtime.
+The exact eight-hour Node soak remains unrun; this release does not claim stable qualification.
 
-The signed-native workflow requires the protected `native-release` environment and these secrets:
+## Website and download links
 
-- macOS: `MACOS_CSC_LINK`, `MACOS_CSC_KEY_PASSWORD`, `APPLE_ID`,
-  `APPLE_APP_SPECIFIC_PASSWORD`, and `APPLE_TEAM_ID`.
-- Windows: `WINDOWS_CSC_LINK` and `WINDOWS_CSC_KEY_PASSWORD`.
+GitHub Pages must use GitHub Actions as its build source. **Deploy website** builds with the repo
+base path `/cmux-linux-alternative/` and only publishes after the versioned GitHub release assets
+exist. Its manual dispatch supports subsequent website-only updates after verifying that release.
+The site derives the version from the root manifest; every platform link addresses that exact tag.
 
-Dispatch it with the exact public HTTPS directory for one `stable` or `beta` channel. Review the
-retained installer, updater metadata, signature checks, and launch evidence before publishing the
-files together.
+## Rollback
 
-The nightly performance workflow always runs release-build smoke gates. It compares results only
-when maintainers have reviewed and checked in
-`apps/desktop/scripts/performance/approved-baseline.json`; in its absence it records that no baseline
-comparison was claimed. The exact eight-hour soak is manual, retains a full report, and is not run on
-pull requests. If implementation work defers that run, the implementation milestone may close but
-the build remains a release candidate. Run the exact commands in
-[Performance qualification](PERFORMANCE.md) later against the unchanged final-code candidate,
-retain the JSON and deterministic analysis, and obtain the manual bounded-growth verdict before
-publication. A partial log or interrupted run is `NOT RUN`, never a pass.
-
-## Approval, publication, and rollback
-
-Before publishing a draft, two maintainers should confirm the tag and commit, changelog, checksum
-verification, all three clean-host jobs, both SBOM formats, license inventory, vulnerability gates,
-and provenance. Confirm whether platform signing is complete and that the intended stable or beta
-channel matches the version. If update metadata is being released, qualify it separately against the
-real channel endpoint.
-
-Copy and complete the [release qualification record](RELEASE_QUALIFICATION.md) for every candidate.
-Keep it with the retained evidence. Missing checks stay `NOT RUN`; the template must not be used to
-turn absent native, manual, signing, publication, or soak evidence into a passing claim.
-
-To roll back before publication, delete the draft and tag, correct the source/version notes, and
-create a new reviewed tag; never reuse a tag whose artifacts escaped the repository. After
-publication, do not replace assets in place. Mark the affected release and channel unavailable,
-publish a security or regression notice, revoke compromised signing material if relevant, and ship a
-new patch version. Preserve the failed artifacts, checksums, SBOMs, provenance, logs, and audit
-results for investigation.
+Before publication, correct the candidate and qualify it again. Preserve published tags and
+artifacts. For a regression, publish a notice and a new patch version; never reuse an escaped tag.
+Keep checksums, smoke logs, and source identity with the release evidence. Do not delete user data
+or modify shared development services during qualification.

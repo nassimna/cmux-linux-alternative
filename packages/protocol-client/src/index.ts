@@ -496,6 +496,7 @@ export type {
 } from './schemas'
 
 export {
+  absolutePathSchema,
   authorizedDocumentKindSchema,
   contentDocumentIssueParamsSchema,
   contentDocumentIssueResultSchema,
@@ -526,6 +527,11 @@ export {
   remoteSessionResultSchema,
   remoteTargetCreateParamsSchema,
   remoteTargetDeleteParamsSchema,
+  remoteTargetEnrollmentBeginSchema,
+  remoteTargetEnrollmentCommitSchema,
+  remoteTargetEnrollmentAbortSchema,
+  remoteTargetEnrollmentAbortResultSchema,
+  remoteCredentialReplacementSchema,
   remoteTargetIdParamsSchema,
   remoteTargetListResultSchema,
   remoteTargetResultSchema,
@@ -788,6 +794,7 @@ export {
   workspaceCardSlotV2ChangedDataSchema,
   workspaceCardSlotV2ChangedEventSchema,
   workspaceCreateParamsSchema,
+  workspaceEnvironmentSchema,
   workspaceListResultSchema,
   workspaceMoveParamsSchema,
   workspaceSelectParamsSchema,

@@ -27,8 +27,16 @@ const LIFECYCLE = '10000000-0000-4000-8000-000000000009'
 
 class FakePage implements BrowserAutomationPage {
   public readonly opaquePageToken = {}
+  public readonly initialize = vi.fn(() => Promise.resolve())
+  public readonly inspect = vi.fn(() => Promise.resolve<unknown>({ requests: [] }))
+  public readonly stopRecording = vi.fn(() =>
+    Promise.resolve({ bytes: Buffer.from('webm'), width: 320, height: 240 })
+  )
   public readonly navigate = vi.fn(() => Promise.resolve())
   public readonly waitForLifecycle = vi.fn(() => Promise.resolve())
+  public readonly evaluate = vi.fn(() => Promise.resolve<unknown>({ answer: 42 }))
+  public readonly readDiagnostics = vi.fn(() => ({ entries: [], cursor: 0, dropped: 0 }))
+  public readonly dispose = vi.fn()
   public readonly insertText = vi.fn(() => Promise.resolve())
   public readonly sendKey = vi.fn()
   public readonly capture = vi.fn(() => Promise.resolve(Buffer.from('png bytes')))
@@ -120,6 +128,129 @@ function harness(page = new FakePage()): BrowserAutomationManager {
 }
 
 describe('BrowserAutomationManager', () => {
+  it('returns evaluation, enriched query, and session diagnostics through guarded operations', async () => {
+    const page = new FakePage()
+    const manager = harness(page)
+    expect(await manager.execute(request({ kind: 'evaluate', expression: '6*7' }))).toMatchObject({
+      state: 'succeeded',
+      result: { kind: 'evaluation', value: { answer: 42 } }
+    })
+    page.executeClosedScript.mockResolvedValue([
+      {
+        index: 0,
+        tag: 'input',
+        visible: true,
+        enabled: true,
+        focused: false,
+        editable: true,
+        text: 'label',
+        value: 'abc',
+        attributes: { id: 'field' }
+      }
+    ])
+    expect(
+      await manager.execute(request({ kind: 'query', selector: '#field', limit: 1 }))
+    ).toMatchObject({
+      result: {
+        kind: 'query',
+        matches: [{ text: 'label', value: 'abc', attributes: { id: 'field' } }]
+      }
+    })
+    expect(await manager.execute(request({ kind: 'errors', clear: true }))).toMatchObject({
+      result: { kind: 'errors', entries: [] }
+    })
+    expect(page.readDiagnostics).toHaveBeenCalledWith('errors', true, undefined, undefined)
+    page.evaluate.mockResolvedValue('x'.repeat(65_536))
+    expect(await manager.execute(request({ kind: 'evaluate', expression: 'large' }))).toMatchObject(
+      { state: 'failed', errorCode: 'resource_limit' }
+    )
+    await manager.dispose()
+    expect(page.dispose).toHaveBeenCalledOnce()
+  })
+
+  it.each(['before', 'during'])(
+    'waits for a URL with navigation %s the wait and reports the new epoch',
+    async (timing) => {
+      const page = new FakePage()
+      const manager = harness(page)
+      await manager.createSession(session())
+      if (timing === 'before') {
+        page.navigateTopLevel()
+        page.evaluate.mockResolvedValue(true)
+      } else
+        page.evaluate.mockResolvedValueOnce(false).mockImplementation(() => {
+          page.navigateTopLevel()
+          return Promise.resolve(true)
+        })
+      expect(
+        await manager.execute(
+          request({ kind: 'wait', condition: { kind: 'url', includes: '/next' } })
+        )
+      ).toMatchObject({ state: 'succeeded', result: { kind: 'navigation', navigationEpoch: 1 } })
+      await manager.dispose()
+    }
+  )
+
+  it('accepts a link navigation caused by a click and reports the new epoch', async () => {
+    const page = new FakePage()
+    page.executeClosedScript.mockImplementation(() => {
+      page.navigateTopLevel()
+      return Promise.resolve(true)
+    })
+    const manager = harness(page)
+    expect(await manager.execute(request({ kind: 'click', selector: 'a' }))).toMatchObject({
+      state: 'succeeded',
+      result: { kind: 'navigation', navigationEpoch: 1 }
+    })
+    await manager.dispose()
+  })
+
+  it('returns inspection and recording through the same session ownership and artifact transfer', async () => {
+    const page = new FakePage()
+    const manager = harness(page)
+    expect(await manager.execute(request({ kind: 'networkList' }))).toMatchObject({
+      state: 'succeeded',
+      result: { kind: 'inspection', value: { requests: [] } }
+    })
+    const recorded = await manager.execute(request({ kind: 'recordingStop' }))
+    expect(recorded).toMatchObject({
+      state: 'succeeded',
+      result: { kind: 'recording', handle: { mediaType: 'video/webm' } }
+    })
+    if (recorded.result?.kind !== 'recording') throw new Error('recording missing')
+    expect(manager.readScreenshot(SESSION, 1, recorded.result.handle.handleId, 0).dataBase64).toBe(
+      Buffer.from('webm').toString('base64')
+    )
+    await manager.dispose()
+  })
+
+  it('reports attached sessions, including creation in progress, without counting an idle provider', async () => {
+    let confirm!: (allowed: boolean) => void
+    const manager = new BrowserAutomationManager({
+      acquireAttachedPage: (target) => Promise.resolve(new FakePage(false, target)),
+      createEphemeralPage: (snapshot) => Promise.resolve(new FakePage(true, snapshot.target)),
+      confirmAttachment: () =>
+        new Promise((resolve) => {
+          confirm = resolve
+        }),
+      now: Date.now,
+      schedule: (callback, delayMs) => setTimeout(callback, delayMs),
+      cancelSchedule: (handle) => clearTimeout(handle)
+    })
+
+    expect(manager.hasAttachedSessions()).toBe(false)
+    const creating = manager.createSession(session('attach'))
+    expect(manager.hasAttachedSessions()).toBe(true)
+    confirm(true)
+    await creating
+    expect(manager.hasAttachedSessions()).toBe(true)
+    await manager.destroySession(SESSION)
+    expect(manager.hasAttachedSessions()).toBe(false)
+    await manager.createSession(session())
+    expect(manager.hasAttachedSessions()).toBe(false)
+    await manager.dispose()
+  })
+
   it('provisions new durable sessions at navigation epoch one', async () => {
     const manager = new BrowserAutomationManager({
       acquireAttachedPage: () => Promise.reject(new Error('not used')),
@@ -162,7 +293,7 @@ describe('BrowserAutomationManager', () => {
     }
   })
 
-  it('returns only bounded text-free structural query summaries', async () => {
+  it('returns bounded text with structural query summaries', async () => {
     const page = new FakePage()
     page.executeClosedScript.mockResolvedValue([
       {
@@ -172,8 +303,7 @@ describe('BrowserAutomationManager', () => {
         enabled: true,
         focused: false,
         editable: false,
-        text: 'hostile secret',
-        html: '<button>hostile secret</button>'
+        text: 'clicked:abc'
       }
     ])
     const result = await harness(page).execute(
@@ -189,11 +319,36 @@ describe('BrowserAutomationManager', () => {
           visible: true,
           enabled: true,
           focused: false,
-          editable: false
+          editable: false,
+          text: 'clicked:abc'
         }
       ]
     })
     expect(JSON.stringify(result)).not.toContain('hostile secret')
+  })
+
+  it('runs the closed interaction set through the native page with bounded inputs', async () => {
+    const page = new FakePage()
+    const manager = harness(page)
+    for (const operation of [
+      { kind: 'focus' as const, selector: '#field' },
+      { kind: 'click' as const, selector: '#submit' },
+      { kind: 'typeText' as const, selector: '#field', text: 'private text' },
+      { kind: 'key' as const, key: 'enter' as const },
+      { kind: 'keyAt' as const, selector: '#field', key: 'tab' as const },
+      {
+        kind: 'wait' as const,
+        condition: { kind: 'lifecycle' as const, lifecycle: 'load' as const }
+      }
+    ]) {
+      expect((await manager.execute(request(operation))).state).toBe('succeeded')
+    }
+    expect(page.executeClosedScript).toHaveBeenCalledWith('focus', { selector: '#field' })
+    expect(page.executeClosedScript).toHaveBeenCalledWith('click', { selector: '#submit' })
+    expect(page.insertText).toHaveBeenCalledWith('private text')
+    expect(page.sendKey).toHaveBeenCalledWith('enter', undefined)
+    expect(page.sendKey).toHaveBeenCalledWith('tab', undefined)
+    expect(page.waitForLifecycle).toHaveBeenCalledWith('load', expect.any(AbortSignal))
   })
 
   it('fences late callbacks after top-level navigation', async () => {
@@ -248,6 +403,52 @@ describe('BrowserAutomationManager', () => {
     await manager.destroySession(SESSION, 1)
     expect(page.destroy).toHaveBeenCalledTimes(1)
     expect(manager.diagnosticCounts).toEqual({ sessions: 0, pending: 0, screenshots: 0 })
+  })
+
+  it('destroys an owned page that finishes creation after provider disposal', async () => {
+    let finishCreation!: (page: BrowserAutomationPage) => void
+    const page = new FakePage()
+    const manager = new BrowserAutomationManager({
+      acquireAttachedPage: () => Promise.resolve(undefined),
+      createEphemeralPage: () =>
+        new Promise((resolve) => {
+          finishCreation = resolve
+        }),
+      confirmAttachment: () => Promise.resolve(false),
+      now: Date.now,
+      schedule: (callback, delayMs) => setTimeout(callback, delayMs),
+      cancelSchedule: (handle) => clearTimeout(handle)
+    })
+    const creating = manager.createSession(session())
+    await manager.dispose()
+    finishCreation(page)
+
+    await expect(creating).rejects.toThrow('interrupted')
+    expect(page.destroy).toHaveBeenCalledOnce()
+    expect(manager.diagnosticCounts.sessions).toBe(0)
+  })
+
+  it('cancels a pending page creation when its exact window is destroyed', async () => {
+    let finishCreation!: (page: BrowserAutomationPage) => void
+    const page = new FakePage()
+    const manager = new BrowserAutomationManager({
+      acquireAttachedPage: () => Promise.resolve(undefined),
+      createEphemeralPage: () =>
+        new Promise((resolve) => {
+          finishCreation = resolve
+        }),
+      confirmAttachment: () => Promise.resolve(false),
+      now: Date.now,
+      schedule: (callback, delayMs) => setTimeout(callback, delayMs),
+      cancelSchedule: (handle) => clearTimeout(handle)
+    })
+    const creating = manager.createSession(session())
+    await manager.destroyTarget(WINDOW, 1)
+    finishCreation(page)
+
+    await expect(creating).rejects.toThrow('interrupted')
+    expect(page.destroy).toHaveBeenCalledOnce()
+    expect(manager.diagnosticCounts.sessions).toBe(0)
   })
 
   it('requires trusted confirmation for exact attachment', async () => {

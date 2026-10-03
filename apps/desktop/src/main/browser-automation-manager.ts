@@ -14,6 +14,11 @@ import type {
   BrowserAutomationTargetBinding
 } from '@agent-workspace/protocol-client'
 import type { Event, NativeImage, WebContents } from 'electron'
+import {
+  BrowserAutomationDevtools,
+  BrowserAutomationDevtoolsFailure
+} from './browser-automation-devtools'
+import { browserAutomationElementSummarySchema } from '@agent-workspace/protocol-client'
 
 const CONTENT_TTL_MS = 60_000
 const SESSION_IDLE_TTL_MS = 30 * 60_000
@@ -29,7 +34,8 @@ const MAX_QUERY_BYTES = 16 * 1024
 const MAX_NAVIGATIONS = 100
 const INITIAL_NAVIGATION_EPOCH = 1
 
-export type BrowserAutomationClosedScript = 'selectorState' | 'query' | 'focus' | 'click'
+export type BrowserAutomationClosedScript =
+  'selectorState' | 'query' | 'focus' | 'click' | 'clear' | 'scroll'
 
 export interface BrowserAutomationPage {
   readonly opaquePageToken: object
@@ -37,6 +43,9 @@ export interface BrowserAutomationPage {
   readonly target: BrowserAutomationTargetBinding
   /** Main-owned validation against the current native view/window identity. */
   revalidate(target: BrowserAutomationTargetBinding): boolean
+  initialize(): Promise<void>
+  inspect(operation: BrowserAutomationOperation): Promise<unknown>
+  stopRecording(): Promise<{ bytes: Buffer; width: number; height: number }>
   navigate(url: string): Promise<void>
   waitForLifecycle(
     lifecycle: 'domContentLoaded' | 'load' | 'networkIdle',
@@ -44,13 +53,44 @@ export interface BrowserAutomationPage {
   ): Promise<void>
   executeClosedScript(
     script: BrowserAutomationClosedScript,
-    input: Readonly<{ selector: string; limit?: number }>
+    input: Readonly<{
+      selector?: string | undefined
+      locator?:
+        | { role?: string | undefined; name?: string | undefined; text?: string | undefined }
+        | undefined
+      limit?: number | undefined
+      deltaX?: number | undefined
+      deltaY?: number | undefined
+      editable?: boolean | undefined
+    }>
   ): Promise<unknown>
+  evaluate(expression: string): Promise<unknown>
+  readDiagnostics(
+    kind: 'console' | 'errors',
+    clear: boolean,
+    after?: number,
+    level?: string
+  ): { entries: BrowserAutomationDiagnostic[]; cursor: number; dropped: number }
+  dispose(): void
   insertText(text: string): Promise<void>
-  sendKey(key: BrowserAutomationKey): void
+  sendKey(
+    key: BrowserAutomationKey,
+    modifiers?: Array<'alt' | 'control' | 'meta' | 'shift'>
+  ): void | Promise<void>
   capture(width: number, height: number): Promise<Buffer>
   onTopLevelNavigation(listener: () => void): () => void
   destroy(): Promise<void>
+}
+
+type BrowserAutomationDiagnostic = {
+  level: string
+  message: string
+  source: string
+  line: number
+  timestampMs: number
+  sequence?: number | undefined
+  args?: Array<unknown> | undefined
+  stack?: string | undefined
 }
 
 export interface BrowserAutomationManagerDependencies {
@@ -63,6 +103,10 @@ export interface BrowserAutomationManagerDependencies {
     session: BrowserAutomationSessionSnapshot,
     signal: AbortSignal
   ): Promise<BrowserAutomationPage>
+  resolveAttachment?(
+    tabId: string,
+    window: BrowserAutomationTargetBinding['window']
+  ): BrowserAutomationTargetBinding | undefined
   confirmAttachment(target: BrowserAutomationTargetBinding, signal: AbortSignal): Promise<boolean>
   now(): number
   schedule(callback: () => void, delayMs: number): ReturnType<typeof setTimeout>
@@ -107,12 +151,21 @@ export class BrowserAutomationFailure extends Error {
 }
 
 /**
- * Main-only executor for the closed M5 operation set. It intentionally accepts no
- * renderer sender, raw webContents ID, caller script, CDP command, or partition.
+ * Main-only executor bound to an authorized automation session. It accepts no
+ * renderer sender, raw webContents ID, CDP command, or partition.
  */
 export class BrowserAutomationManager {
   readonly #dependencies: BrowserAutomationManagerDependencies
   readonly #sessions = new Map<string, LocalSession>()
+  readonly #pendingCreations = new Map<
+    string,
+    {
+      generation: number
+      mode: BrowserAutomationSessionSnapshot['mode']
+      target: BrowserAutomationTargetBinding
+      abort: AbortController
+    }
+  >()
   readonly #screenshots = new Map<string, ScreenshotRecord>()
   #disposed = false
 
@@ -126,7 +179,12 @@ export class BrowserAutomationManager {
     this.assertActive()
     this.purgeExpiredContent()
     const session = await this.ensureSession(request.session)
-    this.guard(request, session)
+    this.guard(
+      request,
+      session,
+      request.operation.operation.kind === 'wait' &&
+        request.operation.operation.condition.kind === 'url'
+    )
     if (session.pending) throw new BrowserAutomationFailure('automation_backpressure')
     session.lastUsedAtMs = this.#dependencies.now()
     this.scheduleSessionExpiry(session)
@@ -134,7 +192,12 @@ export class BrowserAutomationManager {
     const controller = new AbortController()
     session.pending = {
       operationId: request.operation.operationId,
-      allowsNavigation: request.operation.operation.kind === 'navigate',
+      allowsNavigation:
+        ['navigate', 'click', 'key', 'keyAt', 'typeText', 'evaluate'].includes(
+          request.operation.operation.kind
+        ) ||
+        (request.operation.operation.kind === 'wait' &&
+          request.operation.operation.condition.kind === 'url'),
       abort: controller
     }
     const timeout = this.#dependencies.schedule(
@@ -142,8 +205,13 @@ export class BrowserAutomationManager {
       request.operation.timeoutMs
     )
     try {
-      const result = await this.runOperation(request, session, controller.signal)
-      this.guard(request, session, request.operation.operation.kind === 'navigate')
+      let result = await this.runOperation(request, session, controller.signal)
+      this.guard(request, session, session.pending?.allowsNavigation)
+      if (
+        session.pending?.allowsNavigation &&
+        session.navigationEpoch !== request.operation.navigationEpoch
+      )
+        result = { kind: 'navigation', navigationEpoch: session.navigationEpoch }
       return this.snapshot(request, session, 'succeeded', result)
     } catch (error) {
       const code = failureCode(error, controller.signal)
@@ -160,7 +228,10 @@ export class BrowserAutomationManager {
   ): Promise<BrowserAutomationSessionSnapshot> {
     const target =
       provision.mode === 'attach'
-        ? provision.requestedTarget
+        ? (provision.requestedTarget ??
+          (provision.requestedTabId
+            ? this.#dependencies.resolveAttachment?.(provision.requestedTabId, window)
+            : undefined))
         : {
             workspaceId: randomUUID(),
             paneId: randomUUID(),
@@ -169,7 +240,10 @@ export class BrowserAutomationManager {
             browserLifecycleId: randomUUID(),
             window
           }
-    if (!target) throw new BrowserAutomationFailure('target_required')
+    if (!target)
+      throw new BrowserAutomationFailure(
+        provision.requestedTabId ? 'target_not_found' : 'target_required'
+      )
     if (
       target.window.windowId !== window.windowId ||
       target.window.windowGeneration !== window.windowGeneration
@@ -229,6 +303,10 @@ export class BrowserAutomationManager {
   }
 
   public async destroySession(sessionId: string, generation?: number): Promise<void> {
+    const pending = this.#pendingCreations.get(sessionId)
+    if (pending && (generation === undefined || pending.generation === generation)) {
+      pending.abort.abort(new BrowserAutomationFailure('interrupted'))
+    }
     const session = this.#sessions.get(sessionId)
     if (!session || (generation !== undefined && generation !== session.generation)) return
     this.#sessions.delete(sessionId)
@@ -240,11 +318,20 @@ export class BrowserAutomationManager {
     session.pending?.abort.abort(new BrowserAutomationFailure('interrupted'))
     session.abort.abort(new BrowserAutomationFailure('interrupted'))
     session.removeNavigationListener()
+    session.page.dispose()
     this.releaseSessionScreenshots(session.id)
     if (session.page.owned) await session.page.destroy().catch(() => undefined)
   }
 
   public async destroyTarget(windowId: string, windowGeneration: number): Promise<void> {
+    for (const { target, abort } of this.#pendingCreations.values()) {
+      if (
+        target.window.windowId === windowId &&
+        target.window.windowGeneration === windowGeneration
+      ) {
+        abort.abort(new BrowserAutomationFailure('interrupted'))
+      }
+    }
     const matching = [...this.#sessions.values()].filter(
       ({ target }) =>
         target.window.windowId === windowId && target.window.windowGeneration === windowGeneration
@@ -300,6 +387,9 @@ export class BrowserAutomationManager {
   public async dispose(): Promise<void> {
     if (this.#disposed) return
     this.#disposed = true
+    for (const { abort } of this.#pendingCreations.values()) {
+      abort.abort(new BrowserAutomationFailure('interrupted'))
+    }
     await Promise.all([...this.#sessions.keys()].map((sessionId) => this.destroySession(sessionId)))
     for (const record of this.#screenshots.values()) record.bytes.fill(0)
     this.#screenshots.clear()
@@ -317,7 +407,16 @@ export class BrowserAutomationManager {
     }
   }
 
+  /** Includes attach requests before their native page has finished opening. */
+  public hasAttachedSessions(): boolean {
+    return (
+      [...this.#sessions.values()].some((session) => session.mode === 'attach') ||
+      [...this.#pendingCreations.values()].some((pending) => pending.mode === 'attach')
+    )
+  }
+
   private async ensureSession(snapshot: BrowserAutomationSessionSnapshot): Promise<LocalSession> {
+    this.assertActive()
     const current = this.#sessions.get(snapshot.automationSessionId)
     if (current) {
       if (current.generation !== snapshot.generation) {
@@ -330,61 +429,83 @@ export class BrowserAutomationManager {
       this.scheduleSessionExpiry(current)
       return current
     }
-    if (this.#sessions.size >= 8) throw new BrowserAutomationFailure('session_limit')
+    if (this.#pendingCreations.has(snapshot.automationSessionId)) {
+      throw new BrowserAutomationFailure('automation_backpressure')
+    }
+    if (this.#sessions.size + this.#pendingCreations.size >= 8) {
+      throw new BrowserAutomationFailure('session_limit')
+    }
     if (snapshot.state !== 'ready' || snapshot.expiresAtMs <= this.#dependencies.now()) {
       throw new BrowserAutomationFailure('session_expired')
     }
 
     const abort = new AbortController()
-    let page: BrowserAutomationPage | undefined
-    if (snapshot.mode === 'attach') {
-      if (!(await this.#dependencies.confirmAttachment(snapshot.target, abort.signal))) {
-        throw new BrowserAutomationFailure('policy_denied')
-      }
-      page = await this.#dependencies.acquireAttachedPage(
-        snapshot.target,
-        snapshot.profileKey,
-        abort.signal
-      )
-      if (!page || page.owned) throw new BrowserAutomationFailure('target_not_found')
-    } else {
-      page = await this.#dependencies.createEphemeralPage(snapshot, abort.signal)
-      if (!page.owned) throw new BrowserAutomationFailure('policy_denied')
-    }
-    if (!sameTarget(page.target, snapshot.target) || !page.revalidate(snapshot.target)) {
-      if (page.owned) await page.destroy().catch(() => undefined)
-      throw new BrowserAutomationFailure('target_stale')
-    }
-
-    const session: LocalSession = {
-      id: snapshot.automationSessionId,
+    this.#pendingCreations.set(snapshot.automationSessionId, {
       generation: snapshot.generation,
-      profileKey: snapshot.profileKey,
       mode: snapshot.mode,
       target: snapshot.target,
-      page,
-      abort,
-      navigationEpoch: snapshot.navigationEpoch,
-      navigationCount: 0,
-      lastUsedAtMs: this.#dependencies.now(),
-      serverExpiresAtMs: snapshot.expiresAtMs,
-      destroyed: false,
-      removeNavigationListener: () => undefined
-    }
-    session.removeNavigationListener = page.onTopLevelNavigation(() => {
-      session.navigationEpoch += 1
-      session.navigationCount += 1
-      if (session.pending && !session.pending.allowsNavigation) {
-        session.pending.abort.abort(
-          new BrowserAutomationFailure(
-            session.navigationCount > MAX_NAVIGATIONS ? 'resource_limit' : 'stale_navigation'
-          )
-        )
-      }
+      abort
     })
-    this.#sessions.set(session.id, session)
-    this.scheduleSessionExpiry(session)
-    return session
+    let page: BrowserAutomationPage | undefined
+    try {
+      if (snapshot.mode === 'attach') {
+        if (!(await this.#dependencies.confirmAttachment(snapshot.target, abort.signal))) {
+          throw new BrowserAutomationFailure('policy_denied')
+        }
+        if (abort.signal.aborted || this.#disposed) throw abort.signal.reason
+        page = await this.#dependencies.acquireAttachedPage(
+          snapshot.target,
+          snapshot.profileKey,
+          abort.signal
+        )
+        if (!page || page.owned) throw new BrowserAutomationFailure('target_not_found')
+      } else {
+        page = await this.#dependencies.createEphemeralPage(snapshot, abort.signal)
+        if (!page.owned) throw new BrowserAutomationFailure('policy_denied')
+      }
+      if (abort.signal.aborted || this.#disposed) throw abort.signal.reason
+      if (!sameTarget(page.target, snapshot.target) || !page.revalidate(snapshot.target)) {
+        throw new BrowserAutomationFailure('target_stale')
+      }
+
+      await page.initialize()
+      if (abort.signal.aborted || this.#disposed) throw abort.signal.reason
+      const session: LocalSession = {
+        id: snapshot.automationSessionId,
+        generation: snapshot.generation,
+        profileKey: snapshot.profileKey,
+        mode: snapshot.mode,
+        target: snapshot.target,
+        page,
+        abort,
+        navigationEpoch: snapshot.navigationEpoch,
+        navigationCount: 0,
+        lastUsedAtMs: this.#dependencies.now(),
+        serverExpiresAtMs: snapshot.expiresAtMs,
+        destroyed: false,
+        removeNavigationListener: () => undefined
+      }
+      session.removeNavigationListener = page.onTopLevelNavigation(() => {
+        session.navigationEpoch += 1
+        session.navigationCount += 1
+        if (session.pending && !session.pending.allowsNavigation) {
+          session.pending.abort.abort(
+            new BrowserAutomationFailure(
+              session.navigationCount > MAX_NAVIGATIONS ? 'resource_limit' : 'stale_navigation'
+            )
+          )
+        }
+      })
+      this.#sessions.set(session.id, session)
+      this.scheduleSessionExpiry(session)
+      return session
+    } catch (error) {
+      page?.dispose()
+      if (page?.owned) await page.destroy().catch(() => undefined)
+      throw error
+    } finally {
+      this.#pendingCreations.delete(snapshot.automationSessionId)
+    }
   }
 
   private async runOperation(
@@ -417,6 +538,7 @@ export class BrowserAutomationManager {
         const raw = await abortable(
           session.page.executeClosedScript('query', {
             selector: operation.selector,
+            locator: operation.locator,
             limit: operation.limit
           }),
           signal
@@ -428,32 +550,99 @@ export class BrowserAutomationManager {
         }
         return { kind: 'query', matches }
       }
+      case 'evaluate': {
+        this.guard(request, session)
+        const value = await abortable(session.page.evaluate(operation.expression), signal)
+        this.guard(request, session, true)
+        if (Buffer.byteLength(JSON.stringify(value), 'utf8') > 64 * 1_024) {
+          throw new BrowserAutomationFailure('resource_limit')
+        }
+        return { kind: 'evaluation', value }
+      }
+      case 'console':
+      case 'errors':
+        this.guard(request, session)
+        return {
+          kind: operation.kind,
+          ...session.page.readDiagnostics(
+            operation.kind,
+            operation.clear ?? false,
+            operation.after,
+            operation.level
+          )
+        }
       case 'focus':
       case 'click':
         this.guard(request, session)
         await abortable(
-          session.page.executeClosedScript(operation.kind, { selector: operation.selector }),
+          session.page.executeClosedScript(operation.kind, {
+            selector: operation.selector,
+            locator: operation.locator
+          }),
           signal
         )
-        this.guard(request, session)
+        this.guard(request, session, operation.kind === 'click')
         return { kind: 'empty' }
       case 'typeText':
-        await this.focusSelector(request, session, operation.selector, signal)
+        await this.focusSelector(request, session, { ...operation, editable: true }, signal)
         this.guard(request, session)
+        if (operation.clear)
+          await abortable(session.page.executeClosedScript('clear', operation), signal)
         await abortable(session.page.insertText(operation.text), signal)
-        this.guard(request, session)
+        this.guard(request, session, true)
         return { kind: 'empty' }
       case 'key':
         this.guard(request, session)
-        session.page.sendKey(operation.key)
-        this.guard(request, session)
+        await abortable(
+          Promise.resolve(session.page.sendKey(operation.key, operation.modifiers)),
+          signal
+        )
+        this.guard(request, session, true)
         return { kind: 'empty' }
       case 'keyAt':
-        await this.focusSelector(request, session, operation.selector, signal)
+        await this.focusSelector(request, session, operation, signal)
         this.guard(request, session)
-        session.page.sendKey(operation.key)
+        await abortable(
+          Promise.resolve(session.page.sendKey(operation.key, operation.modifiers)),
+          signal
+        )
+        this.guard(request, session, true)
+        return { kind: 'empty' }
+      case 'scroll':
+        this.guard(request, session)
+        await abortable(session.page.executeClosedScript('scroll', operation), signal)
         this.guard(request, session)
         return { kind: 'empty' }
+      case 'recordingStop': {
+        const recording = await abortable(session.page.stopRecording(), signal)
+        this.guard(request, session)
+        return {
+          ...this.retainScreenshot(
+            session,
+            recording.width,
+            recording.height,
+            recording.bytes,
+            'video/webm'
+          ),
+          kind: 'recording'
+        } as BrowserAutomationOperationResultData
+      }
+      case 'snapshot':
+      case 'resize':
+      case 'appearance':
+      case 'networkStart':
+      case 'networkStop':
+      case 'networkList':
+      case 'networkGet':
+      case 'networkBody':
+      case 'recordingStart': {
+        this.guard(request, session)
+        const value = await abortable(session.page.inspect(operation), signal)
+        this.guard(request, session)
+        if (Buffer.byteLength(JSON.stringify(value)) > 64 * 1024)
+          throw new BrowserAutomationFailure('resource_limit')
+        return { kind: 'inspection', value: JSON.parse(JSON.stringify(value)) as unknown }
+      }
       case 'screenshot': {
         this.guard(request, session)
         const bytes = await abortable(
@@ -469,11 +658,17 @@ export class BrowserAutomationManager {
   private async focusSelector(
     request: BrowserAutomationExecutionRequest,
     session: LocalSession,
-    selector: string,
+    target: {
+      selector?: string | undefined
+      locator?:
+        | { role?: string | undefined; name?: string | undefined; text?: string | undefined }
+        | undefined
+      editable?: boolean | undefined
+    },
     signal: AbortSignal
   ): Promise<void> {
     this.guard(request, session)
-    await abortable(session.page.executeClosedScript('focus', { selector }), signal)
+    await abortable(session.page.executeClosedScript('focus', target), signal)
     this.guard(request, session)
   }
 
@@ -492,7 +687,19 @@ export class BrowserAutomationManager {
       return
     }
     while (!signal.aborted) {
-      this.guard(request, session)
+      this.guard(request, session, operation.condition.kind === 'url')
+      if (operation.condition.kind === 'text' || operation.condition.kind === 'url') {
+        const expression =
+          operation.condition.kind === 'text'
+            ? `document.body.innerText.includes(${JSON.stringify(operation.condition.text)})`
+            : `location.href.includes(${JSON.stringify(operation.condition.includes)})`
+        if (await abortable(session.page.evaluate(expression), signal)) {
+          this.guard(request, session, operation.condition.kind === 'url')
+          return
+        }
+        await abortable(delay(this.#dependencies, 50), signal)
+        continue
+      }
       const raw = await abortable(
         session.page.executeClosedScript('selectorState', {
           selector: operation.condition.selector
@@ -511,7 +718,8 @@ export class BrowserAutomationManager {
     session: LocalSession,
     width: number,
     height: number,
-    bytes: Buffer
+    bytes: Buffer,
+    mediaType: 'image/png' | 'video/webm' = 'image/png'
   ): BrowserAutomationOperationResultData {
     if (bytes.length === 0 || bytes.length > MAX_SCREENSHOT_BYTES) {
       bytes.fill(0)
@@ -564,7 +772,7 @@ export class BrowserAutomationManager {
         width,
         height,
         byteLength: bytes.length,
-        mediaType: 'image/png',
+        mediaType,
         sha256,
         chunkCount: chunks.length,
         expiresAtMs
@@ -687,6 +895,15 @@ export class BrowserAutomationManager {
   }
 }
 
+const findTargetsSource = `(input=>{
+  if (input.selector) return Array.from(document.querySelectorAll(input.selector))
+  const normalized=value=>value.replace(/\\s+/g,' ').trim()
+  const text=normalized(input.locator.text)
+  return Array.from(document.querySelectorAll('body *')).filter(element=>
+    !['SCRIPT','STYLE','NOSCRIPT'].includes(element.tagName) && normalized(element.innerText || element.textContent || '')===text &&
+    !Array.from(element.children).some(child=>normalized(child.innerText || child.textContent || '')===text))
+})`
+
 const CLOSED_SCRIPTS: Readonly<Record<BrowserAutomationClosedScript, string>> = {
   selectorState: `(input => {
     const element = document.querySelector(input.selector)
@@ -699,7 +916,7 @@ const CLOSED_SCRIPTS: Readonly<Record<BrowserAutomationClosedScript, string>> = 
       enabled: !('disabled' in element) || element.disabled !== true
     }
   })`,
-  query: `(input => Array.from(document.querySelectorAll(input.selector)).slice(0, input.limit).map((element, index) => {
+  query: `(input => (${findTargetsSource})(input).slice(0, input.limit).map((element, index) => {
     const name = element.tagName.toLowerCase()
     const tag = name === 'a' ? 'link' : name === 'img' ? 'image' :
       ['button','input','textarea','select','form','dialog'].includes(name) ? name : 'generic'
@@ -711,19 +928,52 @@ const CLOSED_SCRIPTS: Readonly<Record<BrowserAutomationClosedScript, string>> = 
       visible: style.display !== 'none' && style.visibility !== 'hidden' && rect.width > 0 && rect.height > 0,
       enabled: !('disabled' in element) || element.disabled !== true,
       focused: document.activeElement === element,
-      editable: name === 'input' || name === 'textarea' || element.isContentEditable === true
+      editable: name === 'input' || name === 'textarea' || element.isContentEditable === true,
+      text: (element.textContent || '').slice(0, 8192),
+      ...('value' in element ? { value: String(element.value).slice(0, 8192) } : {}),
+      attributes: Object.fromEntries(['id', 'class', 'name', 'type', 'role', 'aria-label', 'aria-expanded', 'aria-checked', 'href', 'src', 'placeholder', 'title'].filter(name => element.hasAttribute(name)).map(name => [name, element.getAttribute(name).slice(0, 2048)]))
     }
   }))`,
   focus: `(input => {
-    const element = document.querySelector(input.selector)
+    const matches = (${findTargetsSource})(input)
+    if (matches.length !== 1) throw new Error('target must match exactly one element')
+    const element = matches[0]
     if (!(element instanceof HTMLElement)) throw new Error('selector did not match a focusable element')
+    const rect=element.getBoundingClientRect()
+    const style=getComputedStyle(element)
+    if (!rect.width || !rect.height || style.visibility==='hidden' || style.display==='none' || element.disabled) throw new Error('target is not actionable')
+    if (input.editable && (element.readOnly || !(element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement || element.isContentEditable))) throw new Error('target is not editable')
     element.focus({ preventScroll: true })
+    if (document.activeElement !== element) throw new Error('target could not be focused')
     return true
   })`,
   click: `(input => {
-    const element = document.querySelector(input.selector)
+    const matches = (${findTargetsSource})(input)
+    if (matches.length !== 1) throw new Error('target must match exactly one element')
+    const element = matches[0]
     if (!(element instanceof HTMLElement)) throw new Error('selector did not match a clickable element')
-    element.click()
+    element.scrollIntoView({block:'center',inline:'center'})
+    const rect=element.getBoundingClientRect()
+    const style=getComputedStyle(element)
+    if (rect.width===0 || rect.height===0 || style.visibility==='hidden' || style.display==='none' || element.disabled) throw new Error('target is not actionable')
+    return {x:Math.round(rect.x+rect.width/2),y:Math.round(rect.y+rect.height/2)}
+  })`,
+  clear: `(input=>{
+    const matches=(${findTargetsSource})(input)
+    if (matches.length!==1) throw new Error('target must match exactly one element')
+    const element=matches[0]
+    if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) {
+      const setter=Object.getOwnPropertyDescriptor(element instanceof HTMLInputElement ? HTMLInputElement.prototype : HTMLTextAreaElement.prototype,'value').set
+      setter.call(element,'')
+    } else if (element.isContentEditable) element.textContent=''
+    else throw new Error('target is not editable')
+    element.dispatchEvent(new Event('input',{bubbles:true}))
+    return true
+  })`,
+  scroll: `(input=>{
+    const target=input.selector ? document.querySelector(input.selector) : window
+    if (!target) throw new Error('scroll target was not found')
+    target.scrollBy({left:input.deltaX,top:input.deltaY,behavior:'instant'})
     return true
   })`
 }
@@ -753,11 +1003,37 @@ export function createElectronAutomationPage(options: {
   revalidate: () => boolean
   destroyOwned?: () => Promise<void>
   prepareCapture?: (width: number, height: number) => void
+  captureOffscreen?: (width: number, height: number) => Promise<Buffer>
 }): BrowserAutomationPage {
   const token = {}
+  const devtools = new BrowserAutomationDevtools(options.contents)
   return {
     opaquePageToken: token,
     owned: options.owned,
+    initialize: () => devtools.initialize(),
+    inspect: async (operation) => {
+      if (operation.kind === 'resize') {
+        options.prepareCapture?.(operation.width, operation.height)
+        await devtools.command('Emulation.setDeviceMetricsOverride', {
+          width: operation.width,
+          height: operation.height,
+          deviceScaleFactor: 1,
+          mobile: false
+        })
+        return { width: operation.width, height: operation.height }
+      }
+      if (operation.kind === 'recordingStart') {
+        options.prepareCapture?.(operation.width, operation.height)
+        await devtools.command('Emulation.setDeviceMetricsOverride', {
+          width: operation.width,
+          height: operation.height,
+          deviceScaleFactor: 1,
+          mobile: false
+        })
+      }
+      return devtools.run(operation)
+    },
+    stopRecording: () => devtools.stopRecording(),
     target: options.target,
     revalidate: (target) => sameTarget(target, options.target) && options.revalidate(),
     navigate: async (url) => {
@@ -789,27 +1065,111 @@ export function createElectronAutomationPage(options: {
       await waitForContentsEvent(options.contents, event, signal)
     },
     executeClosedScript: async (script, input) => {
-      // `script` is a closed local enum and input is JSON encoded as data. No caller
-      // bytes are ever concatenated into executable source.
-      const encoded = Buffer.from(JSON.stringify(input), 'utf8').toString('base64')
-      const source = `${CLOSED_SCRIPTS[script]}((encoded => JSON.parse(new TextDecoder().decode(Uint8Array.from(atob(encoded), character => character.charCodeAt(0)))))('${encoded}'))`
-      const result: unknown = await options.contents.executeJavaScript(source, true)
-      return result
+      const attribute = 'data-ternline-' + randomUUID()
+      const objects: string[] = []
+      let target = input
+      try {
+        if (input.locator?.role) {
+          const tree = await devtools.command<{
+            nodes: Array<{
+              ignored?: boolean
+              role?: { value: string }
+              name?: { value: string }
+              backendDOMNodeId?: number
+            }>
+          }>('Accessibility.getFullAXTree', {})
+          const matches = tree.nodes.filter(
+            (node) =>
+              !node.ignored &&
+              node.backendDOMNodeId &&
+              node.role?.value === input.locator!.role &&
+              (input.locator!.name === undefined || node.name?.value === input.locator!.name)
+          )
+          for (const node of matches.slice(0, 100)) {
+            const { object } = await devtools.command<{ object: { objectId: string } }>(
+              'DOM.resolveNode',
+              {
+                backendNodeId: node.backendDOMNodeId
+              }
+            )
+            objects.push(object.objectId)
+            await devtools.command('Runtime.callFunctionOn', {
+              objectId: object.objectId,
+              functionDeclaration: 'function(attribute){this.setAttribute(attribute,"true")}',
+              arguments: [{ value: attribute }]
+            })
+          }
+          target = { ...input, selector: `[${attribute}]` }
+        }
+        const encoded = Buffer.from(JSON.stringify(target), 'utf8').toString('base64')
+        const source = `${CLOSED_SCRIPTS[script]}((encoded => JSON.parse(new TextDecoder().decode(Uint8Array.from(atob(encoded), character => character.charCodeAt(0)))))('${encoded}'))`
+        const result: unknown = await options.contents.executeJavaScript(source, true)
+        if (script === 'click') {
+          const point = result as { x: number; y: number }
+          options.contents.sendInputEvent({ type: 'mouseMove', x: point.x, y: point.y })
+          options.contents.sendInputEvent({
+            type: 'mouseDown',
+            x: point.x,
+            y: point.y,
+            button: 'left',
+            clickCount: 1
+          })
+          options.contents.sendInputEvent({
+            type: 'mouseUp',
+            x: point.x,
+            y: point.y,
+            button: 'left',
+            clickCount: 1
+          })
+        }
+        if (script === 'click') await new Promise((resolve) => setTimeout(resolve, 50))
+        return result
+      } finally {
+        for (const objectId of objects) {
+          await devtools
+            .command('Runtime.callFunctionOn', {
+              objectId,
+              functionDeclaration: 'function(attribute){this.removeAttribute(attribute)}',
+              arguments: [{ value: attribute }]
+            })
+            .catch(() => undefined)
+          await devtools.command('Runtime.releaseObject', { objectId }).catch(() => undefined)
+        }
+      }
     },
+    evaluate: async (expression) => {
+      const value: unknown = await options.contents.executeJavaScript(expression, true)
+      const serialized = JSON.stringify(value === undefined ? null : value)
+      if (serialized === undefined) throw new BrowserAutomationFailure('invalid_operation')
+      if (Buffer.byteLength(serialized, 'utf8') > 64 * 1_024)
+        throw new BrowserAutomationFailure('resource_limit')
+      return JSON.parse(serialized) as unknown
+    },
+    readDiagnostics: (kind, clear, after, level) => devtools.diagnostics(kind, clear, after, level),
+    dispose: () => devtools.dispose(),
     insertText: async (text) => options.contents.insertText(text),
-    sendKey: (key) => {
-      const code = KEY_CODES[key]
-      options.contents.sendInputEvent({ type: 'keyDown', keyCode: code })
-      options.contents.sendInputEvent({ type: 'keyUp', keyCode: code })
+    sendKey: async (key, modifiers = []) => {
+      const code = KEY_CODES[key] ?? key
+      options.contents.sendInputEvent({ type: 'keyDown', keyCode: code, modifiers })
+      options.contents.sendInputEvent({ type: 'keyUp', keyCode: code, modifiers })
+      await new Promise((resolve) => setTimeout(resolve, 50))
     },
     capture: async (width, height) => {
       options.prepareCapture?.(width, height)
-      const image: NativeImage = await options.contents.capturePage({ x: 0, y: 0, width, height })
+      await devtools.command('Emulation.setDeviceMetricsOverride', {
+        width,
+        height,
+        deviceScaleFactor: 1,
+        mobile: false
+      })
+      if (options.captureOffscreen) return options.captureOffscreen(width, height)
+      const image: NativeImage = await options.contents.capturePage(
+        { x: 0, y: 0, width, height },
+        { stayHidden: true }
+      )
       const captured = image.getSize()
-      if (captured.width !== width || captured.height !== height) {
-        throw new BrowserAutomationFailure('resource_limit')
-      }
-      return image.toPNG()
+      if (captured.width === width && captured.height === height) return image.toPNG()
+      throw new BrowserAutomationFailure('resource_limit')
     },
     onTopLevelNavigation: (listener) => {
       const handler = (event: Event): void => {
@@ -838,34 +1198,9 @@ function parseElementSummaries(value: unknown, limit: number): BrowserAutomation
   }
   return value.map((candidate, index) => {
     if (!isRecord(candidate)) throw new BrowserAutomationFailure('invalid_operation')
-    const tag = candidate.tag
-    if (
-      ![
-        'button',
-        'input',
-        'textarea',
-        'select',
-        'link',
-        'form',
-        'image',
-        'dialog',
-        'generic'
-      ].includes(String(tag)) ||
-      typeof candidate.visible !== 'boolean' ||
-      typeof candidate.enabled !== 'boolean' ||
-      typeof candidate.focused !== 'boolean' ||
-      typeof candidate.editable !== 'boolean'
-    ) {
-      throw new BrowserAutomationFailure('invalid_operation')
-    }
-    return {
-      index,
-      tag: tag as BrowserAutomationElementSummary['tag'],
-      visible: candidate.visible,
-      enabled: candidate.enabled,
-      focused: candidate.focused,
-      editable: candidate.editable
-    }
+    const parsed = browserAutomationElementSummarySchema.safeParse({ ...candidate, index })
+    if (!parsed.success) throw new BrowserAutomationFailure('invalid_operation')
+    return parsed.data as BrowserAutomationElementSummary
   })
 }
 
@@ -913,7 +1248,10 @@ function terminalState(
 
 function failureCode(error: unknown, signal: AbortSignal): BrowserAutomationErrorCode {
   const reason: unknown = signal.aborted ? (signal.reason as unknown) : error
-  return reason instanceof BrowserAutomationFailure ? reason.code : 'invalid_operation'
+  return reason instanceof BrowserAutomationFailure ||
+    reason instanceof BrowserAutomationDevtoolsFailure
+    ? reason.code
+    : 'invalid_operation'
 }
 
 function sameTarget(

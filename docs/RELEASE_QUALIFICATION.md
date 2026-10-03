@@ -46,7 +46,7 @@ publication.
 | Build provenance for every published artifact            |        |          |                        |
 | SPDX and CycloneDX SBOMs                                 |        |          |                        |
 | Production dependency license inventory                  |        |          |                        |
-| pnpm, RustSec, and packaged Grype high/critical gates    |        |          |                        |
+| pnpm audit and packaged Grype high/critical gates        |        |          |                        |
 | Zero unresolved critical/high security findings          |        |          |                        |
 
 ## Performance and stability

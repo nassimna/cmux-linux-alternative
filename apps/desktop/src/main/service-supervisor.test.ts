@@ -411,6 +411,51 @@ describe('ServiceSupervisor utilities', () => {
 })
 
 describe('ServiceSupervisor lifecycle', () => {
+  it('drains accepted utilities and rejects new work before releasing Rust ownership', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'service-supervisor-'))
+    const serviceChild = createServiceChild(readyRecord)
+    let releaseUtility: (() => void) | undefined
+    const utilityGate = new Promise<void>((resolve) => {
+      releaseUtility = resolve
+    })
+    const supervisor = new ServiceSupervisor(
+      '/run/control.sock',
+      '0123456789abcdef0123456789abcdef',
+      '/bin/true',
+      serviceOptions(directory),
+      withFakeContainment([serviceChild], {
+        spawnProcess: () => serviceChild.child,
+        createControlClient: () => createControlClient(),
+        utilityRunner: {
+          run: async <T>(_arguments: readonly string[], schema: { parse(value: unknown): T }) => {
+            await utilityGate
+            return schema.parse({ classification: 'healthy', schemaVersion: 5 })
+          }
+        }
+      })
+    )
+    try {
+      await supervisor.start()
+      const utility = supervisor.inspectRecovery()
+      const handoff = supervisor.stopForHandoff()
+      await expect(supervisor.inspectRecovery()).rejects.toThrow('handoff is in progress')
+      await expect(supervisor.start()).rejects.toThrow('handoff is in progress')
+      let handoffFinished = false
+      void handoff.then(() => {
+        handoffFinished = true
+      })
+      await Promise.resolve()
+      expect(handoffFinished).toBe(false)
+      releaseUtility!()
+      await expect(utility).resolves.toMatchObject({ classification: 'healthy' })
+      await expect(handoff).resolves.toBeUndefined()
+    } finally {
+      releaseUtility?.()
+      await supervisor.stop().catch(() => undefined)
+      await rm(directory, { force: true, recursive: true })
+    }
+  })
+
   it('establishes containment before startup authentication', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'service-supervisor-'))
     const serviceChild = createServiceChild(readyRecord)

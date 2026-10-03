@@ -1,3 +1,5 @@
+> Historical Rust-era design record. The current Node/TypeScript architecture and release path are documented in [Architecture](ARCHITECTURE.md).
+
 # cmux behavior and design parity implementation specification
 
 <!-- markdownlint-disable MD013 MD060 -->

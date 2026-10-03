@@ -1,0 +1,77 @@
+name: Deploy website
+
+on:
+  workflow_run:
+    workflows: [Release desktop packages]
+    types: [completed]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: 22.23.3
+  PNPM_VERSION: 10.34.5
+
+jobs:
+  deploy:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'push' &&
+       github.event.workflow_run.head_repository.full_name == github.repository)
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+      - name: Verify published downloads
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version=$(node -p 'require("./package.json").version')
+          gh release view "v$version" --json tagName,isDraft,assets > published-release.json
+          node --input-type=module <<'EOF'
+          import { readFile } from 'node:fs/promises'
+          const { version } = JSON.parse(await readFile('package.json', 'utf8'))
+          const release = JSON.parse(await readFile('published-release.json', 'utf8'))
+          if (release.isDraft || release.tagName !== `v${version}`) throw new Error('Release is not published.')
+          const names = new Set(release.assets.map(asset => asset.name))
+          for (const name of [
+            `agent-workspace-${version}-x86_64.AppImage`,
+            `agent-workspace-${version}-x86_64.deb`,
+            `agent-workspace-${version}-x86_64.rpm`,
+            `agent-workspace-${version}-macos-arm64.dmg`,
+            `agent-workspace-${version}-macos-x64.dmg`,
+            `agent-workspace-${version}-windows-x64-setup.exe`,
+            'SHA256SUMS'
+          ]) if (!names.has(name)) throw new Error(`Missing download: ${name}`)
+          EOF
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.0
+        with:
+          version: ${{ env.PNPM_VERSION }}
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - uses: actions/configure-pages@983d7736d9b0ae728b81ab479565c72886d7745b # v5.0.0
+      - run: pnpm install --filter @ternline/website --filter agent-workspace --frozen-lockfile --ignore-scripts
+      - run: pnpm build:website
+        env:
+          SITE: https://nassimna.github.io
+          WEBSITE_BASE_PATH: /cmux-linux-alternative/
+      - uses: actions/upload-pages-artifact@7b1f4a764d45c48632c6b24a0339c27f5614fb0b # v4.0.0
+        with:
+          path: apps/website/dist
+      - id: deployment
+        uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e # v4.0.5

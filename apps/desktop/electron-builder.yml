@@ -1,31 +1,44 @@
 appId: dev.agentworkspace.desktop
-productName: Agent Workspace
+productName: Ternline
+publish:
+  provider: github
+  owner: nassimna
+  repo: cmux-linux-alternative
 asar: true
+asarUnpack:
+  - node_modules/koffi/**/*
+  - node_modules/@koromix/koffi-*/**/*
 afterPack: ./scripts/after-pack.mjs
 directories:
   output: ../../release
 files:
   - out/**/*
   - package.json
-extraResources:
-  - from: ../../target/release
-    to: bin
+  - from: ../../apps/server/dist
+    to: server/dist
     filter:
-      - agent-workspace-service
-      - agent-workspace-service.exe
-      - agent-workspace-cli
-      - agent-workspace-cli.exe
+      - '**/*'
+  - from: ../cli/dist
+    to: cli/dist
+    filter:
+      - '**/*'
+extraResources:
   - from: node_modules/@fontsource-variable/jetbrains-mono/LICENSE
     to: licenses/JetBrainsMono-OFL-1.1.txt
 linux:
+  extraResources:
+    - from: ../../target/node-linux
+      to: node-linux
+      filter:
+        - '**/*'
   icon: build/icons
   electronUpdaterCompatibility: '>= 2.16'
   category: Development
   executableName: agent-workspace
   artifactName: agent-workspace-${version}-x86_64.${ext}
-  maintainer: Agent Workspace contributors
-  vendor: Agent Workspace contributors
-  synopsis: Cross-platform workspace for agent-driven development
+  maintainer: Ternline contributors
+  vendor: Ternline contributors
+  synopsis: Terminal workspace for local and remote development
   syncDesktopName: true
   desktop:
     entry:
@@ -70,4 +83,4 @@ nsis:
   createDesktopShortcut: true
   createStartMenuShortcut: true
   deleteAppDataOnUninstall: false
-  uninstallDisplayName: Agent Workspace
+  uninstallDisplayName: Ternline

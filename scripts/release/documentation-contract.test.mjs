@@ -85,15 +85,14 @@ test('latest packaged idle CPU evidence stays consistent across public documenta
   assert.equal(new Set(evidence).size, 1, `idle CPU evidence differs: ${evidence.join(', ')}`)
 })
 
-test('README distinguishes release-candidate gates from separate qualification', async () => {
+test('README distinguishes Node release candidate checks from unfinished qualification', async () => {
   const readme = await readRepositoryFile('README.md')
 
   assert.match(
     readme,
-    /release-candidate\s+workflow enforces direct accessibility and visual validation/u
+    /release-candidate\s+workflow retains direct accessibility and visual validation/u
   )
-  assert.match(readme, /performance qualification is a\s+separate workflow/u)
-  assert.match(readme, /native and manual gates remain unrun/u)
+  assert.match(readme, /Node performance\s+qualification and manual gates remain open/u)
   assert.doesNotMatch(readme, /does not run the accessibility or performance suites/u)
 })
 
@@ -161,7 +160,7 @@ test('release documentation records software fallback without overstating native
   assert.match(releasing, /Electron `--disable-gpu`/u)
   assert.match(releasing, /Ubuntu 24\.04 headless Wayland/u)
   assert.match(releasing, /Arch Linux container/u)
-  assert.match(releasing, /All six inspections require executable/u)
+  assert.match(releasing, /All six inspections require `resources\/node-linux\/bin\/node`/u)
   assert.match(releasing, /headless native-Wayland process readiness/u)
   assert.match(releasing, /rolling-distribution readiness in a pinned official container/u)
   for (const unproven of ['real Wayland input/focus', 'native desktop compositor', 'GPU acceleration', 'ARM64']) {

@@ -4,7 +4,7 @@ import {
   DESKTOP_IPC,
   parseDesktopUpdateState,
   type DesktopUpdateState
-} from '../shared/desktop-bridge'
+} from '@agent-workspace/contracts/desktop/desktop-bridge'
 import type { SenderBoundIpcRouter } from './sender-bound-ipc-router'
 import type { WindowRegistry } from './window-registry'
 

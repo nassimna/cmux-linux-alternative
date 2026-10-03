@@ -1,5 +1,9 @@
 # Local control protocol
 
+> Historical protocol detail is retained below for compatibility review. The current
+> Node/TypeScript boundary and ownership are described in [Architecture](ARCHITECTURE.md).
+> Validate implementation claims against the running Linux candidate.
+
 This is the implemented Milestone 5 protocol reference. It complements the long-term contract in
 [the implementation specification](IMPLEMENTATION_SPEC.md); commands described there but absent
 here are planned rather than available.
@@ -237,13 +241,9 @@ available, otherwise starts with a clean view, then checkpoints that recovery bo
 
 ## Compatibility workflow
 
-Rust types in `crates/protocol` generate the TypeScript declarations in
-`packages/protocol-client/src/generated`. After changing wire types, run:
-
-```sh
-pnpm generate:protocol
-pnpm test
-```
-
-Protocol changes require an RFC, compatibility tests, regenerated declarations, and updates to
-this document.
+The TypeScript contracts in `packages/contracts` and Zod validation in
+`packages/protocol-client` define the current client and server boundary. The
+`packages/protocol-client/fixtures` directory retains compatibility cases from
+the previous protocol. Change both producer and consumer schemas together, run
+the relevant focused checks, and verify the desktop and CLI against the same
+server operation before changing a public contract.

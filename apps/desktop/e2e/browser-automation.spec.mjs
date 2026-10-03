@@ -19,10 +19,7 @@ const desktopDirectory = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const repositoryDirectory = resolve(desktopDirectory, '../..')
 const automationMainEntry = join(desktopDirectory, 'e2e/helpers/browser-automation-main.cjs')
 const dialogHarnessEntry = join(desktopDirectory, 'e2e/helpers/dialog-harness-main.cjs')
-const executable = (name) =>
-  join(repositoryDirectory, 'target', 'debug', process.platform === 'win32' ? `${name}.exe` : name)
-const serviceBinary = executable('agent-workspace-service')
-const cliBinary = executable('agent-workspace-cli')
+const cliBinary = join(repositoryDirectory, 'target/node-linux/bin/agent-workspace-node.mjs')
 const rendererUrl = 'agent-workspace://renderer/index.html'
 const evidenceRoot =
   process.env.AGENT_WORKSPACE_EVIDENCE_DIR ?? join(tmpdir(), 'agent-workspace-m5-validation')
@@ -34,14 +31,122 @@ test.beforeAll(async () => {
   }
   await mkdir(evidenceRoot, { recursive: true })
   if (process.env.AGENT_WORKSPACE_E2E_SKIP_BUILD !== '1') {
-    execFileSync('cargo', ['build', '-p', 'agent-workspace-service', '-p', 'agent-workspace-cli'], {
-      cwd: repositoryDirectory,
-      stdio: 'inherit'
-    })
     execFileSync('pnpm', ['--filter', '@agent-workspace/desktop', 'build'], {
       cwd: repositoryDirectory,
       stdio: 'inherit'
     })
+  }
+})
+
+test('Linux automation mode uses a separate profile without keyring access', async () => {
+  test.skip(process.platform !== 'linux', 'No-keyring automation mode is Linux-only.')
+  test.setTimeout(60_000)
+  const profileDirectory = await mkdtemp(join(tmpdir(), 'aw-keyring-'))
+  const normalDirectory = profileDirectory
+  const automationDirectory = join(normalDirectory, 'automation')
+  const sessionFile = join(automationDirectory, 'runtime', 'node-cli-session.json')
+  const normalCredential = join(normalDirectory, 'secrets', 'control-token.enc')
+  const target = await createBrowserAutomationTestServer()
+  let application
+  let session
+  const automation = (command, params) =>
+    cli(sessionFile, ['browser-automation', command, '--params-json', JSON.stringify(params)])
+  try {
+    await mkdir(dirname(normalCredential), { recursive: true })
+    await writeFile(normalCredential, 'normal profile credential remains untouched')
+    const harness = await createPackagedElectronHarness(profileDirectory)
+    const environment = { ...process.env }
+    delete environment.ELECTRON_RUN_AS_NODE
+    application = await electron.launch({
+      args: [automationMainEntry, `--user-data-dir=${profileDirectory}`, '--automation'],
+      cwd: desktopDirectory,
+      executablePath: harness.executablePath,
+      env: {
+        ...environment,
+        ...harness.electronEnvironment,
+        XDG_RUNTIME_DIR: harness.runtimeDirectory,
+        TMPDIR: harness.runtimeDirectory,
+        HOME: profileDirectory,
+        ZDOTDIR: profileDirectory
+      }
+    })
+    const renderer = await application.firstWindow()
+    await expect(renderer.locator('.terminal-pane')).toHaveAttribute('data-process-id', /^\d+$/)
+    await waitForAutomationCapability(sessionFile)
+    expect(
+      await application.evaluate(({ app, safeStorage }) => ({
+        userData: app.getPath('userData'),
+        sessionData: app.getPath('sessionData'),
+        passwordStore: app.commandLine.getSwitchValue('password-store'),
+        backend: safeStorage.getSelectedStorageBackend()
+      }))
+    ).toEqual({
+      userData: automationDirectory,
+      sessionData: automationDirectory,
+      passwordStore: 'basic',
+      backend: 'basic_text'
+    })
+    await expect(
+      readFile(join(automationDirectory, 'secrets', 'control-token.enc'))
+    ).rejects.toMatchObject({
+      code: 'ENOENT'
+    })
+    await expect(
+      readFile(join(automationDirectory, 'state', 'content-index-key-id'))
+    ).rejects.toMatchObject({ code: 'ENOENT' })
+    expect(await readFile(normalCredential, 'utf8')).toBe(
+      'normal profile credential remains untouched'
+    )
+    const epoch = await currentIdempotencyEpoch(sessionFile)
+    session = (
+      await automation('create', {
+        mode: 'ephemeral',
+        profileKey: 'default',
+        idempotency: { epoch, key: randomUUID() },
+        correlationId: randomUUID()
+      })
+    ).session
+    let navigationEpoch = session.navigationEpoch
+    for (const operation of [
+      { kind: 'navigate', url: target.origin },
+      { kind: 'wait', condition: { kind: 'lifecycle', lifecycle: 'load' } },
+      { kind: 'typeText', selector: '#typed', text: 'automation input' },
+      { kind: 'click', selector: '#commit' }
+    ]) {
+      const result = await automation('execute', {
+        automationSessionId: session.automationSessionId,
+        sessionGeneration: session.generation,
+        navigationEpoch,
+        operationId: randomUUID(),
+        attemptEpoch: 1,
+        timeoutMs: 10_000,
+        operation,
+        idempotency: { epoch, key: randomUUID() },
+        correlationId: randomUUID()
+      })
+      expect(result.operation.state).toBe('succeeded')
+      if (result.operation.result?.kind === 'navigation')
+        navigationEpoch = result.operation.result.navigationEpoch
+    }
+    await expect
+      .poll(() => target.requests.filter(({ path }) => path === '/event/input').length)
+      .toBe(1)
+    await application.evaluate(({ webContents }, origin) => {
+      const browser = webContents
+        .getAllWebContents()
+        .find((contents) => contents.getURL().startsWith(origin))
+      if (!browser || browser.session.isPersistent())
+        throw new Error('Automation browser must be in memory')
+    }, target.origin)
+  } finally {
+    if (session)
+      await automation('destroy', {
+        automationSessionId: session.automationSessionId,
+        generation: session.generation
+      }).catch(() => undefined)
+    await application?.close().catch(() => undefined)
+    await target.close()
+    await rm(profileDirectory, { recursive: true, force: true })
   }
 })
 
@@ -60,8 +165,8 @@ test('attach mode requires trusted approval for the exact live target', async ({
   let sessionFile
 
   try {
-    const harness = await createPackagedElectronHarness(profileDirectory, serviceBinary)
-    sessionFile = join(harness.runtimeDirectory, 'agent-workspace', 'cli-session.json')
+    const harness = await createPackagedElectronHarness(profileDirectory)
+    sessionFile = join(profileDirectory, 'runtime', 'node-cli-session.json')
     application = await electron.launch({
       args: [dialogHarnessEntry, `--user-data-dir=${profileDirectory}`, '--disable-gpu'],
       cwd: desktopDirectory,
@@ -179,8 +284,8 @@ test('packaged M5 CLI automation is isolated, policy-bound, cancellable, and lea
   let preserveFailureProfile = false
 
   try {
-    const harness = await createPackagedElectronHarness(profileDirectory, serviceBinary)
-    sessionFile = join(harness.runtimeDirectory, 'agent-workspace', 'cli-session.json')
+    const harness = await createPackagedElectronHarness(profileDirectory)
+    sessionFile = join(profileDirectory, 'runtime', 'node-cli-session.json')
     application = await electron.launch({
       args: [automationMainEntry, `--user-data-dir=${profileDirectory}`, '--disable-gpu'],
       cwd: desktopDirectory,
@@ -527,8 +632,8 @@ test('packaged M5 provider and window races terminate once and preserve exact ro
     writeFile(join(evidenceDirectory, 'm5-ac04-progress.json'), `${JSON.stringify({ step })}\n`)
 
   try {
-    const harness = await createPackagedElectronHarness(profileDirectory, serviceBinary)
-    sessionFile = join(harness.runtimeDirectory, 'agent-workspace', 'cli-session.json')
+    const harness = await createPackagedElectronHarness(profileDirectory)
+    sessionFile = join(profileDirectory, 'runtime', 'node-cli-session.json')
     application = await electron.launch({
       args: [automationMainEntry, `--user-data-dir=${profileDirectory}`, '--disable-gpu'],
       cwd: desktopDirectory,

@@ -49,6 +49,8 @@
   --aw-font-size-heading: 18px;
   --aw-font-size-display: 20px;
   --aw-line-height-solid: 1;
+  --aw-line-height-zero: 0;
+  --aw-line-height-normal: normal;
   --aw-line-height-tight: 1.2;
   --aw-line-height-ui: 1.35;
   --aw-line-height-relaxed: 1.4;
@@ -93,6 +95,9 @@
   --aw-shadow-focus-subtle: 0 0 0 1px color-mix(in oklch, var(--aw-color-focus) 30%, transparent);
   --aw-shadow-focus-control: 0 0 0 2px color-mix(in oklch, var(--aw-color-focus) 18%, transparent);
   --aw-shadow-focus-inset: inset 0 0 0 2px var(--aw-color-focus);
+  --aw-shadow-selection-accent: inset 2px 0 0 var(--aw-color-accent);
+  --aw-shadow-attention-ring: 0 0 0 4px
+    color-mix(in oklch, var(--aw-color-attention) 10%, transparent);
   --aw-shadow-selected-row: inset 0 1px
     color-mix(in oklch, var(--aw-color-browser-content) 3%, transparent);
   --aw-shadow-selected-tab: inset 0 -2px var(--aw-color-accent);

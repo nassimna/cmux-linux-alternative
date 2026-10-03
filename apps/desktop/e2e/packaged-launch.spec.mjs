@@ -131,7 +131,7 @@ test('packaged launch ignores development renderer, service, and endpoint overri
   const profileDirectory = await mkdtemp(join(tmpdir(), 'agent-workspace-packaged-e2e-'))
   const runtimeDirectory = join(profileDirectory, 'runtime')
   const hostileEndpoint = join(profileDirectory, 'hostile', 'control.sock')
-  const trustedEndpoint = join(runtimeDirectory, 'agent-workspace', 'control.sock')
+  const trustedEndpoint = join(runtimeDirectory, 'node-cli-session.json')
   const cdpPort = await reserveLoopbackPort()
   const cdpEndpoint = `http://127.0.0.1:${cdpPort}`
   const applicationOutput = []

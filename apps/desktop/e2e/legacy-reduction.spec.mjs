@@ -14,12 +14,6 @@ import { closeElectronApplication } from './helpers/close-electron-application.m
 const desktopDirectory = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const repositoryDirectory = resolve(desktopDirectory, '../..')
 const mainEntry = join(desktopDirectory, 'out/main/index.js')
-const serviceBinary = join(
-  repositoryDirectory,
-  'target',
-  'debug',
-  process.platform === 'win32' ? 'agent-workspace-service.exe' : 'agent-workspace-service'
-)
 const rendererUrl = 'agent-workspace://renderer/index.html'
 
 test.beforeAll(async () => {
@@ -27,10 +21,6 @@ test.beforeAll(async () => {
   if (process.platform === 'linux' && !process.env.DISPLAY && !process.env.WAYLAND_DISPLAY) {
     throw new Error('Electron E2E needs an X11 or Wayland display.')
   }
-  execFileSync('cargo', ['build', '-p', 'agent-workspace-service'], {
-    cwd: repositoryDirectory,
-    stdio: 'inherit'
-  })
   execFileSync('pnpm', ['--filter', '@agent-workspace/desktop', 'build'], {
     cwd: repositoryDirectory,
     stdio: 'inherit'
@@ -44,7 +34,7 @@ test('packaged UI reports exact legacy counts and clears reduction mode after re
   let application
 
   try {
-    const harness = await createPackagedElectronHarness(profileDirectory, serviceBinary)
+    const harness = await createPackagedElectronHarness(profileDirectory)
     application = await launch(profileDirectory, harness)
     let page = await application.firstWindow()
     await expect.poll(() => page.url()).toBe(rendererUrl)

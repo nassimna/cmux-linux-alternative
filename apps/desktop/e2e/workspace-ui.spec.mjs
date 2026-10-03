@@ -12,12 +12,6 @@ import { createPackagedElectronHarness } from './helpers/packaged-electron-harne
 const desktopDirectory = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const repositoryDirectory = resolve(desktopDirectory, '../..')
 const dialogHarnessEntry = join(desktopDirectory, 'e2e/helpers/dialog-harness-main.cjs')
-const serviceBinary = join(
-  repositoryDirectory,
-  'target',
-  'debug',
-  process.platform === 'win32' ? 'agent-workspace-service.exe' : 'agent-workspace-service'
-)
 const rendererUrl = 'agent-workspace://renderer/index.html'
 const rendererOrigin = 'agent-workspace://renderer/'
 const primaryModifier = process.platform === 'darwin' ? 'Meta' : 'Control'
@@ -30,10 +24,6 @@ test.beforeAll(async () => {
     throw new Error('Electron E2E needs an X11 or Wayland display.')
   }
   await mkdir(evidenceDirectory, { recursive: true })
-  execFileSync('cargo', ['build', '-p', 'agent-workspace-service'], {
-    cwd: repositoryDirectory,
-    stdio: 'inherit'
-  })
   execFileSync('pnpm', ['--filter', '@agent-workspace/desktop', 'build'], {
     cwd: repositoryDirectory,
     stdio: 'inherit'
@@ -58,7 +48,7 @@ test('real service drives the Milestone 2 workspace UI', async () => {
   let electronApplication
 
   try {
-    const harness = await createPackagedElectronHarness(profileDirectory, serviceBinary)
+    const harness = await createPackagedElectronHarness(profileDirectory)
     electronApplication = await electron.launch({
       args: [dialogHarnessEntry, `--user-data-dir=${profileDirectory}`, '--disable-gpu'],
       cwd: desktopDirectory,
@@ -591,9 +581,15 @@ test('real service drives the Milestone 2 workspace UI', async () => {
     await electronApplication.evaluate(({ BrowserWindow }) => {
       BrowserWindow.getAllWindows()[0]?.setSize(900, 650)
     })
-    await page.waitForTimeout(200)
+    await page.setViewportSize({ width: 900, height: 650 })
+    await expect
+      .poll(() => page.evaluate(() => [globalThis.innerWidth, globalThis.innerHeight]))
+      .toEqual([900, 650])
     await expect(page.locator('.workspace-content')).toBeVisible()
+    await page.locator('.workspace-content').click({ position: { x: 300, y: 200 } })
     await page.screenshot({ path: join(evidenceDirectory, '05-narrow-workspace.png') })
+
+    await page.setViewportSize({ width: 1200, height: 800 })
 
     await exerciseWorkspaceCloseVariants(page, profileDirectory)
     await page.screenshot({ path: join(evidenceDirectory, '06-batch-close-replacement.png') })

@@ -17,10 +17,7 @@ const execFileAsync = promisify(execFile)
 const desktopDirectory = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const repositoryDirectory = resolve(desktopDirectory, '../..')
 const dialogHarnessEntry = join(desktopDirectory, 'e2e/helpers/dialog-harness-main.cjs')
-const executable = (name) =>
-  join(repositoryDirectory, 'target', 'debug', process.platform === 'win32' ? `${name}.exe` : name)
-const serviceBinary = executable('agent-workspace-service')
-const cliBinary = executable('agent-workspace-cli')
+const cliBinary = join(repositoryDirectory, 'target/node-linux/bin/agent-workspace-node.mjs')
 const rendererUrl = 'agent-workspace://renderer/index.html'
 const evidenceDirectory =
   process.env.AGENT_WORKSPACE_EVIDENCE_DIR ?? join(tmpdir(), 'agent-workspace-m8-evidence')
@@ -40,10 +37,6 @@ test.beforeAll(() => {
   if (process.platform === 'linux' && !process.env.DISPLAY && !process.env.WAYLAND_DISPLAY) {
     throw new Error('M8 packaged Electron E2E needs an X11 or Wayland display.')
   }
-  execFileSync('cargo', ['build', '-p', 'agent-workspace-service', '-p', 'agent-workspace-cli'], {
-    cwd: repositoryDirectory,
-    stdio: 'pipe'
-  })
   execFileSync('pnpm', ['--filter', '@agent-workspace/desktop', 'build'], {
     cwd: repositoryDirectory,
     stdio: 'inherit'
@@ -508,8 +501,8 @@ async function launchFixture(name, options = {}) {
     await writeFakeCodex(fakeBin, options.agentSessionId, options.transcriptText)
   }
 
-  const harness = await createPackagedElectronHarness(profileDirectory, serviceBinary)
-  const sessionFile = join(harness.runtimeDirectory, 'agent-workspace', 'cli-session.json')
+  const harness = await createPackagedElectronHarness(profileDirectory)
+  const sessionFile = join(profileDirectory, 'runtime', 'node-cli-session.json')
   let application
   let page
   const rendererDiagnostics = []

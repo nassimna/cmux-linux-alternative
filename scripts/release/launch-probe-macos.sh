@@ -55,7 +55,7 @@ for _ in {1..60}; do
       for (pass=1; pass<=NR; pass++)
         for (row=1; row<=NR; row++) if (descendant[parent[row]]) descendant[pid[row]]=1
       for (row=1; row<=NR; row++) if (descendant[pid[row]]) {
-        if (command[row] ~ /Contents\/Resources\/bin\/agent-workspace-service/) print "service " pid[row]
+        if (command[row] ~ /Contents\/Resources\/node-linux\/server\/dist\/bin\.mjs/) print "service " pid[row]
         if (command[row] ~ /--type=renderer/) print "renderer " pid[row]
       }
     }' <<<"$tree")
