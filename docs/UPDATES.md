@@ -8,9 +8,12 @@ restart. Linux update installation and native signing have not been qualified en
 
 ## Feed configuration
 
-Packaged applications default to the public `nassimna/cmux-linux-alternative` GitHub Releases
+Packaged applications default to the public `nassimna/ternline` GitHub Releases
 provider. Stable uses the updater's `latest` channel. Beta and Alpha use their matching channels and permit
 prereleases; choose **Alpha** in Settings to receive this release series.
+Previously installed builds use the former `nassimna/cmux-linux-alternative` repository URL;
+GitHub redirects it to `nassimna/ternline`. Keep the former repository name unused so those
+clients continue to reach the trusted feed.
 Normal package builds generate updater metadata without uploading it. The release workflow
 collects each platform’s manifests and blockmaps alongside the installable packages. macOS
 metadata includes both Intel and Apple Silicon artifacts. Existing releases

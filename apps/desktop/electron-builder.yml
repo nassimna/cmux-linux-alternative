@@ -3,7 +3,7 @@ productName: Ternline
 publish:
   provider: github
   owner: nassimna
-  repo: cmux-linux-alternative
+  repo: ternline
 asar: true
 asarUnpack:
   - node_modules/koffi/**/*

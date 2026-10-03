@@ -477,7 +477,7 @@ export class CodexAdapter {
       write({
         id: 1,
         method: 'initialize',
-        params: { clientInfo: { name: 'cmux-linux-alternative', title: 'cmux', version: '0.1.0' } }
+        params: { clientInfo: { name: 'ternline', title: 'Ternline', version: '0.1.0' } }
       })
       await receive(1)
       write({ method: 'initialized' })

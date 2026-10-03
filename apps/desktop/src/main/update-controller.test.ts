@@ -290,7 +290,7 @@ describe('update controller', () => {
       const feed = {
         provider: 'github' as const,
         owner: 'nassimna',
-        repo: 'cmux-linux-alternative'
+        repo: 'ternline'
       }
       const { controller, updater } = createController({ feeds: feed })
       expect(updater.setFeedURL).toHaveBeenLastCalledWith({

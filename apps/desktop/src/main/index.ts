@@ -3588,7 +3588,7 @@ async function start(): Promise<void> {
     feeds = parseUpdateFeedConfiguration(process.env) ?? {
       provider: 'github' as const,
       owner: 'nassimna',
-      repo: 'cmux-linux-alternative'
+      repo: 'ternline'
     }
   } catch {
     console.warn('Desktop update feeds are invalid; updates are disabled')

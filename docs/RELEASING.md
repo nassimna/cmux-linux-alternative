@@ -112,7 +112,7 @@ The exact eight-hour Node soak remains unrun; this release does not claim stable
 ## Website and download links
 
 GitHub Pages must use GitHub Actions as its build source. **Deploy website** builds with the repo
-base path `/cmux-linux-alternative/` and only publishes after the versioned GitHub release assets
+base path `/ternline/` and only publishes after the versioned GitHub release assets
 exist. Its manual dispatch supports subsequent website-only updates after verifying that release.
 The site derives the version from the root manifest; every platform link addresses that exact tag.
 

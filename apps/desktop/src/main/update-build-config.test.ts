@@ -13,7 +13,7 @@ describe('desktop update build configuration', () => {
     expect(builder).toMatch(/^publish:/mu)
     expect(builder).toContain('provider: github')
     expect(builder).toContain('owner: nassimna')
-    expect(builder).toContain('repo: cmux-linux-alternative')
+    expect(builder).toContain('repo: ternline')
     expect(builder).toMatch(/electronUpdaterCompatibility: ['"]>= 2\.16['"]/u)
     expect(manifest.scripts['package:linux']).not.toContain('publish.provider')
     expect(manifest.scripts['package:linux']).toContain('--publish never')
