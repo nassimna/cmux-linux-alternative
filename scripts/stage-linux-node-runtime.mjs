@@ -134,6 +134,7 @@ async function main() {
   }
 
   const staging = join(root, 'target', `node-linux-stage-${randomUUID()}`)
+  await mkdir(dirname(staging), { recursive: true })
   await mkdir(staging, { mode: 0o700 })
   try {
     const server = join(staging, 'server')
