@@ -9,8 +9,10 @@ builds the Signal website with matching, versioned download URLs.
 
 1. Set the same semantic version in the root and desktop manifests, including the desktop
    checksum and verification scripts. Use an `-alpha.N` suffix for unsigned prereleases. Every new
-   version must be greater than the previously published version: advance `alpha.N` or the base
-   version; changing `beta` to `alpha` on the same base version is a downgrade.
+   version must be greater than every published version and retained release tag: advance
+   `alpha.N` or the base version. GitHub includes tags without releases in its Atom feed; a retained
+   higher beta tag can hide an alpha release and cause missing-metadata errors. When returning to
+   alpha, advance the base version (for example, `0.2.0-beta.1` → `0.2.1-alpha.1`).
 2. Add a non-empty versioned section to `CHANGELOG.md` and keep `[Unreleased]` for future work.
 3. Run affected tests and `pnpm release:validate --version x.y.z --mode candidate --tag vx.y.z`.
 4. Dispatch **Release** from the PR branch with `version: VERSION` and `publish: false` to build
@@ -61,8 +63,9 @@ applies the update only when the user chooses. Automatic updates never restart a
 
 Alpha follows alpha, beta, and stable releases; Beta follows beta and stable; Stable follows stable.
 The updater reads platform metadata from GitHub Releases and rejects equal or lower versions.
-Existing beta installations need a one-time manual alpha install, then must select Alpha if their
-saved channel is Beta or Stable. Deleting old GitHub releases does not change installed preferences.
+Existing installations must select Alpha if their saved channel is Beta or Stable. An alpha
+release on a higher base version can update an earlier beta without allowing downgrades. Deleting
+old GitHub releases does not change installed preferences or remove their tags.
 Unsigned macOS builds require manual installation;
 [macOS auto-installation requires signing](https://www.electron.build/docs/features/auto-update/).
 

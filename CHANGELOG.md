@@ -7,6 +7,13 @@ will become binding at version 1.0.
 
 ## [Unreleased]
 
+## [0.2.1-alpha.1] - 2026-10-03
+
+### Fixed
+
+- Advance the base version beyond the retained beta tag so GitHub update discovery reaches
+  the published alpha release instead of requesting deleted beta assets.
+
 ## [0.2.0-alpha.2] - 2026-10-03
 
 ### Fixed
