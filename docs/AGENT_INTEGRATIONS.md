@@ -34,6 +34,27 @@ Notification targets use explicit flags first, then
 `AGENT_WORKSPACE_TAB_ID`. If no workspace is supplied, the CLI asks the service for the currently
 selected workspace.
 
+## Linux automation without keyring prompts
+
+Start a separate desktop instance with:
+
+```sh
+agent-workspace.AppImage --automation
+```
+
+This mode keeps embedded Chromium and uses an `automation` subdirectory of the usual app profile
+for its workspace data, browser data, and single-instance lock. It has a separate local service and
+`runtime/node-cli-session.json` discovery file in that profile. Select that session from the CLI
+with `--session-file PATH` or `AGENT_WORKSPACE_NODE_SESSION_FILE`.
+Both normal and automation launches respect Electron's `--user-data-dir` profile override.
+
+On Linux, this instance uses Chromium's basic password store. The Node service creates a fresh
+control token for each launch; Electron's keyring encryption APIs are not called. Keyring-backed
+content search is disabled in this mode. Browser data in this dedicated profile has no
+keyring encryption. Use `browser-automation create --params-json JSON` with `mode: "ephemeral"` for background
+automation whose browser data stays in memory. Normal launches retain their existing encryption
+and profile. Existing encrypted credentials are not read, overwritten, or migrated by this mode.
+
 ## Install, inspect, and remove hooks
 
 ```text

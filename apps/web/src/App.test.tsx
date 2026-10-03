@@ -152,7 +152,13 @@ describe('App', () => {
       ctrlKey: false
     })
     fireEvent.click(await screen.findByRole('menuitem', { name: 'Terminal' }))
-    await waitFor(() => expect(bridge.openTerminalTab).toHaveBeenCalledOnce())
+    await waitFor(() =>
+      expect(bridge.openTerminalTab).toHaveBeenCalledWith({
+        workspaceId: projectionFixture.workspaces[0]!.id,
+        paneId: projectionFixture.workspaces[0]!.panes[0]!.id,
+        launch: { cwd: '/tmp/fixture-workspace', rows: 30, cols: 120 }
+      })
+    )
 
     fireEvent.pointerDown(screen.getAllByRole('button', { name: 'Add tab' })[0]!, {
       button: 0,
@@ -165,6 +171,52 @@ describe('App', () => {
         paneId: projectionFixture.workspaces[0]!.panes[0]!.id,
         metadata: { url: messages.workspaceShell.defaultBrowserUrl }
       })
+    )
+  })
+
+  it('uses the saved SSH connection for new terminal tabs, shortcuts and splits', async () => {
+    const workspace = projectionFixture.workspaces[0]!
+    localStorage.setItem(
+      'agent-workspace.ssh-workspaces.v1',
+      JSON.stringify({ [workspace.id]: { host: 'prod-alias', user: 'deploy', port: 2222 } })
+    )
+    const bridge = createBridge()
+    window.desktopBridge = bridge
+    render(<App />)
+    await screen.findByText('Browser content ready')
+
+    fireEvent.pointerDown(screen.getAllByRole('button', { name: 'Add tab' })[0]!, {
+      button: 0,
+      ctrlKey: false
+    })
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Terminal' }))
+    const launch = {
+      cwd: workspace.workingDirectory,
+      rows: 30,
+      cols: 120,
+      command: ['ssh', '-p', '2222', 'deploy@prod-alias']
+    }
+    await waitFor(() =>
+      expect(bridge.openTerminalTab).toHaveBeenCalledWith({
+        workspaceId: workspace.id,
+        paneId: workspace.panes[0]!.id,
+        launch
+      })
+    )
+    vi.mocked(bridge.openTerminalTab).mockClear()
+    fireEvent.keyDown(document, { key: 't', ctrlKey: true, shiftKey: true })
+    await waitFor(() =>
+      expect(bridge.openTerminalTab).toHaveBeenCalledWith({
+        workspaceId: workspace.id,
+        paneId: workspace.selectedPaneId,
+        launch
+      })
+    )
+    fireEvent.click(screen.getAllByRole('button', { name: 'Split pane right' })[0]!)
+    await waitFor(() =>
+      expect(bridge.splitPane).toHaveBeenCalledWith(
+        expect.objectContaining({ content: { kind: 'newTerminal', launch } })
+      )
     )
   })
 

@@ -3,7 +3,10 @@ import { randomUUID } from 'node:crypto'
 import Database from 'better-sqlite3'
 import { expect, it } from 'vitest'
 
-import { migrateBrowserAutomationSchema, PREVIOUS_BROWSER_AUTOMATION_OPERATIONS_SCHEMA_SQL } from './browser-automation-schema'
+import {
+  migrateBrowserAutomationSchema,
+  PREVIOUS_BROWSER_AUTOMATION_OPERATIONS_SCHEMA_SQL
+} from './browser-automation-schema'
 import { RUST_SCHEMA_V15_SQL } from './legacy-schema-v15'
 import { NATIVE_SCHEMA_SQL } from './native-schema'
 
@@ -88,50 +91,56 @@ it('creates fresh native operation tables with evaluation and diagnostics constr
   }
 })
 
-it.each([RUST_SCHEMA_V15_SQL.browser_automation_operations, PREVIOUS_BROWSER_AUTOMATION_OPERATIONS_SCHEMA_SQL])('migrates populated supported operation tables without losing rows or constraints', (definition) => {
-  const database = new Database(':memory:')
-  try {
-    database.pragma('foreign_keys = ON')
-    database.exec(RUST_SCHEMA_V15_SQL.browser_automation_sessions)
-    database.exec(definition)
-    database.exec('CREATE INDEX retained_browser_state ON browser_automation_operations(state)')
-    database.exec(`CREATE TABLE retained_browser_audit (operation_id TEXT);
+it.each([
+  RUST_SCHEMA_V15_SQL.browser_automation_operations,
+  PREVIOUS_BROWSER_AUTOMATION_OPERATIONS_SCHEMA_SQL
+])(
+  'migrates populated supported operation tables without losing rows or constraints',
+  (definition) => {
+    const database = new Database(':memory:')
+    try {
+      database.pragma('foreign_keys = ON')
+      database.exec(RUST_SCHEMA_V15_SQL.browser_automation_sessions)
+      database.exec(definition)
+      database.exec('CREATE INDEX retained_browser_state ON browser_automation_operations(state)')
+      database.exec(`CREATE TABLE retained_browser_audit (operation_id TEXT);
       CREATE TRIGGER retained_browser_update AFTER UPDATE ON browser_automation_operations
       BEGIN INSERT INTO retained_browser_audit VALUES (NEW.operation_id); END;`)
-    const sessionId = insertSession(database)
-    const operationId = insertOperation(database, sessionId, 'screenshot', 'screenshot')
-    const before = database.prepare('SELECT * FROM browser_automation_operations').all()
-    database
-      .prepare("UPDATE sqlite_sequence SET seq = 99 WHERE name = 'browser_automation_operations'")
-      .run()
-    migrateBrowserAutomationSchema(database)
-    migrateBrowserAutomationSchema(database)
-    expect(database.prepare('SELECT * FROM browser_automation_operations').all()).toEqual(before)
-    const nextId = insertOperation(database, sessionId, 'evaluate', 'evaluation')
-    expect(
+      const sessionId = insertSession(database)
+      const operationId = insertOperation(database, sessionId, 'screenshot', 'screenshot')
+      const before = database.prepare('SELECT * FROM browser_automation_operations').all()
       database
-        .prepare('SELECT sequence FROM browser_automation_operations WHERE operation_id = ?')
-        .get(nextId)
-    ).toEqual({ sequence: 100 })
-    database
-      .prepare('UPDATE browser_automation_operations SET input_bytes = 1 WHERE operation_id = ?')
-      .run(operationId)
-    expect(database.prepare('SELECT * FROM retained_browser_audit').all()).toEqual([
-      { operation_id: operationId }
-    ])
-    expect(
+        .prepare("UPDATE sqlite_sequence SET seq = 99 WHERE name = 'browser_automation_operations'")
+        .run()
+      migrateBrowserAutomationSchema(database)
+      migrateBrowserAutomationSchema(database)
+      expect(database.prepare('SELECT * FROM browser_automation_operations').all()).toEqual(before)
+      const nextId = insertOperation(database, sessionId, 'evaluate', 'evaluation')
+      expect(
+        database
+          .prepare('SELECT sequence FROM browser_automation_operations WHERE operation_id = ?')
+          .get(nextId)
+      ).toEqual({ sequence: 100 })
       database
-        .prepare(
-          "SELECT name FROM sqlite_schema WHERE type = 'index' AND name = 'retained_browser_state'"
-        )
-        .get()
-    ).toEqual({ name: 'retained_browser_state' })
-    expect(() =>
-      database.prepare('UPDATE browser_automation_operations SET attempt_epoch = 0').run()
-    ).toThrow('CHECK constraint failed')
-    expectNewKinds(database, sessionId)
-    expect(database.prepare('PRAGMA foreign_key_check').all()).toEqual([])
-  } finally {
-    database.close()
+        .prepare('UPDATE browser_automation_operations SET input_bytes = 1 WHERE operation_id = ?')
+        .run(operationId)
+      expect(database.prepare('SELECT * FROM retained_browser_audit').all()).toEqual([
+        { operation_id: operationId }
+      ])
+      expect(
+        database
+          .prepare(
+            "SELECT name FROM sqlite_schema WHERE type = 'index' AND name = 'retained_browser_state'"
+          )
+          .get()
+      ).toEqual({ name: 'retained_browser_state' })
+      expect(() =>
+        database.prepare('UPDATE browser_automation_operations SET attempt_epoch = 0').run()
+      ).toThrow('CHECK constraint failed')
+      expectNewKinds(database, sessionId)
+      expect(database.prepare('PRAGMA foreign_key_check').all()).toEqual([])
+    } finally {
+      database.close()
+    }
   }
-})
+)

@@ -38,6 +38,118 @@ test.beforeAll(async () => {
   }
 })
 
+test('Linux automation mode uses a separate profile without keyring access', async () => {
+  test.skip(process.platform !== 'linux', 'No-keyring automation mode is Linux-only.')
+  test.setTimeout(60_000)
+  const profileDirectory = await mkdtemp(join(tmpdir(), 'aw-keyring-'))
+  const normalDirectory = profileDirectory
+  const automationDirectory = join(normalDirectory, 'automation')
+  const sessionFile = join(automationDirectory, 'runtime', 'node-cli-session.json')
+  const normalCredential = join(normalDirectory, 'secrets', 'control-token.enc')
+  const target = await createBrowserAutomationTestServer()
+  let application
+  let session
+  const automation = (command, params) =>
+    cli(sessionFile, ['browser-automation', command, '--params-json', JSON.stringify(params)])
+  try {
+    await mkdir(dirname(normalCredential), { recursive: true })
+    await writeFile(normalCredential, 'normal profile credential remains untouched')
+    const harness = await createPackagedElectronHarness(profileDirectory)
+    const environment = { ...process.env }
+    delete environment.ELECTRON_RUN_AS_NODE
+    application = await electron.launch({
+      args: [automationMainEntry, `--user-data-dir=${profileDirectory}`, '--automation'],
+      cwd: desktopDirectory,
+      executablePath: harness.executablePath,
+      env: {
+        ...environment,
+        ...harness.electronEnvironment,
+        XDG_RUNTIME_DIR: harness.runtimeDirectory,
+        TMPDIR: harness.runtimeDirectory,
+        HOME: profileDirectory,
+        ZDOTDIR: profileDirectory
+      }
+    })
+    const renderer = await application.firstWindow()
+    await expect(renderer.locator('.terminal-pane')).toHaveAttribute('data-process-id', /^\d+$/)
+    await waitForAutomationCapability(sessionFile)
+    expect(
+      await application.evaluate(({ app, safeStorage }) => ({
+        userData: app.getPath('userData'),
+        sessionData: app.getPath('sessionData'),
+        passwordStore: app.commandLine.getSwitchValue('password-store'),
+        backend: safeStorage.getSelectedStorageBackend()
+      }))
+    ).toEqual({
+      userData: automationDirectory,
+      sessionData: automationDirectory,
+      passwordStore: 'basic',
+      backend: 'basic_text'
+    })
+    await expect(
+      readFile(join(automationDirectory, 'secrets', 'control-token.enc'))
+    ).rejects.toMatchObject({
+      code: 'ENOENT'
+    })
+    await expect(
+      readFile(join(automationDirectory, 'state', 'content-index-key-id'))
+    ).rejects.toMatchObject({ code: 'ENOENT' })
+    expect(await readFile(normalCredential, 'utf8')).toBe(
+      'normal profile credential remains untouched'
+    )
+    const epoch = await currentIdempotencyEpoch(sessionFile)
+    session = (
+      await automation('create', {
+        mode: 'ephemeral',
+        profileKey: 'default',
+        idempotency: { epoch, key: randomUUID() },
+        correlationId: randomUUID()
+      })
+    ).session
+    let navigationEpoch = session.navigationEpoch
+    for (const operation of [
+      { kind: 'navigate', url: target.origin },
+      { kind: 'wait', condition: { kind: 'lifecycle', lifecycle: 'load' } },
+      { kind: 'typeText', selector: '#typed', text: 'automation input' },
+      { kind: 'click', selector: '#commit' }
+    ]) {
+      const result = await automation('execute', {
+        automationSessionId: session.automationSessionId,
+        sessionGeneration: session.generation,
+        navigationEpoch,
+        operationId: randomUUID(),
+        attemptEpoch: 1,
+        timeoutMs: 10_000,
+        operation,
+        idempotency: { epoch, key: randomUUID() },
+        correlationId: randomUUID()
+      })
+      expect(result.operation.state).toBe('succeeded')
+      if (result.operation.result?.kind === 'navigation')
+        navigationEpoch = result.operation.result.navigationEpoch
+    }
+    await expect
+      .poll(() => target.requests.filter(({ path }) => path === '/event/input').length)
+      .toBe(1)
+    await application.evaluate(({ webContents }, origin) => {
+      const browser = webContents
+        .getAllWebContents()
+        .find((contents) => contents.getURL().startsWith(origin))
+      if (!browser || browser.session.isPersistent())
+        throw new Error('Automation browser must be in memory')
+    }, target.origin)
+  } finally {
+    if (session)
+      await automation('destroy', {
+        automationSessionId: session.automationSessionId,
+        generation: session.generation
+      }).catch(() => undefined)
+    await application?.close().catch(() => undefined)
+    await target.close()
+    await rm(profileDirectory, { recursive: true, force: true })
+  }
+})
+
 // eslint-disable-next-line no-empty-pattern
 test('attach mode requires trusted approval for the exact live target', async ({}, testInfo) => {
   test.setTimeout(60_000)

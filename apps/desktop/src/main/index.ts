@@ -119,6 +119,8 @@ type ActiveDesktopProvider = DesktopProviderController<
   Omit<DesktopProviderAcknowledgeParams, 'identity'>
 >
 
+const automationMode = process.platform === 'linux' && process.argv.includes('--automation')
+
 interface DesktopProviderRecoveryContext {
   readonly controller: ActiveDesktopProvider
   readonly client: ControlClient
@@ -3437,7 +3439,9 @@ async function startNativeDesktop(userData: string): Promise<void> {
     native: true,
     sessionFilePath: join(runtimeDirectory, 'node-cli-session.json'),
     defaultWorkingDirectory: app.getPath('home'),
-    ...(process.platform === 'linux' ? { encryptedSearch: true, remoteTransport: true } : {})
+    ...(process.platform === 'linux'
+      ? { encryptedSearch: !automationMode, remoteTransport: true }
+      : {})
   }
   nativeNodeDesktop = true
   registerDesktopLifecycleHandlers(
@@ -3657,9 +3661,19 @@ const quitOrchestrator = new ApplicationQuitOrchestrator({
 })
 
 // Preserve existing user data across the displayed product name change.
-const userDataDirectory = join(app.getPath('appData'), 'Agent Workspace')
+const userDataDirectory = app.commandLine.hasSwitch('user-data-dir')
+  ? app.getPath('userData')
+  : join(app.getPath('appData'), 'Agent Workspace')
 mkdirSync(userDataDirectory, { recursive: true })
 app.setPath('userData', userDataDirectory)
+
+if (automationMode) {
+  const userData = join(userDataDirectory, 'automation')
+  mkdirSync(userData, { recursive: true, mode: 0o700 })
+  app.setPath('userData', userData)
+  app.setPath('sessionData', userData)
+  app.commandLine.appendSwitch('password-store', 'basic')
+}
 
 if (!app.requestSingleInstanceLock()) {
   app.quit()

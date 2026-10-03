@@ -532,7 +532,7 @@ export function WorkspaceShell({ workspace }: ShellProps): React.JSX.Element {
       const result = await window.desktopBridge.createWorkspace({
         name,
         workingDirectory: directory,
-        initialTerminal: { ...terminalLaunch(directory), command: sshCommand(profile) }
+        initialTerminal: terminalLaunch(directory, profile)
       })
       projection.applyMutation(result)
       const created = result.snapshot.workspaces.find(({ id }) => !before.has(id))
@@ -820,7 +820,7 @@ export function WorkspaceShell({ workspace }: ShellProps): React.JSX.Element {
           window.desktopBridge.openTerminalTab({
             workspaceId: workspace.id,
             paneId: selectedPane.id,
-            launch: terminalLaunch(workspace.workingDirectory)
+            launch: terminalLaunch(workspace.workingDirectory, sshWorkspaces[workspace.id])
           })
         )
         return
@@ -852,7 +852,8 @@ export function WorkspaceShell({ workspace }: ShellProps): React.JSX.Element {
           workspace,
           selectedPane.id,
           commandId === 'pane.splitRight' ? 'horizontal' : 'vertical',
-          runMutation
+          runMutation,
+          sshWorkspaces[workspace.id]
         )
         return
       }
@@ -891,6 +892,7 @@ export function WorkspaceShell({ workspace }: ShellProps): React.JSX.Element {
       selectedBrowserState,
       selectedPane,
       selectedTab,
+      sshWorkspaces,
       workspace
     ]
   )
@@ -1244,6 +1246,7 @@ export function WorkspaceShell({ workspace }: ShellProps): React.JSX.Element {
             }
             onMutation={runMutation}
             onProcessTitleChange={recordProcessTitle}
+            sshProfile={sshWorkspaces[workspace.id]}
             workspace={workspace}
           />
         ) : (
@@ -1442,15 +1445,21 @@ function commandShortcutLabel(
   return shortcut ? formatShortcut(shortcut, platform) : null
 }
 
-function terminalLaunch(cwd: string) {
-  return { cwd, rows: DEFAULT_ROWS, cols: DEFAULT_COLS }
+function terminalLaunch(cwd: string, sshProfile?: SavedSshWorkspace) {
+  return {
+    cwd,
+    rows: DEFAULT_ROWS,
+    cols: DEFAULT_COLS,
+    ...(sshProfile ? { command: sshCommand(sshProfile) } : {})
+  }
 }
 
 async function splitWithTerminal(
   workspace: WorkspaceSnapshot,
   targetPaneId: string,
   axis: 'horizontal' | 'vertical',
-  mutate: (operation: MutationOperation) => Promise<boolean>
+  mutate: (operation: MutationOperation) => Promise<boolean>,
+  sshProfile: SavedSshWorkspace | undefined
 ): Promise<void> {
   await mutate(
     window.desktopBridge.splitPane({
@@ -1459,7 +1468,10 @@ async function splitWithTerminal(
       axis,
       ratio: 0.5,
       placement: 'after',
-      content: { kind: 'newTerminal', launch: terminalLaunch(workspace.workingDirectory) }
+      content: {
+        kind: 'newTerminal',
+        launch: terminalLaunch(workspace.workingDirectory, sshProfile)
+      }
     })
   )
 }
@@ -2324,7 +2336,7 @@ function SortableWorkspace({
         window.desktopBridge.openTerminalTab({
           workspaceId: workspace.id,
           paneId: pane.id,
-          launch: { ...terminalLaunch(workspace.workingDirectory), command: sshCommand(sshProfile) }
+          launch: terminalLaunch(workspace.workingDirectory, sshProfile)
         })
       )
     })()
@@ -3038,11 +3050,13 @@ function PaneWorkspace({
   browserViewsVisible,
   onMutation,
   onProcessTitleChange,
+  sshProfile,
   workspace
 }: MutationOwner & {
   browserTabsEnabled: boolean
   browserViewsVisible: boolean
   onProcessTitleChange: ProcessTitleHandler
+  sshProfile: SavedSshWorkspace | undefined
   workspace: WorkspaceSnapshot
 }): React.JSX.Element {
   const [draggedTab, setDraggedTab] = useState<TabMutationSource | null>(null)
@@ -3118,6 +3132,7 @@ function PaneWorkspace({
         onMutation={onMutation}
         onProcessTitleChange={onProcessTitleChange}
         onTabAction={executeTabAction}
+        sshProfile={sshProfile}
         workspace={workspace}
       />
     </DndContext>
@@ -3160,6 +3175,7 @@ function PaneTree({
   onMutation,
   onProcessTitleChange,
   onTabAction,
+  sshProfile,
   workspace
 }: MutationOwner & {
   browserTabsEnabled: boolean
@@ -3168,6 +3184,7 @@ function PaneTree({
   node: PaneTreeNode
   onProcessTitleChange: ProcessTitleHandler
   onTabAction: TabActionHandler
+  sshProfile: SavedSshWorkspace | undefined
   workspace: WorkspaceSnapshot
 }): React.JSX.Element {
   if (node.kind === 'leaf') {
@@ -3181,6 +3198,7 @@ function PaneTree({
         onProcessTitleChange={onProcessTitleChange}
         onTabAction={onTabAction}
         pane={pane}
+        sshProfile={sshProfile}
         workspace={workspace}
       />
     ) : (
@@ -3217,6 +3235,7 @@ function PaneTree({
           onMutation={onMutation}
           onProcessTitleChange={onProcessTitleChange}
           onTabAction={onTabAction}
+          sshProfile={sshProfile}
           workspace={workspace}
         />
       </Panel>
@@ -3232,6 +3251,7 @@ function PaneTree({
           onMutation={onMutation}
           onProcessTitleChange={onProcessTitleChange}
           onTabAction={onTabAction}
+          sshProfile={sshProfile}
           workspace={workspace}
         />
       </Panel>
@@ -3247,6 +3267,7 @@ function PaneView({
   onProcessTitleChange,
   onTabAction,
   pane,
+  sshProfile,
   workspace
 }: MutationOwner & {
   browserTabsEnabled: boolean
@@ -3255,6 +3276,7 @@ function PaneView({
   onTabAction: TabActionHandler
   onProcessTitleChange: ProcessTitleHandler
   pane: PaneSnapshot
+  sshProfile: SavedSshWorkspace | undefined
   workspace: WorkspaceSnapshot
 }): React.JSX.Element {
   const [terminalToolsTabId, setTerminalToolsTabId] = useState<string | null>(null)
@@ -3351,7 +3373,7 @@ function PaneView({
                     window.desktopBridge.openTerminalTab({
                       workspaceId: workspace.id,
                       paneId: pane.id,
-                      launch: terminalLaunch(workspace.workingDirectory)
+                      launch: terminalLaunch(workspace.workingDirectory, sshProfile)
                     })
                   )
                 }
@@ -3379,7 +3401,9 @@ function PaneView({
           <IconButton
             aria-label={messages.workspaceShell.pane.splitRight}
             className="pane-split-action"
-            onClick={() => void splitWithTerminal(workspace, pane.id, 'horizontal', onMutation)}
+            onClick={() =>
+              void splitWithTerminal(workspace, pane.id, 'horizontal', onMutation, sshProfile)
+            }
             tooltip={`${messages.workspaceShell.pane.splitRight} · Ctrl+D`}
           >
             <SplitSquareHorizontal size={14} />
@@ -3387,7 +3411,9 @@ function PaneView({
           <IconButton
             aria-label={messages.workspaceShell.pane.splitDown}
             className="pane-split-action"
-            onClick={() => void splitWithTerminal(workspace, pane.id, 'vertical', onMutation)}
+            onClick={() =>
+              void splitWithTerminal(workspace, pane.id, 'vertical', onMutation, sshProfile)
+            }
             tooltip={`${messages.workspaceShell.pane.splitDown} · Ctrl+Shift+D`}
           >
             <SplitSquareVertical size={14} />
@@ -3432,7 +3458,7 @@ function PaneView({
                 window.desktopBridge.openTerminalTab({
                   workspaceId: workspace.id,
                   paneId: pane.id,
-                  launch: terminalLaunch(workspace.workingDirectory)
+                  launch: terminalLaunch(workspace.workingDirectory, sshProfile)
                 })
               )
             }

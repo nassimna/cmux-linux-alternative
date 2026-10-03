@@ -558,7 +558,8 @@ describe('BrowserViewManager', () => {
     await page.initialize()
     await expect(page.capture(320, 240)).resolves.toEqual(Buffer.from('png'))
     expect(automationWindow?.webContents.debugger.sendCommand).toHaveBeenCalledWith(
-      'Emulation.setDeviceMetricsOverride', { width: 320, height: 240, deviceScaleFactor: 1, mobile: false }
+      'Emulation.setDeviceMetricsOverride',
+      { width: 320, height: 240, deviceScaleFactor: 1, mobile: false }
     )
     expect(automationWindow?.setContentSize).toHaveBeenCalledWith(320, 240, false)
     expect(automationWindow?.webContents.capturePage).not.toHaveBeenCalled()
