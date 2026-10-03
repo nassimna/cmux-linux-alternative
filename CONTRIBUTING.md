@@ -6,7 +6,7 @@ design and keep the temporary project identity replaceable.
 
 ## Prerequisites and setup
 
-Use Node.js 22.22.3, pnpm 10.34.5, a C/C++ build toolchain, and Electron's
+Use Node.js 22.23.3, pnpm 10.34.5, a C/C++ build toolchain, and Electron's
 Linux development libraries. Then run:
 
 ```sh

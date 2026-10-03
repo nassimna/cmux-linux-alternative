@@ -18,7 +18,7 @@ builds the Signal website with matching, versioned download URLs.
    A tag run publishes the prerelease after every platform succeeds. A manual publication also
    requires the workflow ref to be that exact tag.
 
-Builds use the frozen lockfile, cached pnpm downloads, pinned actions, and Node 22.22.3.
+Builds use the frozen lockfile, cached pnpm downloads, pinned actions, and Node 22.23.3.
 Release concurrency prevents overlapping runs for the same ref. PR CI runs Node validation and
 focused Windows runtime contracts on Windows 2022;
 expensive distro-package and security inventories remain scheduled or manual.

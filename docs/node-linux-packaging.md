@@ -1,6 +1,6 @@
 # Linux Node packaging
 
-The Linux x64 desktop package carries Node 22.22.3, the TypeScript server, CLI, native addons,
+The Linux x64 desktop package carries Node 22.23.3, the TypeScript server, CLI, native addons,
 and a runtime manifest at `resources/node-linux`. The Electron main process launches the Node
 server from that staged runtime. Existing profiles receive a pre-Node database backup; legacy
 settings and trusted host records are checked before normal startup.
@@ -33,7 +33,7 @@ does not change the remote user's tmux settings.
 
 ## Build distribution artifacts
 
-From a clean checkout with Node 22.22.3 and pnpm 10.34.5:
+From a clean checkout with Node 22.23.3 and pnpm 10.34.5:
 
 ```sh
 pnpm install --frozen-lockfile

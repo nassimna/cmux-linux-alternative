@@ -23,7 +23,7 @@ import console from 'node:console'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const output = join(root, 'target', 'node-linux')
-const requiredNodeVersion = '22.22.3'
+const requiredNodeVersion = '22.23.3'
 
 function assertLinuxRuntime() {
   if (process.platform !== 'linux' || process.arch !== 'x64') {

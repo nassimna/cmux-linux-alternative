@@ -6,7 +6,7 @@ import { execFileSync } from 'node:child_process'
 if (!process.argv[2]) throw new Error('packaged Node runtime path is required')
 const root = resolve(process.argv[2])
 const manifest = JSON.parse(await readFile(join(root, 'manifest.json'), 'utf8'))
-if (manifest.kind !== 'agent-workspace-node-linux-x64' || manifest.nodeVersion !== '22.22.3') {
+if (manifest.kind !== 'agent-workspace-node-linux-x64' || manifest.nodeVersion !== '22.23.3') {
   throw new Error('unexpected packaged Node runtime identity')
 }
 
@@ -34,7 +34,7 @@ for (const [key, name] of Object.entries(required)) {
 const node = join(root, required.nodeSha256)
 const server = join(root, 'server')
 const version = execFileSync(node, ['--version'], { encoding: 'utf8' }).trim()
-if (version !== 'v22.22.3') throw new Error(`unexpected packaged Node version: ${version}`)
+if (version !== 'v22.23.3') throw new Error(`unexpected packaged Node version: ${version}`)
 execFileSync(node, [join(root, required.cliSha256), '--help'], { cwd: root, stdio: 'pipe' })
 for (const module of ['better-sqlite3', 'node-pty', './dist/rename-exchange.node', './dist/seal-executable.node']) {
   execFileSync(node, ['-e', `require(${JSON.stringify(module)})`], { cwd: server, stdio: 'pipe' })

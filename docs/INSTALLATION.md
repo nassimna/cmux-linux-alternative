@@ -123,7 +123,7 @@ cannot be undone.
 
 ## Building instead of installing
 
-Contributors need Node.js 22.22.3, pnpm 10.34.5, a native-addon build toolchain, and Electron's
+Contributors need Node.js 22.23.3, pnpm 10.34.5, a native-addon build toolchain, and Electron's
 Linux development libraries. See [CONTRIBUTING.md](../CONTRIBUTING.md) for build and validation
 commands. Building from source is not equivalent to installing a qualified release.
 
