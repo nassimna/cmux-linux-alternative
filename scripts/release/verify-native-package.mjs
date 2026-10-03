@@ -1,7 +1,7 @@
 import { execFile, spawn } from 'node:child_process'
 import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { createServer } from 'node:http'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import process from 'node:process'
 import { promisify } from 'node:util'
 
@@ -41,6 +41,14 @@ try {
   await request(new URL('v1/system/identify', session.baseUrl), headers)
   await request(new URL('v1/state/snapshot', session.baseUrl), headers)
   await runCli(['identify'])
+  if (platform === 'windows') {
+    const launcher = join(dirname(executable), 'resources', 'cli', 'ternline-cli.cmd')
+    await execFileAsync(
+      'cmd.exe',
+      ['/d', '/s', '/c', `""${launcher}" --session-file "${sessionFile}" identify"`],
+      { windowsVerbatimArguments: true, timeout: 15_000 }
+    )
+  }
 
   const command =
     platform === 'windows'
@@ -179,7 +187,26 @@ async function waitForBrowser(url) {
 }
 
 async function stop(child) {
-  if (!child?.pid || child.exitCode !== null || child.signalCode !== null) return
+  if (!child?.pid) return
+  if (process.platform === 'linux') {
+    try {
+      process.kill(-child.pid, 'SIGTERM')
+    } catch (error) {
+      if (error.code !== 'ESRCH') throw error
+      return
+    }
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      await delay(250)
+      if (child.exitCode !== null || child.signalCode !== null) break
+    }
+    try {
+      process.kill(-child.pid, 'SIGKILL')
+    } catch (error) {
+      if (error.code !== 'ESRCH') throw error
+    }
+    return
+  }
+  if (child.exitCode !== null || child.signalCode !== null) return
   if (process.platform === 'win32') {
     await execFileAsync('taskkill.exe', ['/PID', String(child.pid), '/T', '/F']).catch(
       () => undefined
