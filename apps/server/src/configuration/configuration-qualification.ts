@@ -7,6 +7,11 @@ import {
   configurationGetResultSchema,
   configurationUpdateParamsSchema
 } from '@agent-workspace/protocol-client'
+import {
+  assertWindowsPrivatePath,
+  createWindowsPrivateFile,
+  ensureWindowsPrivateDirectory
+} from '@agent-workspace/client-runtime'
 
 import type { ApplicationStateStore } from '../persistence/application-state-store'
 import { validateEffectiveShortcuts } from '../persistence/settings-mutations'
@@ -224,6 +229,10 @@ export class ConfigurationQualification {
     logger?: ServiceLogger
   ) {
     const directory = dirname(workingPath)
+    if (process.platform === 'win32') {
+      ensureWindowsPrivateDirectory(directory)
+      return new ConfigurationQualification(directory, state, writable, terminals, logger)
+    }
     const resolved = await realpath(directory)
     const metadata = await stat(resolved)
     if (directory !== resolved || !metadata.isDirectory() || (metadata.mode & 0o077) !== 0)
@@ -390,7 +399,11 @@ export class ConfigurationQualification {
     const path = join(this.workingDirectory, 'config.json')
     let handle: Awaited<ReturnType<typeof open>>
     try {
-      handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW)
+      if (process.platform === 'win32') assertWindowsPrivatePath(path)
+      handle = await open(
+        path,
+        constants.O_RDONLY | (process.platform === 'win32' ? 0 : constants.O_NOFOLLOW)
+      )
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
         return { bytes: Buffer.alloc(0), raw: structuredClone(DEFAULTS) }
@@ -400,7 +413,12 @@ export class ConfigurationQualification {
     let bytes: Buffer
     try {
       const metadata = await handle.stat()
-      if (!metadata.isFile() || (metadata.mode & 0o077) !== 0 || metadata.size > MAX_CONFIG_BYTES)
+      if (process.platform === 'win32') assertWindowsPrivatePath(path)
+      if (
+        !metadata.isFile() ||
+        (process.platform !== 'win32' && (metadata.mode & 0o077) !== 0) ||
+        metadata.size > MAX_CONFIG_BYTES
+      )
         fail('unsafe_config')
       bytes = await handle.readFile()
       if (bytes.byteLength > MAX_CONFIG_BYTES) fail('invalid_config')
@@ -422,22 +440,34 @@ export class ConfigurationQualification {
     try {
       try {
         const existing = await lstat(destination)
-        if (!existing.isFile() || (existing.mode & 0o077) !== 0) fail('unsafe_config')
+        if (!existing.isFile() || (process.platform !== 'win32' && (existing.mode & 0o077) !== 0))
+          fail('unsafe_config')
+        if (process.platform === 'win32') assertWindowsPrivatePath(destination)
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
       }
+      if (process.platform === 'win32') createWindowsPrivateFile(temporary)
       handle = await open(
         temporary,
-        constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW,
+        constants.O_WRONLY |
+          (process.platform === 'win32'
+            ? 0
+            : constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW),
         0o600
       )
       await handle.writeFile(bytes)
       await handle.sync()
       await handle.close()
       handle = undefined
+      if (process.platform === 'win32') assertWindowsPrivatePath(temporary)
       // The private directory is the transaction boundary; recheck before replacement.
       await this.load()
       await rename(temporary, destination)
+      if (process.platform === 'win32') {
+        assertWindowsPrivatePath(destination)
+        ensureWindowsPrivateDirectory(this.workingDirectory)
+        return
+      }
       const directory = await open(this.workingDirectory, constants.O_RDONLY)
       try {
         await directory.sync()

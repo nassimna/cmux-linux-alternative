@@ -1,6 +1,6 @@
 {
   "name": "agent-workspace",
-  "version": "0.1.0",
+  "version": "0.2.0-beta.1",
   "private": true,
   "description": "Independent cross-platform workspace for agent-driven development",
   "license": "GPL-3.0-or-later",
@@ -29,7 +29,13 @@
     "typecheck": "pnpm -r --if-present typecheck",
     "validate": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm test && pnpm build",
     "dev:website": "pnpm --filter @ternline/website dev",
-    "build:website": "pnpm --filter @ternline/website build"
+    "build:website": "pnpm --filter @ternline/website build",
+    "package:mac": "pnpm --filter @agent-workspace/desktop package:mac",
+    "package:mac:updates": "pnpm --filter @agent-workspace/desktop package:mac:updates",
+    "package:mac:dir": "pnpm --filter @agent-workspace/desktop package:mac:dir",
+    "package:windows": "pnpm --filter @agent-workspace/desktop package:windows",
+    "package:windows:updates": "pnpm --filter @agent-workspace/desktop package:windows:updates",
+    "package:windows:dir": "pnpm --filter @agent-workspace/desktop package:windows:dir"
   },
   "devDependencies": {
     "@eslint/js": "catalog:",

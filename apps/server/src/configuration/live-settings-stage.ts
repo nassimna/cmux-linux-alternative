@@ -9,6 +9,11 @@ import {
   readArtifact,
   type LiveRuntimeSettings
 } from './live-settings-preflight'
+import {
+  assertWindowsPrivatePath,
+  createWindowsPrivateFile,
+  ensureWindowsPrivateDirectory
+} from '@agent-workspace/client-runtime'
 
 type LiveOwnerEvidence = { assertDatabaseUnchanged(): void }
 type Preflight = Awaited<ReturnType<typeof preflightLiveSettings>>
@@ -52,28 +57,34 @@ export async function stageLiveSettings(
     unavailable()
 
   const directoryPath = dirname(nodeConfigPath)
-  const directory = await open(
-    directoryPath,
-    constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW
-  )
+  if (process.platform === 'win32') ensureWindowsPrivateDirectory(directoryPath)
+  const directory =
+    process.platform === 'win32'
+      ? undefined
+      : await open(directoryPath, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW)
   const temporary = join(directoryPath, `.config.json.${randomUUID()}.tmp`)
   try {
-    const directoryStat = await directory.stat()
+    const directoryStat = directory ? await directory.stat() : await lstat(directoryPath)
     const namedDirectory = await lstat(directoryPath)
     if (
       !directoryStat.isDirectory() ||
       directoryStat.dev !== namedDirectory.dev ||
       directoryStat.ino !== namedDirectory.ino ||
-      directoryStat.uid !== process.getuid?.() ||
-      (directoryStat.mode & 0o077) !== 0 ||
+      (process.platform !== 'win32' &&
+        (directoryStat.uid !== process.getuid?.() || (directoryStat.mode & 0o077) !== 0)) ||
       (await realpath(directoryPath)) !== directoryPath
     ) {
       throw new ConfigurationQualificationError('unsafe_config')
     }
+    if (process.platform === 'win32') assertWindowsPrivatePath(directoryPath, true)
 
+    if (process.platform === 'win32') createWindowsPrivateFile(temporary)
     const file = await open(
       temporary,
-      constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW,
+      constants.O_WRONLY |
+        (process.platform === 'win32'
+          ? 0
+          : constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW),
       0o600
     )
     let stagedIdentity: { dev: number; ino: number }
@@ -83,12 +94,14 @@ export async function stageLiveSettings(
       const staged = await file.stat()
       if (
         !staged.isFile() ||
-        staged.uid !== process.getuid?.() ||
-        (staged.mode & 0o777) !== 0o600 ||
-        staged.nlink !== 1 ||
+        (process.platform !== 'win32' &&
+          (staged.uid !== process.getuid?.() ||
+            (staged.mode & 0o777) !== 0o600 ||
+            staged.nlink !== 1)) ||
         staged.size !== source.bytes.byteLength
       )
         throw new ConfigurationQualificationError('unsafe_config')
+      if (process.platform === 'win32') assertWindowsPrivatePath(temporary)
       stagedIdentity = { dev: staged.dev, ino: staged.ino }
     } finally {
       await file.close()
@@ -116,10 +129,11 @@ export async function stageLiveSettings(
       !stagedBeforeCommit.isFile() ||
       stagedBeforeCommit.dev !== stagedIdentity.dev ||
       stagedBeforeCommit.ino !== stagedIdentity.ino ||
-      stagedBeforeCommit.nlink !== 1 ||
+      (process.platform !== 'win32' && stagedBeforeCommit.nlink !== 1) ||
       stagedBeforeCommit.size !== source.bytes.byteLength
     )
       unavailable()
+    if (process.platform === 'win32') assertWindowsPrivatePath(temporary)
     owner.assertDatabaseUnchanged()
     // A hard link publishes the fully synced bytes and fails if config.json appeared.
     // Rename would replace an existing target after the last absence check.
@@ -130,7 +144,10 @@ export async function stageLiveSettings(
       throw error
     }
     await rm(temporary)
-    await directory.sync()
+    if (process.platform === 'win32') {
+      assertWindowsPrivatePath(nodeConfigPath)
+      assertWindowsPrivatePath(directoryPath, true)
+    } else await directory!.sync()
     owner.assertDatabaseUnchanged()
     const after = await preflightLiveSettings(rustDesktopPath, nodeConfigPath, runtime)
     if (!after.byteIdentical || after.runtimeSettingsMatch !== true || after.blockers.length > 0)
@@ -145,6 +162,6 @@ export async function stageLiveSettings(
     return after
   } finally {
     await rm(temporary, { force: true })
-    await directory.close()
+    await directory?.close()
   }
 }

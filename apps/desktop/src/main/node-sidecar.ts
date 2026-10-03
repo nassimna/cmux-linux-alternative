@@ -11,6 +11,9 @@ import WebSocket, { type RawData } from 'ws'
 
 import {
   AgentWorkspaceClient,
+  createOwnerIpcStream,
+  assertWindowsPrivatePath,
+  ensureWindowsPrivateDirectory,
   parseTerminalEvent,
   ServerError
 } from '@agent-workspace/client-runtime'
@@ -980,7 +983,7 @@ export class NodeSidecar {
         (await realpath(parent)) !== parent ||
         !directory.isDirectory() ||
         directory.isSymbolicLink() ||
-        directory.uid !== process.getuid() ||
+        directory.uid !== process.getuid!() ||
         (directory.mode & 0o077) !== 0
       ) {
         throw new Error('Node live sidecar output directory must be private and canonical')
@@ -1083,9 +1086,15 @@ export class NodeSidecar {
 
   /** Start the production Node owner without a Rust service or copied database. */
   static async startNative(options: NodeSidecarNativeOptions): Promise<NodeSidecar> {
-    if ((process.platform !== 'linux' && process.platform !== 'darwin') || !process.getuid) {
-      throw new Error('Native Node desktop ownership requires Linux or macOS')
+    if (
+      (process.platform !== 'linux' &&
+        process.platform !== 'darwin' &&
+        process.platform !== 'win32') ||
+      (process.platform !== 'win32' && !process.getuid)
+    ) {
+      throw new Error('Native Node desktop ownership requires a supported native platform')
     }
+    const userId = process.platform === 'win32' ? undefined : process.getuid!()
     for (const path of [
       options.serverPath,
       options.liveDatabasePath,
@@ -1109,12 +1118,17 @@ export class NodeSidecar {
     if (!server.isFile() || server.isSymbolicLink()) throw new Error('Native Node server is unsafe')
     for (const target of [options.liveDatabasePath, options.backupPath, options.sessionFilePath]) {
       const parent = dirname(target)
+      if (process.platform === 'win32') {
+        ensureWindowsPrivateDirectory(parent)
+        assertWindowsPrivatePath(parent, true)
+        continue
+      }
       const directory = await lstat(parent)
       if (
         (await realpath(parent)) !== parent ||
         !directory.isDirectory() ||
         directory.isSymbolicLink() ||
-        directory.uid !== process.getuid() ||
+        directory.uid !== userId ||
         (directory.mode & 0o077) !== 0
       ) {
         throw new Error('Native Node state directory must be private')
@@ -1159,10 +1173,10 @@ export class NodeSidecar {
     const token = env.AGENT_WORKSPACE_SERVER_TOKEN!
     const child = spawn(options.executable ?? process.execPath, [options.serverPath], {
       env,
-      stdio: ['pipe', 'pipe', 'pipe', 'pipe'],
+      stdio: ['pipe', 'pipe', 'pipe', process.platform === 'win32' ? 'ipc' : 'pipe'],
       windowsHide: true,
       detached: false
-    })
+    }) as ChildProcessWithoutNullStreams
     child.stdin.end()
     if (process.env.AGENT_WORKSPACE_DEBUG_STARTUP === '1') {
       child.stderr.on('data', (chunk: Buffer) =>
@@ -1170,7 +1184,8 @@ export class NodeSidecar {
       )
     }
     child.stderr.resume()
-    const ownerPipe = child.stdio[3] as Duplex | null
+    const ownerPipe =
+      process.platform === 'win32' ? createOwnerIpcStream(child) : (child.stdio[3] as Duplex | null)
     if (!ownerPipe) {
       await stopChild(child)
       throw new Error('Node sidecar private owner pipe is unavailable')

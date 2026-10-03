@@ -7,7 +7,7 @@ import { build } from 'electron-builder'
 const target = process.argv[2]
 const targets = {
   linux: { linux: ['AppImage', 'deb', 'rpm'], x64: true },
-  mac: { mac: ['dmg', 'zip'], x64: true },
+  mac: { mac: ['dmg', 'zip'], [process.arch]: true },
   windows: { win: ['nsis'], x64: true }
 }
 
@@ -46,7 +46,7 @@ if (
 }
 
 const pnpm = process.platform === 'win32' ? 'pnpm.cmd' : 'pnpm'
-if (target === 'mac') run(['--workspace-root', 'build:node'])
+if (target === 'mac' || target === 'windows') run(['--workspace-root', 'build:node'])
 run(['exec', 'electron-vite', 'build'])
 await build({
   ...targets[target],

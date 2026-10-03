@@ -12,6 +12,7 @@
   "dependencies": {
     "@agent-workspace/contracts": "workspace:*",
     "@agent-workspace/protocol-client": "workspace:*",
+    "koffi": "3.3.2",
     "zod": "catalog:"
   },
   "devDependencies": {

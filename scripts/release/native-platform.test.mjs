@@ -12,13 +12,23 @@ const repositoryDirectory = resolve(dirname(fileURLToPath(import.meta.url)), '..
 const read = (path) => readFile(resolve(repositoryDirectory, path), 'utf8')
 const execFileAsync = promisify(execFile)
 
-test('CI builds the Node desktop and inspects packaged Linux artifacts', async () => {
-  const workflow = await read('.github/workflows/ci.yml')
-  assert.match(workflow, /node-version: 22\.22\.3/u)
-  assert.match(workflow, /pnpm validate/u)
-  assert.match(workflow, /pnpm package:linux/u)
-  assert.match(workflow, /inspect-node-preview\.sh/u)
-  assert.doesNotMatch(workflow, /cargo|rustup|build:service/u)
+test('CI retains Node quality gates while release owns native packaging', async () => {
+  const [ci, release] = await Promise.all([
+    read('.github/workflows/ci.yml'),
+    read('.github/workflows/release.yml')
+  ])
+  assert.match(ci, /node-version: 22\.22\.3/u)
+  assert.match(ci, /pnpm validate/u)
+  assert.doesNotMatch(ci, /pnpm package:linux/u)
+  assert.doesNotMatch(ci, /cargo|rustup|build:service/u)
+  assert.match(release, /linux-x64/u)
+  assert.match(release, /macos-arm64/u)
+  assert.match(release, /macos-x64/u)
+  assert.match(release, /windows-x64/u)
+  assert.match(release, /pnpm build:node/u)
+  assert.match(release, /inspect-node-preview\.sh/u)
+  assert.match(release, /verify-native-package\.mjs/u)
+  assert.doesNotMatch(release, /cargo|rustup|build:service/u)
 })
 
 test('Linux package workflows retain default lanes and add one software-rendered AppImage lane', async () => {

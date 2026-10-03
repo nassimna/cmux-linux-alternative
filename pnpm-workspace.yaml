@@ -6,6 +6,7 @@ onlyBuiltDependencies:
   - better-sqlite3
   - electron
   - electron-winstaller
+  - koffi
   - esbuild
   - node-pty
 

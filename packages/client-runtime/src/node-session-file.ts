@@ -6,6 +6,7 @@ import { dirname, join, resolve } from 'node:path'
 import { connect } from 'node:net'
 
 import { nodeSessionRecordSchema, type NodeSessionRecord } from '@agent-workspace/contracts'
+import { assertWindowsPrivatePath } from './windows-private-state'
 
 const MAX_SESSION_BYTES = 64 * 1024
 
@@ -16,34 +17,43 @@ export function resolveNodeSessionFile(explicit?: string): string {
     return process.env.AGENT_WORKSPACE_NODE_SESSION_FILE
   }
   const desktopSessions =
-    process.platform === 'darwin'
+    process.platform === 'win32'
       ? [
           join(
-            homedir(),
-            'Library',
-            'Application Support',
+            process.env.APPDATA || join(homedir(), 'AppData', 'Roaming'),
             'Agent Workspace',
             'runtime',
             'node-cli-session.json'
-          ),
-          join(
-            homedir(),
-            'Library',
-            'Application Support',
-            'Ternline',
-            'runtime',
-            'node-cli-session.json'
           )
         ]
-      : [
-          join(
-            process.env.XDG_CONFIG_HOME || join(homedir(), '.config'),
-            '@agent-workspace',
-            'desktop',
-            'runtime',
-            'node-cli-session.json'
-          )
-        ]
+      : process.platform === 'darwin'
+        ? [
+            join(
+              homedir(),
+              'Library',
+              'Application Support',
+              'Agent Workspace',
+              'runtime',
+              'node-cli-session.json'
+            ),
+            join(
+              homedir(),
+              'Library',
+              'Application Support',
+              'Ternline',
+              'runtime',
+              'node-cli-session.json'
+            )
+          ]
+        : [
+            join(
+              process.env.XDG_CONFIG_HOME || join(homedir(), '.config'),
+              '@agent-workspace',
+              'desktop',
+              'runtime',
+              'node-cli-session.json'
+            )
+          ]
   const desktopSession = desktopSessions.find((candidate) => existsSync(candidate))
   if (desktopSession) return desktopSession
   let temporaryRoot = tmpdir()
@@ -61,6 +71,7 @@ export function resolveNodeSessionFile(explicit?: string): string {
 }
 
 function requireUnix(): void {
+  if (process.platform === 'win32') return
   if (
     (process.platform !== 'linux' && process.platform !== 'darwin') ||
     process.getuid === undefined
@@ -70,6 +81,10 @@ function requireUnix(): void {
 }
 
 async function privateDirectory(path: string): Promise<void> {
+  if (process.platform === 'win32') {
+    assertWindowsPrivatePath(path, true)
+    return
+  }
   requireUnix()
   const [actual, metadata] = await Promise.all([realpath(path), lstat(path)])
   if (
@@ -87,8 +102,8 @@ function privateFile(metadata: Awaited<ReturnType<typeof lstat>>): void {
   if (
     !metadata.isFile() ||
     metadata.isSymbolicLink() ||
-    metadata.uid !== process.getuid!() ||
-    (Number(metadata.mode) & 0o077) !== 0 ||
+    (process.platform !== 'win32' &&
+      (metadata.uid !== process.getuid!() || (Number(metadata.mode) & 0o077) !== 0)) ||
     metadata.nlink !== 1 ||
     metadata.size > MAX_SESSION_BYTES
   ) {
@@ -102,7 +117,11 @@ export async function readNodeSessionFile(path: string): Promise<NodeSessionReco
   await privateDirectory(dirname(file))
   const before = await lstat(file)
   privateFile(before)
-  const handle = await open(file, constants.O_RDONLY | constants.O_NOFOLLOW)
+  if (process.platform === 'win32') assertWindowsPrivatePath(file)
+  const handle = await open(
+    file,
+    constants.O_RDONLY | (process.platform === 'win32' ? 0 : constants.O_NOFOLLOW)
+  )
   try {
     const current = await handle.stat()
     privateFile(current)
@@ -184,7 +203,10 @@ export async function createNodeSessionFile(
   const temporary = resolve(parent, `.node-cli-session-${randomUUID()}.tmp`)
   const handle = await open(
     temporary,
-    constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW,
+    constants.O_WRONLY |
+      constants.O_CREAT |
+      constants.O_EXCL |
+      (process.platform === 'win32' ? 0 : constants.O_NOFOLLOW),
     0o600
   )
   let published = false
@@ -192,6 +214,7 @@ export async function createNodeSessionFile(
     await handle.writeFile(encoded)
     await handle.sync()
     await handle.close()
+    if (process.platform === 'win32') assertWindowsPrivatePath(temporary)
     try {
       await link(temporary, file)
     } catch (error) {
@@ -206,11 +229,16 @@ export async function createNodeSessionFile(
     }
     published = true
     await unlink(temporary)
-    const directory = await open(parent, constants.O_RDONLY | constants.O_DIRECTORY)
-    try {
-      await directory.sync()
-    } finally {
-      await directory.close()
+    if (process.platform === 'win32') {
+      assertWindowsPrivatePath(file)
+      assertWindowsPrivatePath(parent, true)
+    } else {
+      const directory = await open(parent, constants.O_RDONLY | constants.O_DIRECTORY)
+      try {
+        await directory.sync()
+      } finally {
+        await directory.close()
+      }
     }
   } catch (error) {
     await handle.close().catch(() => {})

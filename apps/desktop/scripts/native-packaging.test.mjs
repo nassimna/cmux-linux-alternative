@@ -58,9 +58,8 @@ test('macOS uses the updater-compatible signed distribution targets', async () =
 
 test('macOS packages build and include the CLI for both architectures', async () => {
   const configuration = await readBuilderConfiguration()
-  const mac = section(configuration, 'mac', 'win')
-  assert.match(mac, /from: \.\.\/cli\/dist/u)
-  assert.match(mac, /to: cli\/dist/u)
+  assert.match(configuration, /from: \.\.\/cli\/dist/u)
+  assert.match(configuration, /to: cli\/dist/u)
   const packageJson = JSON.parse(await readFile(resolve(desktopDirectory, 'package.json'), 'utf8'))
   for (const command of ['package:mac', 'package:mac:dir']) {
     assert.match(packageJson.scripts[command], /^pnpm --workspace-root build:node &&/u)
@@ -106,7 +105,7 @@ printf '%s\\n' "$@"
         }
       )
       assert.deepEqual(stdout.trimEnd().split('\n'), [
-        resolve(cliDirectory, 'dist/bin.mjs'),
+        resolve(contents, 'Resources/app.asar/cli/dist/bin.mjs'),
         'identify',
         'a b',
         '$(false)'

@@ -10,6 +10,7 @@ The current Linux application uses the pinned versions in `pnpm-lock.yaml`. Ther
 | Hono, `@hono/node-server`                                            | Authenticated local HTTP boundary                                   | `apps/server`                                                   |
 | `better-sqlite3`                                                     | Durable local state and revisioned mutations                        | `apps/server`                                                   |
 | `node-pty`                                                           | Local terminal processes and resize                                 | `apps/server`                                                   |
+| `koffi` 3.3.2 (MIT)                                                  | Windows owner-only DACLs and process-managed file locks             | `packages/client-runtime`, `apps/desktop`                       |
 | `ssh2`                                                               | Remote SSH/tmux transport                                           | `apps/server`                                                   |
 | `dbus-next`                                                          | Linux Secret Service integration                                    | `apps/server`                                                   |
 | `@noble/ciphers`, `@noble/hashes`                                    | Encrypted content and key handling                                  | `apps/server`                                                   |

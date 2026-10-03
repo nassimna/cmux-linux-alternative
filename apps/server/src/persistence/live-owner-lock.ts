@@ -1,20 +1,48 @@
 import { spawnSync } from 'node:child_process'
 import { closeSync, constants, fstatSync, lstatSync, openSync, realpathSync } from 'node:fs'
 import { dirname, isAbsolute, resolve } from 'node:path'
+import koffi from 'koffi'
+import {
+  acquireWindowsPrivateLock,
+  assertWindowsPrivatePath
+} from '@agent-workspace/client-runtime'
+
+type WindowsFence = { close(): void }
 
 /** Process ownership fence for the live state database. */
 export class LiveOwnerLock {
   private closed = false
 
   private constructor(
-    private readonly transferFd: number,
-    private readonly ownerFd: number,
+    private readonly transferFd: number | WindowsFence,
+    private readonly ownerFd: number | WindowsFence,
     private readonly databasePath: string,
     private readonly databaseDevice: number,
-    private readonly databaseInode: number
+    private readonly databaseInode: number,
+    private readonly windowsIdentity?: string
   ) {}
 
   static acquire(databasePath: string): LiveOwnerLock {
+    if (process.platform === 'win32') {
+      if (!isAbsolute(databasePath) || resolve(databasePath) !== databasePath)
+        throw new Error('Live state path must be canonical')
+      const identity = assertWindowsPrivatePath(databasePath)
+      const transfer = acquireWindowsPrivateLock(`${databasePath}.writer-transfer.lock`)
+      try {
+        const owner = acquireWindowsPrivateLock(`${databasePath}.live-owner.lock`)
+        const lock = new LiveOwnerLock(transfer, owner, databasePath, 0, 0, identity)
+        try {
+          lock.assertDatabaseUnchanged()
+          return lock
+        } catch (error) {
+          owner.close()
+          throw error
+        }
+      } catch (error) {
+        transfer.close()
+        throw error
+      }
+    }
     if (
       (process.platform !== 'linux' && process.platform !== 'darwin') ||
       !process.getuid ||
@@ -73,6 +101,11 @@ export class LiveOwnerLock {
   /** Call immediately before opening the live database under this fence. */
   assertDatabaseUnchanged(): void {
     if (this.closed) throw new Error('Live owner lock is closed')
+    if (process.platform === 'win32') {
+      if (assertWindowsPrivatePath(this.databasePath) !== this.windowsIdentity)
+        throw new Error('Live state database changed while acquiring ownership')
+      return
+    }
     const database = lstatSync(this.databasePath)
     if (
       !database.isFile() ||
@@ -95,8 +128,10 @@ export class LiveOwnerLock {
   close(): void {
     if (this.closed) return
     this.closed = true
-    closeSync(this.ownerFd)
-    closeSync(this.transferFd)
+    if (typeof this.ownerFd === 'number') closeSync(this.ownerFd)
+    else this.ownerFd.close()
+    if (typeof this.transferFd === 'number') closeSync(this.transferFd)
+    else this.transferFd.close()
   }
 }
 
@@ -115,17 +150,20 @@ function acquireFence(path: string, name: string): number {
     ) {
       throw new Error(`${name} lock file is unsafe`)
     }
-    // Both helpers lock the shared open-file description passed as descriptor
-    // 3. The lock survives the short helper process and remains held by this fd.
-    const result = spawnSync(
-      process.platform === 'darwin' ? '/usr/bin/lockf' : '/usr/bin/flock',
-      process.platform === 'darwin' ? ['-t', '0', '3'] : ['-n', '3'],
-      {
-        stdio: ['ignore', 'ignore', 'pipe', fd],
-        timeout: 5_000
-      }
-    )
-    if (result.status !== 0) {
+    // BSD flock must run in the owner process; a lockf helper loses its process lock on exit.
+    const status =
+      process.platform === 'darwin'
+        ? (
+            koffi.load('/usr/lib/libSystem.B.dylib').func('int flock(int, int)') as (
+              fd: number,
+              operation: number
+            ) => number
+          )(fd, 6)
+        : spawnSync('/usr/bin/flock', ['-n', '3'], {
+            stdio: ['ignore', 'ignore', 'pipe', fd],
+            timeout: 5_000
+          }).status
+    if (status !== 0) {
       throw new Error(`Live state is already owned or the ${name} fence is unavailable`)
     }
     const current = lstatSync(path)

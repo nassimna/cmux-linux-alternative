@@ -11,10 +11,12 @@ restart. Linux update installation and native signing have not been qualified en
 Packaged applications default to the public `nassimna/cmux-linux-alternative` GitHub Releases
 provider. Stable uses the updater's `latest` channel; beta uses `beta` and permits prereleases.
 Normal package builds generate updater metadata without uploading it. The release workflow
-collects Linux manifests and blockmaps alongside the installable packages. Existing releases
+collects each platform’s manifests and blockmaps alongside the installable packages. macOS
+metadata includes both Intel and Apple Silicon artifacts. Existing releases
 without this metadata cannot serve an in-app update.
 
-Release versions must increase in the root and desktop package manifests before packaging.
+Release versions must increase in the root and desktop package manifests before packaging. Beta
+releases use `-beta.N`; the beta update channel excludes `-alpha.N` tags.
 Publish stable versions as production releases and beta versions as prereleases; the stable
 channel does not use prereleases. GitHub Actions must be enabled to run the release workflow.
 

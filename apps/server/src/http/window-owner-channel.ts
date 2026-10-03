@@ -42,7 +42,7 @@ type Request =
   | { id: string; operation: 'revokeWindow'; windowId: string }
 
 /**
- * The caller must pass the inherited fd 3 duplex pipe, never a network socket.
+ * The caller must pass the inherited private duplex pipe, never a network socket.
  * Its peer is trusted Electron main. No HTTP-supplied window ID reaches issue().
  */
 export class WindowOwnerChannel {

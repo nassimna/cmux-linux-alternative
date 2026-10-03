@@ -9,6 +9,7 @@ const webRoot = fileURLToPath(new URL('../web/', import.meta.url))
 
 export default defineConfig({
   main: {
+    build: { rollupOptions: { external: ['koffi'] } },
     plugins: [
       externalizeDepsPlugin({
         exclude: [

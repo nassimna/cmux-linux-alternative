@@ -7,6 +7,7 @@ import {
   ConfigurationQualificationError,
   qualifyConfigurationBytes
 } from './configuration-qualification'
+import { assertWindowsPrivatePath } from '@agent-workspace/client-runtime'
 
 type Qualified = ReturnType<typeof qualifyConfigurationBytes>
 
@@ -54,13 +55,18 @@ export async function readArtifact(path: string, expectedName: string): Promise<
   const parentStat = await lstat(parent)
   if (
     !parentStat.isDirectory() ||
-    parentStat.uid !== process.getuid?.() ||
-    (parentStat.mode & 0o077) !== 0
+    (process.platform !== 'win32' &&
+      (parentStat.uid !== process.getuid?.() || (parentStat.mode & 0o077) !== 0))
   )
     fail('unsafe_config')
+  if (process.platform === 'win32') assertWindowsPrivatePath(parent, true)
   let handle: Awaited<ReturnType<typeof open>>
   try {
-    handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW)
+    if (process.platform === 'win32') assertWindowsPrivatePath(path)
+    handle = await open(
+      path,
+      constants.O_RDONLY | (process.platform === 'win32' ? 0 : constants.O_NOFOLLOW)
+    )
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return { report: { status: 'absent' } }
     if ((error as NodeJS.ErrnoException).code === 'ELOOP') fail('unsafe_config')
@@ -70,12 +76,12 @@ export async function readArtifact(path: string, expectedName: string): Promise<
     const before = await handle.stat()
     if (
       !before.isFile() ||
-      before.uid !== process.getuid?.() ||
-      (before.mode & 0o077) !== 0 ||
-      before.nlink !== 1 ||
+      (process.platform !== 'win32' &&
+        (before.uid !== process.getuid?.() || (before.mode & 0o077) !== 0 || before.nlink !== 1)) ||
       before.size > MAX_CONFIG_BYTES
     )
       fail('unsafe_config')
+    if (process.platform === 'win32') assertWindowsPrivatePath(path)
     const buffer = Buffer.alloc(before.size + 1)
     let length = 0
     while (length < buffer.length) {

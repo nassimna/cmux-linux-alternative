@@ -4,6 +4,11 @@ import { dirname, join } from 'node:path'
 
 import Database from 'better-sqlite3'
 import { durableApplicationStateSchema } from '@agent-workspace/contracts'
+import {
+  assertWindowsPrivatePath,
+  createWindowsPrivateFile,
+  ensureWindowsPrivateDirectory
+} from '@agent-workspace/client-runtime'
 
 import { NATIVE_SCHEMA_SQL } from './native-schema'
 
@@ -14,15 +19,26 @@ export function ensureNativeDatabase(
   now = Date.now
 ): boolean {
   const parent = dirname(path)
-  const stat = lstatSync(parent)
-  if (
-    parent !== realpathSync(parent) ||
-    !stat.isDirectory() ||
-    stat.isSymbolicLink() ||
-    stat.uid !== process.getuid?.() ||
-    (stat.mode & 0o777) !== 0o700
-  ) {
-    throw new Error('Native state directory must be private and owned by this user')
+  if (process.platform === 'win32') {
+    ensureWindowsPrivateDirectory(parent)
+    try {
+      assertWindowsPrivatePath(path)
+      return false
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+    }
+  }
+  if (process.platform !== 'win32') {
+    const stat = lstatSync(parent)
+    if (
+      parent !== realpathSync(parent) ||
+      !stat.isDirectory() ||
+      stat.isSymbolicLink() ||
+      stat.uid !== process.getuid?.() ||
+      (stat.mode & 0o777) !== 0o700
+    ) {
+      throw new Error('Native state directory must be private and owned by this user')
+    }
   }
   try {
     lstatSync(path)
@@ -86,8 +102,11 @@ export function ensureNativeDatabase(
     recentlyClosed: []
   })
   const temporary = join(parent, `.native-state-${randomUUID()}.sqlite`)
-  const descriptor = openSync(temporary, 'wx', 0o600)
-  closeSync(descriptor)
+  if (process.platform === 'win32') createWindowsPrivateFile(temporary)
+  else {
+    const descriptor = openSync(temporary, 'wx', 0o600)
+    closeSync(descriptor)
+  }
   try {
     const database = new Database(temporary, { fileMustExist: true })
     try {
@@ -122,7 +141,6 @@ export function ensureNativeDatabase(
     }
     try {
       linkSync(temporary, path)
-      return true
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === 'EEXIST') return false
       throw error
@@ -130,4 +148,6 @@ export function ensureNativeDatabase(
   } finally {
     unlinkSync(temporary)
   }
+  if (process.platform === 'win32') assertWindowsPrivatePath(path)
+  return true
 }

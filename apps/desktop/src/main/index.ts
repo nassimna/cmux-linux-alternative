@@ -1,4 +1,4 @@
-import { dirname, join } from 'node:path'
+import { delimiter, dirname, join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { execFile } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
@@ -36,6 +36,7 @@ import {
   type WindowCloseParams,
   type WorkspaceSnapshotResult
 } from '@agent-workspace/protocol-client'
+import { ensureWindowsPrivateDirectory } from '@agent-workspace/client-runtime'
 import type { DesktopLifecycleState } from '@agent-workspace/contracts/desktop/desktop-bridge'
 import electronUpdater from 'electron-updater'
 
@@ -3411,15 +3412,22 @@ async function restartNativeDesktop(
 }
 
 async function startNativeDesktop(userData: string): Promise<void> {
-  if (app.isPackaged && process.platform === 'darwin') {
+  if (app.isPackaged && (process.platform === 'darwin' || process.platform === 'win32')) {
     const cliDirectory = join(process.resourcesPath, 'cli')
-    const paths = (process.env.PATH ?? '/usr/bin:/bin:/usr/sbin:/sbin').split(':')
-    process.env.PATH = [cliDirectory, ...paths.filter((path) => path !== cliDirectory)].join(':')
+    const paths = (process.env.PATH ?? '').split(delimiter)
+    process.env.PATH = [cliDirectory, ...paths.filter((path) => path !== cliDirectory)].join(
+      delimiter
+    )
   }
   const stateDirectory = join(userData, 'state')
   const runtimeDirectory = join(userData, 'runtime')
-  await mkdir(stateDirectory, { recursive: true, mode: 0o700 })
-  await mkdir(runtimeDirectory, { recursive: true, mode: 0o700 })
+  if (process.platform === 'win32') {
+    ensureWindowsPrivateDirectory(stateDirectory)
+    ensureWindowsPrivateDirectory(runtimeDirectory)
+  } else {
+    await mkdir(stateDirectory, { recursive: true, mode: 0o700 })
+    await mkdir(runtimeDirectory, { recursive: true, mode: 0o700 })
+  }
   const stagedRuntime = join(process.resourcesPath, 'node-linux')
   const packagedServerPath = join(process.resourcesPath, 'app.asar', 'server', 'dist', 'bin.mjs')
   const serverPath =

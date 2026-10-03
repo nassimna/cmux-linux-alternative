@@ -3,11 +3,11 @@
 > The internal `agent-workspace` slug remains stable for user data and automation integrations.
 
 Ternline is an independent, clean-room desktop workspace for terminal-driven development
-sessions. It does not copy another product's source, assets, identity, or trademarks. Development and validation are Linux-first. The desktop, server, CLI, and shared contracts are TypeScript; the Linux package carries a pinned Node runtime.
+sessions. It does not copy another product's source, assets, identity, or trademarks. The desktop, server, CLI, and shared contracts are TypeScript. Native packages target Linux, macOS, and Windows; the Linux package carries a pinned Node runtime.
 
 This is pre-alpha software. Milestones 0–5 are established on the documented Linux reference host.
 Milestone 6 release-candidate work is implemented in substantial part but remains in validation;
-there is no published download, signed stable release, or public support guarantee.
+unsigned prereleases are distributed through [GitHub Releases](https://github.com/nassimna/cmux-linux-alternative/releases) and the [website](https://nassimna.github.io/cmux-linux-alternative/). There is no signed stable release or public support guarantee.
 
 ## What works
 
@@ -22,20 +22,19 @@ there is no published download, signed stable release, or public support guarant
   notification settings, and explicit stable/beta update controls.
 - Authenticated local protocol and packaged JSON CLI for workspace list/create, terminal
   create/send, pane split, identify, notifications, and reversible agent hooks.
-- Exact x86_64 AppImage, deb, and rpm packaging with deterministic `SHA256SUMS`; feed-free default
-  packages; explicit user-approved update check, download, and install state transitions.
+- Native Linux x64 AppImage/deb/rpm, macOS Intel and Apple Silicon DMG/zip, and Windows x64 NSIS
+  packaging with deterministic `SHA256SUMS` and GitHub update metadata. Update installation
+  requires explicit user approval.
 - Linux package, security, SBOM, provenance, and clean-container workflow definitions. The
   release-candidate workflow retains direct accessibility and visual validation; Node performance
   qualification and manual gates remain open.
 
-Current limitations matter: package publication metadata and signing are unresolved, the public
-name and identity are still temporary, the hosted dual update feeds do not exist, GitHub release
-workflows have not run in this repository state, and the eight-hour soak and human
-assistive-technology checks remain open. Read [Known limitations](docs/KNOWN_LIMITATIONS.md) before
-evaluating support. The 2026-07-18 local soak attempt was intentionally stopped after about 3 hours
-8 minutes and produced no report; it is explicitly deferred, not passed. Implementation completion
-therefore yields a release candidate until the documented exact-eight-hour run and manual trend
-review succeed.
+Current prereleases are unsigned. Native hosted runners check packaged startup and the CLI/PTY
+journey; that does not qualify every physical device, OS version, installer trust prompt, or in-app
+update installation. The eight-hour Node soak and human assistive-technology checks remain open.
+Read [Known limitations](docs/KNOWN_LIMITATIONS.md) before evaluating support. The 2026-07-18 local
+soak attempt was intentionally stopped after about 3 hours 8 minutes and produced no report; it is
+explicitly deferred, not passed.
 
 ## User documentation
 

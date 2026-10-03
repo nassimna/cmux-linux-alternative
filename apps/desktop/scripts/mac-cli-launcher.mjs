@@ -16,6 +16,6 @@ done
 contents_dir=$(CDPATH= cd -- "$(dirname -- "$launcher_path")/../.." && pwd) || exit 1
 unset NODE_OPTIONS NODE_PATH ELECTRON_NO_ASAR
 export ELECTRON_RUN_AS_NODE=1
-exec "$contents_dir"/MacOS/${quote(productFilename)} "$contents_dir/Resources/cli/dist/bin.mjs" "$@"
+exec "$contents_dir"/MacOS/${quote(productFilename)} "$contents_dir/Resources/app.asar/cli/dist/bin.mjs" "$@"
 `
 }

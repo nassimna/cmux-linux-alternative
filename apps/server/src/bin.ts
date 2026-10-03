@@ -7,7 +7,7 @@ import { homedir, tmpdir } from 'node:os'
 
 import Database from 'better-sqlite3'
 
-import { createNodeSessionFile } from '@agent-workspace/client-runtime'
+import { createNodeSessionFile, createOwnerIpcStream } from '@agent-workspace/client-runtime'
 
 import { ContentCatalog } from './content/content-catalog'
 import { FilesService } from './content/files-service'
@@ -443,11 +443,22 @@ async function main(): Promise<void> {
         process.platform === 'darwin' ? 'mac' : 'nonMac'
       )
       if (process.env.AGENT_WORKSPACE_WINDOW_OWNER_CHANNEL === '1') {
-        if (!fstatSync(3).isSocket()) {
+        if (
+          process.platform === 'win32'
+            ? !process.send || !process.channel
+            : !fstatSync(3).isSocket()
+        ) {
           throw new Error('Window owner channel requires an inherited private socket')
         }
         ownerChannel = new WindowOwnerChannel(
-          new Socket({ fd: 3, readable: true, writable: true }),
+          process.platform === 'win32'
+            ? createOwnerIpcStream({
+                send: process.send!.bind(process),
+                connected: process.connected,
+                on: process.on.bind(process),
+                removeListener: process.removeListener.bind(process)
+              })
+            : new Socket({ fd: 3, readable: true, writable: true }),
           stateStore,
           {
             databasePath: statePath,

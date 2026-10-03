@@ -1674,6 +1674,13 @@ export {
   readNodeSessionFile,
   resolveNodeSessionFile
 } from './node-session-file'
+export {
+  assertWindowsPrivatePath,
+  acquireWindowsPrivateLock,
+  createWindowsPrivateFile,
+  ensureWindowsPrivateDirectory
+} from './windows-private-state'
+export { createOwnerIpcStream } from './child-ipc-stream'
 
 export function parseTerminalEvent(
   value: string

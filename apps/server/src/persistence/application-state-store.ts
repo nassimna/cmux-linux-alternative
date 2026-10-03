@@ -3,6 +3,7 @@ import { existsSync, lstatSync } from 'node:fs'
 
 import Database from 'better-sqlite3'
 import type { z, ZodType } from 'zod'
+import { assertWindowsPrivatePath } from '@agent-workspace/client-runtime'
 import {
   actionInvokeResultSchema,
   windowCreateParamsSchema,
@@ -424,12 +425,14 @@ export class ApplicationStateStore {
         if (
           !backup.isFile() ||
           backup.isSymbolicLink() ||
-          backup.nlink !== 1 ||
-          backup.uid !== process.getuid?.() ||
-          (backup.mode & 0o777) !== 0o600
+          (process.platform !== 'win32' &&
+            (backup.nlink !== 1 ||
+              backup.uid !== process.getuid?.() ||
+              (backup.mode & 0o777) !== 0o600))
         ) {
           throw new Error('Native profile backup is unsafe')
         }
+        if (process.platform === 'win32') assertWindowsPrivatePath(backupPath)
       }
       // A pre-Node profile gets one immutable backup before any Node mutation.
       if (!created && !existsSync(backupPath)) {
@@ -604,11 +607,21 @@ export class ApplicationStateStore {
     try {
       if (ownerLock instanceof LiveOwnerLock) ownerLock.assertDatabaseUnchanged()
       const file = lstatSync(workingPath)
-      if (!file.isFile() || file.isSymbolicLink() || (file.mode & 0o077) !== 0) {
+      if (
+        !file.isFile() ||
+        file.isSymbolicLink() ||
+        (process.platform !== 'win32' && (file.mode & 0o077) !== 0)
+      ) {
         throw new Error('Working database must be a private regular file')
       }
+      if (process.platform === 'win32') assertWindowsPrivatePath(workingPath)
       const database = new Database(workingPath, { fileMustExist: true, timeout: 5_000 })
       try {
+        if (process.platform === 'win32') {
+          for (const path of [workingPath, `${workingPath}-wal`, `${workingPath}-shm`]) {
+            if (existsSync(path)) assertWindowsPrivatePath(path)
+          }
+        }
         database.pragma('foreign_keys = ON')
         readLegacySnapshotConnection(database)
         migrateBrowserAutomationSchema(database)
@@ -658,6 +671,11 @@ export class ApplicationStateStore {
             new RemoteCatalog(database, now).reconcileAfterRestart()
           })
           .immediate()
+        if (process.platform === 'win32') {
+          for (const path of [workingPath, `${workingPath}-wal`, `${workingPath}-shm`]) {
+            if (existsSync(path)) assertWindowsPrivatePath(path)
+          }
+        }
         return new ApplicationStateStore(database, now, epoch, ownerLock, backupProof)
       } catch (error) {
         database.close()

@@ -5,6 +5,9 @@ publish:
   owner: nassimna
   repo: cmux-linux-alternative
 asar: true
+asarUnpack:
+  - node_modules/koffi/**/*
+  - node_modules/@koromix/koffi-*/**/*
 afterPack: ./scripts/after-pack.mjs
 directories:
   output: ../../release
@@ -13,6 +16,10 @@ files:
   - package.json
   - from: ../../apps/server/dist
     to: server/dist
+    filter:
+      - '**/*'
+  - from: ../cli/dist
+    to: cli/dist
     filter:
       - '**/*'
 extraResources:
@@ -51,11 +58,6 @@ deb:
     - bubblewrap
     - systemd
 mac:
-  extraResources:
-    - from: ../cli/dist
-      to: cli/dist
-      filter:
-        - '**/*'
   icon: build/icon.svg
   electronUpdaterCompatibility: '>= 2.16'
   category: public.app-category.developer-tools

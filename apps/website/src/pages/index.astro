@@ -2,9 +2,14 @@
 import Icon from '../components/Icon.astro'
 import workspace from '../assets/workspace.png'
 import '../styles/global.css'
+import rootPackage from '../../../../package.json'
 
 const repository = 'https://github.com/nassimna/cmux-linux-alternative'
-const documentation = `${repository}/blob/9e7b1330f38ae32fb437a26643cd2e1fb60f03ea`
+const version = rootPackage.version
+const release = `${repository}/releases/tag/v${version}`
+const releaseFiles = `${repository}/releases/download/v${version}`
+const documentation = `${repository}/blob/v${version}`
+const favicon = `${import.meta.env.BASE_URL.replace(/\/$/, '')}/favicon.svg`
 const description =
   'Connect your servers. Keep terminals, local browser previews, and context together. Let your shell or agent app drive Ternline through the CLI.'
 const screenshotDescription =
@@ -55,7 +60,7 @@ const sessions = [
     <meta property="og:type" content="website" />
     <meta property="og:title" content="Ternline — Local or remote. One place to work." />
     <meta property="og:description" content={description} />
-    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="icon" href={favicon} type="image/svg+xml" />
     <title>Ternline — Local or remote. One place to work.</title>
   </head>
   <body id="top" class="font-sans text-ink antialiased">
@@ -75,7 +80,7 @@ const sessions = [
             href="#top"
             class="flex items-center gap-2.5 text-[21px] font-semibold tracking-[-0.8px]"
           >
-            <img src="/favicon.svg" width="32" height="32" alt="" />
+            <img src={favicon} width="32" height="32" alt="" />
             Ternline
           </a>
           <div class="flex items-center gap-4 text-xs text-muted sm:gap-[27px]">
@@ -116,16 +121,20 @@ const sessions = [
             Let your shell or agent app drive the workspace through the CLI.
           </p>
           <div class="flex flex-wrap items-center justify-center gap-3">
-            <a href="#ssh" class="button bg-accent text-[#15121e] hover:bg-[#c2b4ff]">
-              Explore SSH workspaces
-              <Icon name="arrow" class="size-4" />
+            <a
+              id="recommended-download"
+              href="#downloads"
+              class="button bg-accent text-[#15121e] hover:bg-[#c2b4ff]"
+            >
+              <span id="download-label">Download Ternline</span>
+              <Icon name="download" class="size-4" />
             </a>
             <a
-              href={`${documentation}/README.md`}
+              href="#ssh"
               class="button border-line text-ink hover:border-accent/50 hover:bg-white/5"
             >
-              Build from source
-              <Icon name="code" class="size-4" />
+              Explore SSH workspaces
+              <Icon name="arrow" class="size-4" />
             </a>
           </div>
           <p class="mt-[15px] text-[11px] text-muted">Pre-alpha · Cross-platform · Open source</p>
@@ -253,6 +262,130 @@ const sessions = [
         </section>
 
         <section
+          id="downloads"
+          aria-labelledby="downloads-title"
+          class="pt-[65px] pb-6 md:pt-[90px]"
+        >
+          <div class="mb-8 flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+            <div>
+              <p class="eyebrow mb-4">Start your next workspace</p>
+              <h2
+                id="downloads-title"
+                class="text-[clamp(33px,3.3vw,46px)] leading-[1.12] font-medium tracking-[-1.7px]"
+              >
+                Download Ternline.
+              </h2>
+            </div>
+            <div class="text-[13px] leading-relaxed text-muted">
+              <a href={release} class="text-accent underline underline-offset-4">
+                v{version} · Pre-release
+              </a>
+              <p id="download-suggestion" aria-live="polite">
+                Choose your operating system below.
+              </p>
+            </div>
+          </div>
+          <div class="grid gap-4 md:grid-cols-3">
+            <article
+              id="download-mac"
+              class="min-w-0 rounded-md border border-line bg-white/[0.025] p-6"
+            >
+              <h3 class="text-xl font-medium">macOS</h3>
+              <p class="mt-2 mb-6 text-xs leading-relaxed text-muted">
+                Choose the chip in your Mac.
+              </p>
+              <div class="flex flex-col gap-3 text-[13px]">
+                <a
+                  data-download="mac-arm64"
+                  href={`${releaseFiles}/agent-workspace-${version}-macos-arm64.dmg`}
+                  class="inline-flex items-center justify-between gap-2 rounded border border-line px-3 py-3 hover:border-accent"
+                >
+                  Apple Silicon · DMG <Icon name="download" class="size-4 shrink-0" />
+                </a>
+                <a
+                  data-download="mac-x64"
+                  href={`${releaseFiles}/agent-workspace-${version}-macos-x64.dmg`}
+                  class="inline-flex items-center justify-between gap-2 rounded border border-line px-3 py-3 hover:border-accent"
+                >
+                  Intel · DMG <Icon name="download" class="size-4 shrink-0" />
+                </a>
+              </div>
+            </article>
+            <article
+              id="download-windows"
+              class="min-w-0 rounded-md border border-line bg-white/[0.025] p-6"
+            >
+              <h3 class="text-xl font-medium">Windows</h3>
+              <p class="mt-2 mb-6 text-xs leading-relaxed text-muted">
+                64-bit installer for x64 PCs.
+              </p>
+              <a
+                data-download="windows-x64"
+                href={`${releaseFiles}/agent-workspace-${version}-windows-x64-setup.exe`}
+                class="inline-flex w-full items-center justify-between gap-2 rounded border border-line px-3 py-3 text-[13px] hover:border-accent"
+              >
+                Windows x64 · EXE <Icon name="download" class="size-4 shrink-0" />
+              </a>
+            </article>
+            <article
+              id="download-linux"
+              class="min-w-0 rounded-md border border-line bg-white/[0.025] p-6"
+            >
+              <h3 class="text-xl font-medium">Linux</h3>
+              <p class="mt-2 mb-6 text-xs leading-relaxed text-muted">
+                x86_64 packages for your distribution.
+              </p>
+              <a
+                data-download="linux-x64"
+                href={`${releaseFiles}/agent-workspace-${version}-x86_64.AppImage`}
+                class="inline-flex w-full items-center justify-between gap-2 rounded border border-line px-3 py-3 text-[13px] hover:border-accent"
+              >
+                Linux x64 · AppImage <Icon name="download" class="size-4 shrink-0" />
+              </a>
+              <div class="mt-4 flex flex-wrap gap-5 text-xs text-muted">
+                <a
+                  href={`${releaseFiles}/agent-workspace-${version}-x86_64.deb`}
+                  class="underline underline-offset-4 hover:text-ink"
+                >
+                  Debian / Ubuntu
+                </a>
+                <a
+                  href={`${releaseFiles}/agent-workspace-${version}-x86_64.rpm`}
+                  class="underline underline-offset-4 hover:text-ink"
+                >
+                  Fedora / RHEL
+                </a>
+              </div>
+            </article>
+          </div>
+          <div class="mt-5 flex flex-wrap items-center justify-between gap-3 text-xs leading-relaxed text-muted">
+            <p>
+              Early, unsigned builds.{' '}
+              <a
+                href={`${documentation}/docs/INSTALLATION.md`}
+                class="text-accent underline underline-offset-4"
+              >
+                Installation notes
+              </a>
+            </p>
+            <div class="flex gap-5">
+              <a
+                href={`${releaseFiles}/SHA256SUMS`}
+                class="underline underline-offset-4 hover:text-ink"
+              >
+                Checksums
+              </a>
+              <a
+                href={`${documentation}/README.md`}
+                class="underline underline-offset-4 hover:text-ink"
+              >
+                Build from source
+              </a>
+            </div>
+          </div>
+        </section>
+
+        <section
           aria-labelledby="faq-title"
           class="grid gap-[22px] pt-[53px] pb-[60px] md:grid-cols-[1fr_1.4fr] md:gap-[70px] md:pt-[75px] md:pb-[90px]"
         >
@@ -316,7 +449,8 @@ const sessions = [
                 </span>
               </summary>
               <p class="pr-6 pb-[18px] text-[13px] leading-[1.65] text-muted">
-                Ternline is cross-platform and currently pre-alpha. Check the{' '}
+                Yes. Download the current pre-release for your operating system above. Ternline is
+                cross-platform and currently pre-alpha. Check the{' '}
                 <a
                   href={`${documentation}/README.md`}
                   class="text-accent underline underline-offset-4"
@@ -384,10 +518,53 @@ const sessions = [
     </dialog>
 
     <script>
+      import { recommendedDownload } from '../lib/downloads'
+
       const dialog = document.querySelector<HTMLDialogElement>('#workspace-screenshot')!
       const openButton = document.querySelector<HTMLButtonElement>('#open-screenshot')!
 
       openButton.addEventListener('click', () => dialog.showModal())
+
+      const download = document.querySelector<HTMLAnchorElement>('#recommended-download')!
+      const label = document.querySelector<HTMLElement>('#download-label')!
+      const suggestion = document.querySelector<HTMLElement>('#download-suggestion')!
+      const hints = (
+        navigator as Navigator & {
+          userAgentData?: {
+            platform: string
+            getHighEntropyValues(
+              values: string[]
+            ): Promise<{ architecture?: string; bitness?: string }>
+          }
+        }
+      ).userAgentData
+      const browser = {
+        platform: hints?.platform ?? navigator.platform,
+        userAgent: navigator.userAgent,
+        maxTouchPoints: navigator.maxTouchPoints
+      }
+      function suggestDownload(architecture?: string, bitness?: string) {
+        const recommendation = recommendedDownload({ ...browser, architecture, bitness })
+        if (!recommendation) return
+        const names = { mac: 'macOS', windows: 'Windows', linux: 'Linux' }
+        const name = names[recommendation.os]
+        const asset =
+          recommendation.asset &&
+          document.querySelector<HTMLAnchorElement>(`[data-download="${recommendation.asset}"]`)
+        download.href = asset?.href ?? `#download-${recommendation.os}`
+        label.textContent = asset ? `Download for ${name}` : `Choose your ${name} download`
+        suggestion.textContent = `Suggested for your device: ${name}. All downloads are available below.`
+        document
+          .querySelector(`#download-${recommendation.os}`)
+          ?.classList.replace('border-line', 'border-accent')
+      }
+      suggestDownload()
+      if (hints) {
+        void hints
+          .getHighEntropyValues(['architecture', 'bitness'])
+          .then(({ architecture, bitness }) => suggestDownload(architecture, bitness))
+          .catch(() => {})
+      }
     </script>
   </body>
 </html>

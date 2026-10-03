@@ -86,7 +86,7 @@ export class TerminalService {
       throw new TerminalServiceError('invalid_configured_shell', 'Configured shell is not usable')
     }
     const metadata = await stat(shell).catch(() => undefined)
-    if (!metadata?.isFile() || (metadata.mode & 0o111) === 0) {
+    if (!metadata?.isFile() || (process.platform !== 'win32' && (metadata.mode & 0o111) === 0)) {
       throw new TerminalServiceError('invalid_configured_shell', 'Configured shell is not usable')
     }
   }

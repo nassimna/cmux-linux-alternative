@@ -14,7 +14,10 @@ function executablePath(context) {
     return join(context.appOutDir, `${productFilename}.app`, 'Contents', 'MacOS', productFilename)
   }
   if (context.electronPlatformName === 'win32') {
-    return join(context.appOutDir, `${productFilename}.exe`)
+    return join(
+      context.appOutDir,
+      `${context.packager.platformSpecificBuildOptions.executableName || productFilename}.exe`
+    )
   }
   return join(context.appOutDir, context.packager.executableName)
 }
@@ -97,13 +100,28 @@ export default async function applyProductionFuses(context) {
       mode: 0o755
     })
   }
+  if (context.electronPlatformName === 'win32') {
+    const cliDirectory = join(context.appOutDir, 'resources', 'cli')
+    await mkdir(cliDirectory, { recursive: true })
+    await writeFile(
+      join(cliDirectory, 'ternline-cli.cmd'),
+      `@echo off
+setlocal
+set ELECTRON_RUN_AS_NODE=1
+set NODE_OPTIONS=
+set NODE_PATH=
+set ELECTRON_NO_ASAR=
+"%~dp0..\\..\\agent-workspace.exe" "%~dp0..\\app.asar\\cli\\dist\\bin.mjs" %*
+exit /b %errorlevel%
+`
+    )
+  }
   await flipFuses(executablePath(context), {
     version: FuseVersion.V1,
     resetAdHocDarwinSignature: context.electronPlatformName === 'darwin' && context.arch === 3,
     strictlyRequireAllFuses: true,
-    // The packaged Mac sidecar uses Electron's embedded Node runtime. Linux
-    // keeps RunAsNode disabled because it launches the staged Node binary.
-    [FuseV1Options.RunAsNode]: context.electronPlatformName === 'darwin',
+    // macOS and Windows use Electron's embedded Node runtime for the sidecar and CLI.
+    [FuseV1Options.RunAsNode]: context.electronPlatformName !== 'linux',
     [FuseV1Options.EnableCookieEncryption]: true,
     [FuseV1Options.EnableNodeOptionsEnvironmentVariable]: false,
     [FuseV1Options.EnableNodeCliInspectArguments]: false,

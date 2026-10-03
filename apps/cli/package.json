@@ -8,7 +8,7 @@
     "agent-workspace-node": "./dist/bin.mjs"
   },
   "scripts": {
-    "build": "esbuild src/bin.ts --bundle --platform=node --format=esm --outfile=dist/bin.mjs",
+    "build": "esbuild src/bin.ts --bundle --platform=node --format=esm --external:koffi --outfile=dist/bin.mjs",
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {

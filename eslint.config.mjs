@@ -29,6 +29,7 @@ export default tseslint.config(
           './apps/web/tsconfig.node.json',
           './apps/server/tsconfig.json',
           './apps/cli/tsconfig.json',
+          './apps/website/tsconfig.json',
           './packages/client-runtime/tsconfig.json',
           './packages/contracts/tsconfig.json',
           './packages/protocol-client/tsconfig.json'

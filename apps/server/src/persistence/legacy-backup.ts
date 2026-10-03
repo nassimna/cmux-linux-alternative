@@ -1,9 +1,15 @@
 import { randomUUID } from 'node:crypto'
 import { constants } from 'node:fs'
+import { existsSync } from 'node:fs'
 import { chmod, link, lstat, open, unlink } from 'node:fs/promises'
 import { basename, dirname, join } from 'node:path'
 
 import Database from 'better-sqlite3'
+import {
+  assertWindowsPrivatePath,
+  createWindowsPrivateFile,
+  ensureWindowsPrivateDirectory
+} from '@agent-workspace/client-runtime'
 
 import { inspectLegacyDatabase, type LegacyDatabaseReport } from './legacy-inspection'
 
@@ -24,17 +30,32 @@ export async function backupLegacyDatabase(
   if (!source.isFile() || source.isSymbolicLink()) {
     throw new Error('State database must be a regular file, not a symbolic link')
   }
+  if (process.platform === 'win32') {
+    for (const path of [sourcePath, `${sourcePath}-wal`, `${sourcePath}-shm`]) {
+      if (existsSync(path)) assertWindowsPrivatePath(path)
+    }
+  }
   inspectLegacyDatabase(sourcePath)
 
   const directory = dirname(destinationPath)
+  if (process.platform === 'win32') ensureWindowsPrivateDirectory(directory)
   const parent = await lstat(directory)
-  if (!parent.isDirectory() || parent.isSymbolicLink() || (parent.mode & 0o077) !== 0) {
+  if (
+    !parent.isDirectory() ||
+    parent.isSymbolicLink() ||
+    (process.platform !== 'win32' && (parent.mode & 0o077) !== 0)
+  ) {
     throw new Error('Backup directory must be a private, real directory')
   }
+  if (process.platform === 'win32') assertWindowsPrivatePath(directory, true)
   const temporaryPath = join(directory, `.${basename(destinationPath)}.${randomUUID()}.tmp`)
+  if (process.platform === 'win32') createWindowsPrivateFile(temporaryPath)
   const temporary = await open(
     temporaryPath,
-    constants.O_CREAT | constants.O_EXCL | constants.O_RDWR | constants.O_NOFOLLOW,
+    constants.O_RDWR |
+      (process.platform === 'win32'
+        ? 0
+        : constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW),
     0o600
   )
   await temporary.close()
@@ -64,7 +85,13 @@ export async function backupLegacyDatabase(
       compacted.close()
     }
 
-    await chmod(temporaryPath, 0o600)
+    if (process.platform === 'win32') assertWindowsPrivatePath(temporaryPath)
+    else await chmod(temporaryPath, 0o600)
+    if (process.platform === 'win32') {
+      for (const path of [`${temporaryPath}-wal`, `${temporaryPath}-shm`]) {
+        if (existsSync(path)) assertWindowsPrivatePath(path)
+      }
+    }
     const verified = new Database(temporaryPath, { readonly: true, fileMustExist: true })
     try {
       const result = verified.prepare('PRAGMA integrity_check(1)').get() as {
@@ -77,7 +104,10 @@ export async function backupLegacyDatabase(
       verified.close()
     }
     const report = inspectLegacyDatabase(temporaryPath)
-    const file = await open(temporaryPath, constants.O_RDONLY | constants.O_NOFOLLOW)
+    const file = await open(
+      temporaryPath,
+      constants.O_RDONLY | (process.platform === 'win32' ? 0 : constants.O_NOFOLLOW)
+    )
     try {
       await file.sync()
     } finally {
@@ -87,6 +117,10 @@ export async function backupLegacyDatabase(
     // Unlike rename(), it cannot silently replace an existing user backup.
     await link(temporaryPath, destinationPath)
     await unlink(temporaryPath)
+    if (process.platform === 'win32') {
+      assertWindowsPrivatePath(destinationPath)
+      return { path: destinationPath, database: report }
+    }
     const parent = await open(
       directory,
       constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW
