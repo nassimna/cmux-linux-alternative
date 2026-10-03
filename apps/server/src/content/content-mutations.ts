@@ -1,3 +1,4 @@
+import { assertWindowsPrivatePath } from '@agent-workspace/client-runtime'
 import { lstatSync } from 'node:fs'
 
 import Database from 'better-sqlite3'
@@ -118,7 +119,12 @@ export class ContentMutations {
         if (path !== databasePath && (error as NodeJS.ErrnoException).code === 'ENOENT') continue
         fail('runtime_unavailable', 'Content database is unavailable')
       }
-      if (!file.isFile() || file.isSymbolicLink() || (file.mode & 0o077) !== 0) {
+      if (process.platform === 'win32') assertWindowsPrivatePath(path)
+      if (
+        !file.isFile() ||
+        file.isSymbolicLink() ||
+        (process.platform !== 'win32' && (file.mode & 0o077) !== 0)
+      ) {
         fail('runtime_unavailable', 'Content database must be a private regular file')
       }
     }

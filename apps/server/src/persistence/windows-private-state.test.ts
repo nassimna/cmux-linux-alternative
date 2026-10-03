@@ -1,6 +1,6 @@
 import { spawn, spawnSync } from 'node:child_process'
 import { once } from 'node:events'
-import { mkdtemp, rename, rm, symlink, writeFile } from 'node:fs/promises'
+import { mkdtemp, readFile, rename, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -18,8 +18,43 @@ import { durableApplicationStateSchema } from '@agent-workspace/contracts'
 
 import { closeTab } from '../domain/workspace-mutations'
 import { reopenClosedTab } from '../domain/recently-closed-mutations'
+import { DiagnosticService } from '../diagnostics/diagnostic-service'
+import { RotatingDiagnosticLog } from '../diagnostics/rotating-log'
 import { ApplicationStateStore } from './application-state-store'
 import { LiveOwnerLock } from './live-owner-lock'
+
+it.skipIf(process.platform !== 'win32')(
+  'keeps diagnostics private without changing the chosen export directory permissions',
+  async () => {
+    const root = await mkdtemp(join(tmpdir(), 'agent-workspace-windows-diagnostics-'))
+    const logs = join(root, 'logs')
+    const before = spawnSync('icacls.exe', [root], { encoding: 'utf8' }).stdout
+    try {
+      const writer = new RotatingDiagnosticLog(logs)
+      writer.writeLine('password=private-test-value')
+      writer.close()
+      assertWindowsPrivatePath(join(logs, 'diagnostics.jsonl'))
+      const service = new DiagnosticService({
+        logDirectory: logs,
+        application: 'agent-workspace',
+        version: '0.2.0-beta.1',
+        platform: 'windows',
+        recovery: 'healthy',
+        configurationSummary: {}
+      })
+      const destination = join(root, 'diagnostics.json')
+      const preview = service.preview()
+      service.export(destination, preview)
+      assertWindowsPrivatePath(destination)
+      expect(await readFile(destination, 'utf8')).not.toContain('private-test-value')
+      expect(spawnSync('icacls.exe', [root], { encoding: 'utf8' }).stdout).toBe(before)
+      expect(spawnSync('icacls.exe', [destination, '/grant', '*S-1-1-0:(R)']).status).toBe(0)
+      expect(() => assertWindowsPrivatePath(destination)).toThrow('owner-only')
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  }
+)
 
 it.skipIf(process.platform !== 'win32')(
   'rejects reparse points and access granted to another user',

@@ -105,6 +105,7 @@ async function launch(previousToken) {
     stdio: ['ignore', 'pipe', 'pipe'],
     env: {
       ...process.env,
+      AGENT_WORKSPACE_DEBUG_STARTUP: '1',
       ...(platform === 'linux'
         ? {
             XDG_RUNTIME_DIR: join(profile, 'runtime'),

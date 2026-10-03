@@ -1,3 +1,4 @@
+import { assertWindowsPrivatePath } from '@agent-workspace/client-runtime'
 import { createHash } from 'node:crypto'
 import { lstatSync } from 'node:fs'
 
@@ -211,7 +212,12 @@ export class SettingsMutations {
         if (path !== databasePath && (error as NodeJS.ErrnoException).code === 'ENOENT') continue
         fail('runtime_unavailable', 'Settings database is unavailable')
       }
-      if (!file.isFile() || file.isSymbolicLink() || (file.mode & 0o077) !== 0) {
+      if (process.platform === 'win32') assertWindowsPrivatePath(path)
+      if (
+        !file.isFile() ||
+        file.isSymbolicLink() ||
+        (process.platform !== 'win32' && (file.mode & 0o077) !== 0)
+      ) {
         fail('runtime_unavailable', 'Settings database must be a private regular file')
       }
     }

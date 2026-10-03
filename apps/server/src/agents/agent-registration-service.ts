@@ -1,3 +1,4 @@
+import { assertWindowsPrivatePath } from '@agent-workspace/client-runtime'
 import { lstatSync, realpathSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join, resolve } from 'node:path'
@@ -57,7 +58,12 @@ export class AgentRegistrationService {
         if (path !== databasePath && (error as NodeJS.ErrnoException).code === 'ENOENT') continue
         throw new AgentMutationError('runtime_unavailable', 'Agent database is unavailable')
       }
-      if (!file.isFile() || file.isSymbolicLink() || (file.mode & 0o077) !== 0) {
+      if (process.platform === 'win32') assertWindowsPrivatePath(path)
+      if (
+        !file.isFile() ||
+        file.isSymbolicLink() ||
+        (process.platform !== 'win32' && (file.mode & 0o077) !== 0)
+      ) {
         throw new AgentMutationError(
           'runtime_unavailable',
           'Agent database must be a private regular file'

@@ -8,12 +8,14 @@ import {
   lstatSync,
   openSync,
   readSync,
+  realpathSync,
   unlinkSync,
   writeSync
 } from 'node:fs'
 import { dirname, isAbsolute, join, parse, resolve, sep } from 'node:path'
 
 import { diagnosticBundlePreviewSchema } from '@agent-workspace/protocol-client'
+import { assertWindowsPrivatePath, createWindowsPrivateFile } from '@agent-workspace/client-runtime'
 
 import { redact } from './redact'
 
@@ -60,17 +62,21 @@ export function verifyDirectory(directory: string, ownerOnly = true): void {
     const stat = lstatSync(current)
     if (!stat.isDirectory() || stat.isSymbolicLink()) fail('Unsafe diagnostics directory')
   }
-  if (ownerOnly && (lstatSync(absolute).mode & 0o077) !== 0)
+  if (process.platform === 'win32') {
+    if (realpathSync(absolute) !== absolute) fail('Unsafe diagnostics directory')
+    if (ownerOnly) assertWindowsPrivatePath(absolute, true)
+  } else if (ownerOnly && (lstatSync(absolute).mode & 0o077) !== 0)
     fail('Diagnostics directory is not owner-only')
 }
 
 function verifyPrivateLogFile(path: string): { device: number; inode: number } {
+  if (process.platform === 'win32') assertWindowsPrivatePath(path)
   const before = lstatSync(path)
   if (
     !before.isFile() ||
     before.isSymbolicLink() ||
     before.nlink !== 1 ||
-    (before.mode & 0o077) !== 0
+    (process.platform !== 'win32' && (before.mode & 0o077) !== 0)
   )
     fail('Unsafe diagnostics file')
   return { device: before.dev, inode: before.ino }
@@ -92,7 +98,7 @@ function readLogTail(directory: string): { bytes: Buffer; clipped: boolean } | u
     if (
       !stat.isFile() ||
       stat.nlink !== 1 ||
-      (stat.mode & 0o077) !== 0 ||
+      (process.platform !== 'win32' && (stat.mode & 0o077) !== 0) ||
       stat.ino !== identity.inode ||
       stat.dev !== identity.device
     )
@@ -220,18 +226,29 @@ export class DiagnosticService {
       fail('Unsafe diagnostic destination')
     verifyDirectory(dirname(destination), false)
     const temp = join(dirname(destination), `.diagnostic-export-${randomUUID()}.tmp`)
+    if (process.platform === 'win32') createWindowsPrivateFile(temp)
     const fd = openSync(
       temp,
-      constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW,
+      constants.O_WRONLY |
+        (process.platform === 'win32'
+          ? 0
+          : constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW),
       0o600
     )
+    let published = false
     try {
       const stat = fstatSync(fd)
-      if (!stat.isFile() || stat.nlink !== 1 || (stat.mode & 0o077) !== 0)
+      if (
+        !stat.isFile() ||
+        stat.nlink !== 1 ||
+        (process.platform !== 'win32' && (stat.mode & 0o077) !== 0)
+      )
         fail('Unsafe diagnostic destination')
+      if (process.platform === 'win32') assertWindowsPrivatePath(temp)
       let written = 0
       while (written < approval.bytes.length) written += writeSync(fd, approval.bytes, written)
       fsyncSync(fd)
+      verifyDirectory(dirname(destination), false)
       try {
         linkSync(temp, destination)
       } catch (error) {
@@ -239,10 +256,12 @@ export class DiagnosticService {
           fail('Diagnostic export destination already exists')
         throw error
       }
+      published = true
       return { path: destination, bytes: approval.bytes.length }
     } finally {
       closeSync(fd)
       unlinkSync(temp)
+      if (published && process.platform === 'win32') assertWindowsPrivatePath(destination)
     }
   }
 

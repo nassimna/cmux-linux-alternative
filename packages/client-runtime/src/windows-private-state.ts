@@ -323,7 +323,7 @@ export function assertWindowsPrivatePath(path: string, directory = false): strin
 }
 
 export function createWindowsPrivateFile(path: string): void {
-  ensureWindowsPrivateDirectory(dirname(path))
+  canonical(path)
   const win = api()
   const descriptor = privateDescriptor(win, false)
   try {

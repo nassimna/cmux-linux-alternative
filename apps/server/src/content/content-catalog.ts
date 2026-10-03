@@ -1,3 +1,4 @@
+import { assertWindowsPrivatePath } from '@agent-workspace/client-runtime'
 import { lstatSync } from 'node:fs'
 
 import Database from 'better-sqlite3'
@@ -145,8 +146,13 @@ export class ContentCatalog {
   private readonly database: Database.Database
 
   constructor(databasePath: string) {
+    if (process.platform === 'win32') assertWindowsPrivatePath(databasePath)
     const file = lstatSync(databasePath)
-    if (!file.isFile() || file.isSymbolicLink() || (file.mode & 0o077) !== 0) {
+    if (
+      !file.isFile() ||
+      file.isSymbolicLink() ||
+      (process.platform !== 'win32' && (file.mode & 0o077) !== 0)
+    ) {
       throw new Error('Content database must be a private regular file')
     }
     this.database = new Database(databasePath, {

@@ -1,3 +1,4 @@
+import { assertWindowsPrivatePath } from '@agent-workspace/client-runtime'
 import { lstatSync } from 'node:fs'
 
 import Database from 'better-sqlite3'
@@ -116,8 +117,13 @@ export class TaskCatalog {
     databasePath: string,
     private readonly providers: TaskProviderAvailability
   ) {
+    if (process.platform === 'win32') assertWindowsPrivatePath(databasePath)
     const file = lstatSync(databasePath)
-    if (!file.isFile() || file.isSymbolicLink() || (file.mode & 0o077) !== 0) {
+    if (
+      !file.isFile() ||
+      file.isSymbolicLink() ||
+      (process.platform !== 'win32' && (file.mode & 0o077) !== 0)
+    ) {
       throw new TaskCatalogError('invalid_state', 'Task database must be a private regular file')
     }
     this.database = new Database(databasePath, {
