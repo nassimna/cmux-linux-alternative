@@ -165,7 +165,7 @@ function privateDescriptor(win: ReturnType<typeof api>, directory: boolean): unk
     const text: unknown[] = [null]
     if (!win.sidText(sid, text)) throw new Error('Unable to format Windows user SID')
     try {
-      const owner = win.koffi.decode.string16(text[0] as bigint)
+      const owner = win.koffi.decode.string16(text[0])
       const descriptor: unknown[] = [null]
       if (
         !win.descriptor(

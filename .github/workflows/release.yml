@@ -128,13 +128,15 @@ jobs:
           scripts/release/verify-downloaded-artifacts.sh release-linux-x64 "$RELEASE_VERSION"
       - name: Exercise packaged Linux service, CLI, and PTY
         if: matrix.label == 'linux-x64'
-        run: >-
-          xvfb-run -a node scripts/release/verify-native-package.mjs
-          --platform linux
-          --executable release-linux-x64/linux-unpacked/agent-workspace
-          --cli release-linux-x64/linux-unpacked/resources/node-linux/bin/node
-          --cli-entry release-linux-x64/linux-unpacked/resources/node-linux/bin/agent-workspace-node.mjs
-          --profile-root "$RUNNER_TEMP"
+        run: |
+          sudo chown root:root release-linux-x64/linux-unpacked/chrome-sandbox
+          sudo chmod 4755 release-linux-x64/linux-unpacked/chrome-sandbox
+          xvfb-run -a node scripts/release/verify-native-package.mjs \
+            --platform linux \
+            --executable release-linux-x64/linux-unpacked/agent-workspace \
+            --cli release-linux-x64/linux-unpacked/resources/node-linux/bin/node \
+            --cli-entry release-linux-x64/linux-unpacked/resources/node-linux/bin/agent-workspace-node.mjs \
+            --profile-root "$RUNNER_TEMP"
       - name: Exercise packaged macOS service, CLI, and PTY
         if: startsWith(matrix.label, 'macos-')
         run: |
