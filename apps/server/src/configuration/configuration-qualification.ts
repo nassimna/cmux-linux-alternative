@@ -17,6 +17,7 @@ import type { ApplicationStateStore } from '../persistence/application-state-sto
 import { validateEffectiveShortcuts } from '../persistence/settings-mutations'
 import { TerminalService } from '../terminal/terminal-service'
 import { serviceLogger, type ServiceLogger } from '../logging/service-logger'
+import { version } from '../../../../package.json'
 
 const MAX_CONFIG_BYTES = 1024 * 1024
 const MAX_NODES = 4096
@@ -34,6 +35,7 @@ const SECTIONS = [
 ] as const
 
 type Snapshot = ReturnType<typeof configurationGetResultSchema.parse>['config']
+const releaseChannel = version.split('-')[1]?.split('.')[0]
 
 const DEFAULTS: Snapshot = {
   schemaVersion: 2,
@@ -54,7 +56,10 @@ const DEFAULTS: Snapshot = {
   notifications: { systemEnabled: true, includeBody: false },
   keyboardShortcuts: { overrides: {} },
   agentIntegration: { enabled: true, notificationsEnabled: true, browserEnabled: true },
-  updates: { channel: 'stable', automatic: false },
+  updates: {
+    channel: releaseChannel === 'alpha' || releaseChannel === 'beta' ? releaseChannel : 'stable',
+    automatic: false
+  },
   logging: { level: 'info' }
 }
 

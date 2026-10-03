@@ -8,8 +8,9 @@ builds the Signal website with matching, versioned download URLs.
 ## Prepare and qualify
 
 1. Set the same semantic version in the root and desktop manifests, including the desktop
-   checksum and verification scripts. Use an `-alpha.N` suffix for unsigned prereleases and select the app's
-   Alpha update channel to receive them.
+   checksum and verification scripts. Use an `-alpha.N` suffix for unsigned prereleases. Every new
+   version must be greater than the previously published version: advance `alpha.N` or the base
+   version; changing `beta` to `alpha` on the same base version is a downgrade.
 2. Add a non-empty versioned section to `CHANGELOG.md` and keep `[Unreleased]` for future work.
 3. Run affected tests and `pnpm release:validate --version x.y.z --mode candidate --tag vx.y.z`.
 4. Dispatch **Release** from the PR branch with `version: VERSION` and `publish: false` to build
@@ -29,6 +30,9 @@ Each native build first launches the packaged app with a new, isolated user-data
 waits for the authenticated Node service, and exercises the packaged CLI and a real PTY. Windows
 checks the installed NSIS package. All platforms exercise browser automation and workspace
 persistence across restart. Linux also inspects AppImage/deb/rpm contents and hashes.
+Fresh profiles default to the release's channel (Alpha, Beta, or Stable), with automatic updates
+off until the user opts in. Saved channel and automatic-update preferences survive upgrades.
+Native smoke checks verify the Alpha default and that automatic-update settings persist on restart.
 
 Windows private writers set their own process token's default object owner to the current user,
 so SQLite-created journals, WAL and SHM files retain the same owner-only proof as explicitly
@@ -47,6 +51,20 @@ The release contains:
 Publication rejects colliding artifact names and verifies every expected installer is present.
 The macOS updater manifest combines both architectures and retains their individual hashes.
 Do not replace a published release's assets in place; ship a new version for corrections.
+
+## In-app updates
+
+Open **Settings → Updates**, select the channel, enable **Automatically check and download
+updates**, and save the section. The app checks immediately, checks again on each launch, and
+checks every six hours while running. Downloads happen in the background; **Restart to update**
+applies the update only when the user chooses. Automatic updates never restart an active workspace.
+
+Alpha follows alpha, beta, and stable releases; Beta follows beta and stable; Stable follows stable.
+The updater reads platform metadata from GitHub Releases and rejects equal or lower versions.
+Existing beta installations need a one-time manual alpha install, then must select Alpha if their
+saved channel is Beta or Stable. Deleting old GitHub releases does not change installed preferences.
+Unsigned macOS builds require manual installation;
+[macOS auto-installation requires signing](https://www.electron.build/docs/features/auto-update/).
 
 ## Signing and qualification limits
 

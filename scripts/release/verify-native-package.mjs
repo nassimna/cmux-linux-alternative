@@ -41,9 +41,12 @@ try {
   await request(new URL('v1/system/identify', session.baseUrl), headers)
   await request(new URL('v1/state/snapshot', session.baseUrl), headers)
   const configuration = await request(new URL('v1/configuration', session.baseUrl), headers)
+  if (configuration.config.updates.channel !== 'alpha') {
+    throw new Error('A fresh alpha installation must default to the Alpha update channel.')
+  }
   await request(new URL('v1/configuration/update', session.baseUrl), headers, {
     expectedRevision: configuration.config.revision,
-    update: { updates: { channel: 'alpha' } }
+    update: { updates: { channel: 'alpha', automatic: true } }
   })
   await runCli(['identify'])
   if (platform === 'windows') {
@@ -94,8 +97,11 @@ try {
   const restoredConfiguration = await request(new URL('v1/configuration', restarted.baseUrl), {
     authorization: `Bearer ${restarted.token}`
   })
-  if (restoredConfiguration.config.updates.channel !== 'alpha') {
-    throw new Error('Alpha update selection did not persist across application restart.')
+  if (
+    restoredConfiguration.config.updates.channel !== 'alpha' ||
+    restoredConfiguration.config.updates.automatic !== true
+  ) {
+    throw new Error('Automatic Alpha update settings did not persist across application restart.')
   }
   const restored = JSON.parse(await runCli(['workspace', 'list']))
   if (!restored.snapshot.workspaces.some((workspace) => workspace.id === created.workspaceId)) {
