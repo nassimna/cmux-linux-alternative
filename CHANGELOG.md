@@ -7,6 +7,19 @@ will become binding at version 1.0.
 
 ## [Unreleased]
 
+## [0.2.0-alpha.2] - 2026-10-03
+
+### Fixed
+
+- Fresh profiles select the packaged release's update channel instead of always selecting Stable.
+- Saved update-channel and automatic-download preferences remain intact across restarts and upgrades.
+
+### Changed
+
+- Native release checks verify the Alpha default and persistent automatic-update opt-in.
+- Release guidance documents background checks/downloads, explicit restart, version ordering,
+  and the signing requirement for macOS automatic installation.
+
 ## [0.2.0-alpha.1] - 2026-10-03
 
 ### Added

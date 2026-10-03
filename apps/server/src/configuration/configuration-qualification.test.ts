@@ -2,7 +2,7 @@ import { mkdtemp, symlink, writeFile, chmod, rm, readFile } from 'node:fs/promis
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import type { ApplicationStateStore } from '../persistence/application-state-store'
 import { ServiceLogger } from '../logging/service-logger'
@@ -68,6 +68,28 @@ async function fixture(config: unknown, terminals?: TerminalService, logger?: Se
 }
 
 describe('configuration qualification', () => {
+  it.each([
+    ['0.2.0-alpha.2', 'alpha'],
+    ['0.2.0-beta.2', 'beta'],
+    ['0.2.0', 'stable']
+  ])('defaults %s to %s and preserves saved update preferences', async (version, channel) => {
+    vi.resetModules()
+    vi.doMock('../../../../package.json', () => ({ version }))
+    const { ConfigurationQualification: ReleaseConfiguration } =
+      await import('./configuration-qualification')
+    vi.doUnmock('../../../../package.json')
+    const { directory, path, state } = await fixture({ schemaVersion: 2 })
+    await rm(path)
+    const service = await ReleaseConfiguration.create(join(directory, 'state.db'), state, true)
+    expect((await service.get()).config.updates).toEqual({ channel, automatic: false })
+    await service.update({
+      expectedRevision: 0,
+      update: { updates: { channel: 'stable', automatic: true } }
+    })
+    const reopened = await ReleaseConfiguration.create(join(directory, 'state.db'), state, true)
+    expect((await reopened.get()).config.updates).toEqual({ channel: 'stable', automatic: true })
+  })
+
   it('defaults automatic updates off for existing profiles and persists opt-in across reopen', async () => {
     const { service, directory, state } = await fixture({
       schemaVersion: 2,
