@@ -6,7 +6,7 @@
   "main": "./out/main/index.js",
   "description": "Terminal workspace for local and remote development",
   "author": "Ternline contributors",
-  "homepage": "https://github.com/nassimna/cmux-linux-alternative",
+  "homepage": "https://github.com/nassimna/ternline",
   "desktopName": "agent-workspace",
   "license": "GPL-3.0-or-later",
   "scripts": {

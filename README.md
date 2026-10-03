@@ -7,7 +7,7 @@ sessions. It does not copy another product's source, assets, identity, or tradem
 
 This is alpha software. Milestones 0–5 are established on the documented Linux reference host.
 Milestone 6 release-candidate work is implemented in substantial part but remains in validation;
-unsigned prereleases are distributed through [GitHub Releases](https://github.com/nassimna/cmux-linux-alternative/releases) and the [website](https://nassimna.github.io/cmux-linux-alternative/). There is no signed stable release or public support guarantee.
+unsigned prereleases are distributed through [GitHub Releases](https://github.com/nassimna/ternline/releases) and the [website](https://nassimna.github.io/ternline/). There is no signed stable release or public support guarantee.
 
 ## What works
 

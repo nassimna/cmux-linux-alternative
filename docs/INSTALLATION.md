@@ -1,7 +1,7 @@
 # Installation
 
-Choose your platform on the [Ternline website](https://nassimna.github.io/cmux-linux-alternative/),
-or open the [GitHub releases](https://github.com/nassimna/cmux-linux-alternative/releases).
+Choose your platform on the [Ternline website](https://nassimna.github.io/ternline/),
+or open the [GitHub releases](https://github.com/nassimna/ternline/releases).
 The website recommends your OS and offers every installer so you can choose another machine or
 architecture. On Macs that do not expose their CPU architecture to the browser, choose Apple
 Silicon or Intel manually using **About This Mac**.
