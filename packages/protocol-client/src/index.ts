@@ -496,6 +496,7 @@ export type {
 } from './schemas'
 
 export {
+  absolutePathSchema,
   authorizedDocumentKindSchema,
   contentDocumentIssueParamsSchema,
   contentDocumentIssueResultSchema,

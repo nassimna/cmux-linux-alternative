@@ -9,6 +9,7 @@ function loadApi() {
     lpSecurityDescriptor: 'void *',
     bInheritHandle: 'int32'
   })
+  const TOKEN_OWNER = koffi.struct('PRIVATE_TOKEN_OWNER', { Owner: 'void *' })
   koffi.struct('PRIVATE_FILE_INFORMATION', {
     attributes: 'uint32',
     creationLow: 'uint32',
@@ -48,6 +49,7 @@ function loadApi() {
   return {
     koffi,
     SECURITY_ATTRIBUTES,
+    TOKEN_OWNER,
     ACL_INFORMATION,
     ACE_HEADER,
     close: kernel.func('bool __stdcall CloseHandle(void *)') as (handle: unknown) => boolean,
@@ -87,6 +89,9 @@ function loadApi() {
     tokenInformation: security.func(
       'bool __stdcall GetTokenInformation(void *, int32, void *, uint32, _Out_ uint32 *)'
     ) as (token: unknown, kind: number, buffer: unknown, size: number, length: number[]) => boolean,
+    setTokenOwner: security.func(
+      'bool __stdcall SetTokenInformation(void *, int32, PRIVATE_TOKEN_OWNER *, uint32)'
+    ) as (token: unknown, kind: number, owner: { Owner: bigint }, size: number) => boolean,
     sidText: security.func('bool __stdcall ConvertSidToStringSidW(void *, _Out_ void **)') as (
       sid: bigint,
       text: unknown[]
@@ -125,6 +130,7 @@ function loadApi() {
 }
 
 let windowsApi: ReturnType<typeof loadApi> | undefined
+let userOwnsNewObjects = false
 function api(): ReturnType<typeof loadApi> {
   if (process.platform !== 'win32') throw new Error('Windows private state requires Windows')
   return (windowsApi ??= loadApi())
@@ -179,6 +185,23 @@ function privateDescriptor(win: ReturnType<typeof api>, directory: boolean): unk
       return descriptor[0]
     } finally {
       win.free(text[0])
+    }
+  })
+}
+
+function configureUserDefaultOwner(win: ReturnType<typeof api>): void {
+  if (userOwnsNewObjects) return
+  withUserSid(win, (sid) => {
+    const token: unknown[] = [null]
+    if (!win.processToken(win.currentProcess(), 0x80, token))
+      throw pathError(win, 'Unable to configure Windows private file ownership')
+    try {
+      // Elevated tokens may default to Administrators; SQLite must create user-owned journals too.
+      if (!win.setTokenOwner(token[0], 4, { Owner: sid }, win.koffi.sizeof(win.TOKEN_OWNER)))
+        throw pathError(win, 'Unable to configure Windows private file ownership')
+      userOwnsNewObjects = true
+    } finally {
+      win.close(token[0])
     }
   })
 }
@@ -275,6 +298,7 @@ export function ensureWindowsPrivateDirectory(path: string): void {
     win.free(descriptor)
   }
   assertWindowsPrivatePath(path, true)
+  configureUserDefaultOwner(win)
 }
 
 /** Validate the current user's DACL and return the handle's stable file identity. */

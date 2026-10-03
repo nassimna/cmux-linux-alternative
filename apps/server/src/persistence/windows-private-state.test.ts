@@ -13,7 +13,11 @@ import {
   readNodeSessionFile
 } from '@agent-workspace/client-runtime'
 import { expect, it } from 'vitest'
+import Database from 'better-sqlite3'
+import { durableApplicationStateSchema } from '@agent-workspace/contracts'
 
+import { closeTab } from '../domain/workspace-mutations'
+import { reopenClosedTab } from '../domain/recently-closed-mutations'
 import { ApplicationStateStore } from './application-state-store'
 import { LiveOwnerLock } from './live-owner-lock'
 
@@ -99,8 +103,67 @@ it.skipIf(process.platform !== 'win32')(
       ensureWindowsPrivateDirectory(state)
       store = await ApplicationStateStore.openNative(database, join(state, 'backup.sqlite'), root)
       expect(store.readSnapshot().workspaces).toHaveLength(1)
+      const snapshot = store.readSnapshot()
+      const workspace = snapshot.workspaces[0]!
+      const tabId = Object.keys(workspace.tabs)[0]!
+      const terminal = workspace.tabs[tabId]!.content
+      if (terminal.kind !== 'terminal') throw new Error('Expected initial terminal')
+      terminal.launch.cwd = join(root, 'child', 'nested')
+      const closedItemId = 'c3e4b3cd-03bf-4b47-806c-d25b003daec5'
+      const closed = closeTab(
+        snapshot,
+        workspace.id,
+        tabId,
+        closedItemId,
+        'b1e2af72-ac37-471a-8100-12943c80d612',
+        Date.now()
+      )
+      const target = {
+        windowId: closed.windowPlacements[0]!.id,
+        workspaceId: workspace.id,
+        paneId: workspace.selectedPaneId,
+        destinationIndex: 1,
+        expectedWindowRevision: closed.windowPlacements[0]!.revision
+      }
+      const restoredTabId = 'b2e2af72-ac37-471a-8100-12943c80d612'
+      const restored = reopenClosedTab(
+        closed,
+        closedItemId,
+        target,
+        restoredTabId,
+        'b3e2af72-ac37-471a-8100-12943c80d612',
+        Date.now()
+      )
+      expect(restored.workspaces[0]!.tabs[restoredTabId]!.content).toEqual(terminal)
+      const unsafe = closed.recentlyClosed[0]!.restore
+      if (unsafe.kind !== 'terminal') throw new Error('Expected terminal restore')
+      unsafe.root_relative_cwd = '..\\escape'
+      expect(durableApplicationStateSchema.safeParse(closed).success).toBe(false)
+      expect(() =>
+        reopenClosedTab(
+          closed,
+          closedItemId,
+          target,
+          restoredTabId,
+          'b3e2af72-ac37-471a-8100-12943c80d612',
+          Date.now()
+        )
+      ).toThrow('policy denied')
       store.close()
       store = undefined
+      const sqlite = new Database(database, { fileMustExist: true })
+      try {
+        sqlite.pragma('journal_mode = WAL')
+        sqlite.exec('CREATE TABLE windows_acl_probe (id INTEGER)')
+        for (const path of [database, `${database}-wal`, `${database}-shm`])
+          assertWindowsPrivatePath(path)
+        sqlite.pragma('journal_mode = DELETE')
+        sqlite.exec('BEGIN IMMEDIATE; INSERT INTO windows_acl_probe VALUES (1)')
+        assertWindowsPrivatePath(`${database}-journal`)
+        sqlite.exec('ROLLBACK')
+      } finally {
+        sqlite.close()
+      }
       const lock = LiveOwnerLock.acquire(database)
       try {
         await rename(database, join(state, 'old.sqlite'))

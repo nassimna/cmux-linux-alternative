@@ -6,7 +6,7 @@ import { dirname, join, resolve } from 'node:path'
 import { connect } from 'node:net'
 
 import { nodeSessionRecordSchema, type NodeSessionRecord } from '@agent-workspace/contracts'
-import { assertWindowsPrivatePath } from './windows-private-state'
+import { assertWindowsPrivatePath, createWindowsPrivateFile } from './windows-private-state'
 
 const MAX_SESSION_BYTES = 64 * 1024
 
@@ -201,12 +201,13 @@ export async function createNodeSessionFile(
   await privateDirectory(parent)
 
   const temporary = resolve(parent, `.node-cli-session-${randomUUID()}.tmp`)
+  if (process.platform === 'win32') createWindowsPrivateFile(temporary)
   const handle = await open(
     temporary,
     constants.O_WRONLY |
-      constants.O_CREAT |
-      constants.O_EXCL |
-      (process.platform === 'win32' ? 0 : constants.O_NOFOLLOW),
+      (process.platform === 'win32'
+        ? 0
+        : constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW),
     0o600
   )
   let published = false

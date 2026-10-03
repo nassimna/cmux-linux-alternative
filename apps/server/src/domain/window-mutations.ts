@@ -153,7 +153,7 @@ export function closeWindowWorkspaces(state: State, input: {
     let restore: State['recentlyClosed'][number]['restore']
     if (tab.content.kind === 'terminal') {
       const cwd = relative(workspace.workingDirectory, tab.content.launch.cwd)
-      if (isAbsolute(cwd) || cwd.split('/').some((part) => part === '.' || part === '..'))
+      if (isAbsolute(cwd) || cwd.split(/[\\/]/u).some((part) => part === '.' || part === '..'))
         throw new WindowMutationError('policy_denied', 'Terminal restore path is outside the workspace')
       restore = { kind: 'terminal', authorized_root_id: workspace.id,
         root_relative_cwd: cwd, rows: tab.content.launch.rows, cols: tab.content.launch.cols }

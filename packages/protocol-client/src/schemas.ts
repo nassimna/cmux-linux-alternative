@@ -20,12 +20,19 @@ const hasAsciiControlCharacter = (value: string): boolean =>
     const codePoint = character.codePointAt(0)
     return codePoint !== undefined && (codePoint <= 0x1f || codePoint === 0x7f)
   })
-const absolutePathSchema = z
+export const absolutePathSchema = z
   .string()
   .min(1)
-  .refine((value) => value.startsWith('/') && !value.includes('\0'), {
-    message: 'path must be an absolute UTF-8 path'
-  })
+  .refine(
+    (value) =>
+      !value.includes('\0') &&
+      (value.startsWith('/') ||
+        /^[A-Za-z]:[\\/]/u.test(value) ||
+        /^\\\\[^\\/]+[\\/][^\\/]+(?:[\\/]|$)/u.test(value)),
+    {
+      message: 'path must be an absolute UTF-8 path'
+    }
+  )
 const normalizedString = (max: number, allowEmpty = false) =>
   z
     .string()

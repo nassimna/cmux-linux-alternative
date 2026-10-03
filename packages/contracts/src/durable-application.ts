@@ -67,7 +67,9 @@ const closedRestore = z.discriminatedUnion('kind', [
       .string()
       .refine(
         (value) =>
-          !value.startsWith('/') && !value.split('/').some((part) => part === '.' || part === '..')
+          !/^(?:[\\/]|[A-Za-z]:)/u.test(value) &&
+          !value.includes('\0') &&
+          !value.split(/[\\/]/u).some((part) => part === '.' || part === '..')
       ),
     rows: z.number().int().min(1).max(1_000),
     cols: z.number().int().min(1).max(1_000)

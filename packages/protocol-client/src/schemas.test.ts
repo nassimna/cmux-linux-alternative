@@ -4,6 +4,7 @@ import { z } from 'zod'
 import { randomUUID } from 'node:crypto'
 
 import {
+  absolutePathSchema,
   actionDefinitionSchema,
   actionInvokeParamsSchema,
   actionInvocationSnapshotSchema,
@@ -87,6 +88,20 @@ import {
   multiWindowProtocolEventSchema,
   protocolEventSchema
 } from './schemas'
+
+it('accepts cross-platform absolute paths without accepting relative paths', () => {
+  for (const path of [
+    '/workspace',
+    'C:\\workspace',
+    'C:/workspace',
+    '\\\\server\\share\\workspace'
+  ]) {
+    expect(absolutePathSchema.safeParse(path).success).toBe(true)
+  }
+  for (const path of ['workspace', 'C:workspace', '\\workspace', '\\\\server', 'C:\\work\0space']) {
+    expect(absolutePathSchema.safeParse(path).success).toBe(false)
+  }
+})
 
 const milestone2Fixture: unknown = JSON.parse(
   readFileSync(new URL('../fixtures/milestone2-projection.json', import.meta.url), 'utf8')

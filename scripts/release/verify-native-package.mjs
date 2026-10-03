@@ -65,9 +65,7 @@ try {
   }
   await waitForOutput(created.terminalId)
   const address = preview.address()
-  const opened = JSON.parse(
-    await runCli(['browser', 'open', '--url', `http://127.0.0.1:${address.port}`])
-  )
+  const opened = await waitForBrowser(`http://127.0.0.1:${address.port}`)
   const sessionId = opened.session?.automationSessionId
   if (!sessionId) throw new Error('Packaged browser did not create an automation session.')
   await runCli([
@@ -165,6 +163,18 @@ async function waitForOutput(terminalId) {
     await delay(250)
   }
   throw new Error('Terminal did not return the expected PTY output.')
+}
+
+async function waitForBrowser(url) {
+  const deadline = Date.now() + 20_000
+  for (;;) {
+    try {
+      return JSON.parse(await runCli(['browser', 'open', '--url', url]))
+    } catch (error) {
+      if (!error.stderr?.includes('[provider_unavailable]') || Date.now() >= deadline) throw error
+    }
+    await delay(250)
+  }
 }
 
 async function stop(child) {

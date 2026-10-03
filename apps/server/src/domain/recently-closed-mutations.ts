@@ -115,7 +115,7 @@ export function reopenClosedTab(
     if (!root) throw new RecentlyClosedError('policy_denied')
     const cwd = resolve(root.workingDirectory, restore.root_relative_cwd)
     const within = relative(root.workingDirectory, cwd)
-    if (isAbsolute(within) || within.split('/').some((part) => part === '..'))
+    if (isAbsolute(within) || within.split(/[\\/]/u).some((part) => part === '..'))
       throw new RecentlyClosedError('policy_denied')
     content = { kind: 'terminal', launch: { cwd, rows: restore.rows, cols: restore.cols } }
   } else {

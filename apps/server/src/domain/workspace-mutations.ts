@@ -731,8 +731,8 @@ export function closeTab(
     const cwd = relative(original.workingDirectory, originalTab.content.launch.cwd)
     if (
       isAbsolute(cwd) ||
-      cwd.split('/').some((part) => part === '.' || part === '..') ||
-      originalTab.content.launch.cwd.split('/').some((part) => part === '.' || part === '..')
+      cwd.split(/[\\/]/u).some((part) => part === '.' || part === '..') ||
+      originalTab.content.launch.cwd.split(/[\\/]/u).some((part) => part === '.' || part === '..')
     ) {
       throw new WorkspaceMutationError(
         'policy_denied',
