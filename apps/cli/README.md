@@ -76,6 +76,16 @@ node apps/cli/dist/bin.mjs --session-file "$XDG_RUNTIME_DIR/agent-workspace-node
 node apps/cli/dist/bin.mjs --session-file "$XDG_RUNTIME_DIR/agent-workspace-node/session.json" request textbox.delete --params-json '{...}'
 node apps/cli/dist/bin.mjs --session-file "$XDG_RUNTIME_DIR/agent-workspace-node/session.json" terminal create --workspace-id UUID --pane-id UUID --cwd /tmp
 node apps/cli/dist/bin.mjs --session-file "$XDG_RUNTIME_DIR/agent-workspace-node/session.json" terminal send --terminal-id UUID --data 'echo ready'
+node apps/cli/dist/bin.mjs --session-file "$XDG_RUNTIME_DIR/agent-workspace-node/session.json" terminal read --terminal-id UUID --lines 50
+node apps/cli/dist/bin.mjs --session-file "$XDG_RUNTIME_DIR/agent-workspace-node/session.json" tab rename --tab-id UUID --title 'Server logs'
+node apps/cli/dist/bin.mjs --session-file "$XDG_RUNTIME_DIR/agent-workspace-node/session.json" browser open --url https://example.com
+node apps/cli/dist/bin.mjs --session-file "$XDG_RUNTIME_DIR/agent-workspace-node/session.json" browser query --session-id UUID --selector h1
+node apps/cli/dist/bin.mjs --session-file "$XDG_RUNTIME_DIR/agent-workspace-node/session.json" browser eval --session-id UUID --expression 'document.title'
+node apps/cli/dist/bin.mjs --session-file "$XDG_RUNTIME_DIR/agent-workspace-node/session.json" browser click --session-id UUID --selector button
+node apps/cli/dist/bin.mjs --session-file "$XDG_RUNTIME_DIR/agent-workspace-node/session.json" browser type --session-id UUID --selector input --text 'hello'
+node apps/cli/dist/bin.mjs --session-file "$XDG_RUNTIME_DIR/agent-workspace-node/session.json" browser screenshot --session-id UUID --output ./page.png
+node apps/cli/dist/bin.mjs --session-file "$XDG_RUNTIME_DIR/agent-workspace-node/session.json" browser console --session-id UUID --clear true
+node apps/cli/dist/bin.mjs --session-file "$XDG_RUNTIME_DIR/agent-workspace-node/session.json" browser errors --session-id UUID
 node apps/cli/dist/bin.mjs --session-file "$XDG_RUNTIME_DIR/agent-workspace-node/session.json" pane split --workspace-id UUID --target-pane-id UUID --axis vertical --expected-revision N terminal --cwd /tmp
 node apps/cli/dist/bin.mjs --session-file "$XDG_RUNTIME_DIR/agent-workspace-node/session.json" request workspace.select --params-json '{...}'
 ```
@@ -97,6 +107,38 @@ Workspace creation accepts a trailing `--command` and uses the working directory
 cwd unless `--terminal-cwd` is supplied. Pinning and reordering require an explicit current
 revision. Supply `--idempotency-key` with `--expected-revision` to retry the same create request
 after a lost response.
+Workspace creation also accepts repeated `--env KEY=VALUE` and one `--env-file PATH` with dotenv
+syntax, including quoted values. Explicit `--env` assignments override file values; the last
+assignment to the same key wins. These values are stored with the workspace and inherited by
+its terminals, including after restart. The environment file is read by the CLI; only its
+parsed values are sent to the service. Variables must have POSIX names and NUL-free values.
+Example: `workspace create --name Review --working-directory /home/user/project --env-file
+./review.env --env MODE=review`. Put these options before the trailing `--command`.
+
+`terminal read` prints retained terminal output as decoded plain text, combining its checkpoint
+and base64 output chunks, removing terminal escape sequences, and normalizing line endings.
+`--lines N` keeps the last N lines. A warning on stderr reports incomplete retained history.
+`tab rename` finds the tab's workspace and saves a custom title using the current revision.
+
+`browser open` creates an ephemeral session in the configured `default` profile and navigates
+to its URL; its JSON response includes `session.automationSessionId` for later commands. Supply
+`--session-id` to navigate an existing session. Other browser commands require this session ID
+and obtain current generation, navigation epoch, and idempotency epoch automatically. A failed
+open cleans up only the session it just created. Browser automation requires the running
+desktop provider. Ephemeral sessions use their own hidden page and do not inherit a visible
+tab's login. Use the existing `browser-automation create` attach contract and its approval
+dialog when you need to automate a visible tab.
+
+`browser query` returns matching elements with text, input value, and useful attributes.
+`browser eval` returns a JSON value from the page expression; JavaScript `undefined` becomes
+`null`, and evaluation results have a 64 KiB bound. `browser console` and `browser errors`
+return buffered diagnostic entries; `--clear true` reads and clears that buffer.
+`browser screenshot` defaults to 1280×720, accepts `--width` and `--height`, and returns a
+bounded screenshot handle. With `--output PATH`, it reads all chunks, verifies the PNG's size
+and SHA-256, saves it, and releases the handle. Without `--output`, use the existing
+`browser-automation read` and `release` JSON commands to consume and release the handle.
+`browser-automation create --params-json '{"mode":"ephemeral"}'` defaults the profile, epoch,
+idempotency key, and correlation ID. Supplying these identity fields preserves exact retries.
 Layout save accepts one or more `--workspace-id` flags in template order. Layout import reads
 one Rust-compatible export envelope from `--file` (maximum 256 KiB). Layout writes require an
 explicit current revision; keep the same `--idempotency-key` when retrying a lost response.

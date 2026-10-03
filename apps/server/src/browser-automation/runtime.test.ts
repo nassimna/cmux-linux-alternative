@@ -2,6 +2,7 @@ import { createHash, randomUUID } from 'node:crypto'
 
 import Database from 'better-sqlite3'
 import { expect, it } from 'vitest'
+import type { BrowserAutomationOperation, BrowserAutomationOperationResultData } from '@agent-workspace/protocol-client'
 
 import { RUST_SCHEMA_V15_SQL } from '../persistence/legacy-schema-v15'
 import { BrowserAutomationProviderAuthority } from './provider-authority'
@@ -66,6 +67,25 @@ it('publishes create, execute, and destroy through an exact private provider lea
   expect(await invoking).toMatchObject({ state: 'queued' })
   expect(records.getOperationSnapshot(execute.request.operation.operationId))
     .toMatchObject({ state: 'succeeded', result: { kind: 'query', matches: [] } })
+
+  for (const [operation, result] of [
+    [{ kind: 'evaluate', expression: '1+1' }, { kind: 'evaluation', value: 2 }],
+    [{ kind: 'console' }, { kind: 'console', entries: [] }],
+    [{ kind: 'errors', clear: true }, { kind: 'errors', entries: [] }]
+  ] as [BrowserAutomationOperation, BrowserAutomationOperationResultData][]) {
+    const params = { automationSessionId: ready.automationSessionId,
+      sessionGeneration: 1, navigationEpoch: 1, operationId: randomUUID(), attemptEpoch: 1,
+      timeoutMs: 10_000, operation,
+      idempotency: { epoch, key: randomUUID() }, correlationId: randomUUID() }
+    expect(await runtime.invoke(params)).toMatchObject({ state: 'queued' })
+    const delivery = (await authority.mailbox.poll({ identity, timeoutMs: 0 })).request
+    if (delivery?.kind !== 'execute') throw new Error('inspection operation was not delivered')
+    records.acknowledge({ identity, target, automationSessionId: ready.automationSessionId,
+      sessionGeneration: 1, operationId: params.operationId,
+      correlationId: params.correlationId, attemptEpoch: 1,
+      state: 'succeeded', result })
+    expect(await runtime.invoke(params)).toMatchObject({ state: 'succeeded', result })
+  }
 
   const navigateParams = { automationSessionId: ready.automationSessionId,
     sessionGeneration: 1, navigationEpoch: 1, operationId: randomUUID(), attemptEpoch: 1,

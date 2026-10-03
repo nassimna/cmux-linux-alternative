@@ -794,6 +794,20 @@ export function createApp(
       const runtime = browserAutomation.runtime
       app.post('/v1/browser-automation/sessions', async (c) => {
         const params = await parseBody(c.req.json(), browserAutomationSessionCreateParamsSchema)
+        const profileKey = configurationQualification
+          ? (await configurationQualification.inspect()).config.browser.partition
+          : 'default'
+        if (params.profileKey !== profileKey) {
+          return c.json(
+            {
+              error: {
+                code: 'profile_unavailable',
+                message: `Browser profile '${params.profileKey}' is unavailable; allowed profile: '${profileKey}'`
+              }
+            },
+            422
+          )
+        }
         return c.json(
           browserAutomationSessionCreateResultSchema.parse({
             session: await runtime.createSession(params as BrowserAutomationSessionCreateParams)

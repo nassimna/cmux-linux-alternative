@@ -222,8 +222,8 @@ export class BrowserAutomationProviderMailbox {
       if (entry.request.kind === 'execute' && value.result) {
         const operation = entry.request.request.operation.operation
         const expectedResult = operation.kind === 'navigate' ? 'navigation'
-          : operation.kind === 'query' ? 'query'
-            : operation.kind === 'screenshot' ? 'screenshot' : 'empty'
+          : operation.kind === 'evaluate' ? 'evaluation'
+            : ['query', 'screenshot', 'console', 'errors'].includes(operation.kind) ? operation.kind : 'empty'
         if (value.result.kind !== expectedResult ||
             (value.result.kind === 'navigation' &&
              value.result.navigationEpoch !== entry.request.request.operation.navigationEpoch + 1))

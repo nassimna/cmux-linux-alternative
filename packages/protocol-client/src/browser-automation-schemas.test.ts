@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import {
   browserAutomationOperationInvokeParamsSchema,
+  browserAutomationOperationResultDataSchema,
   browserAutomationProviderAcknowledgeParamsSchema,
   browserAutomationScreenshotReadResultSchema,
   browserAutomationSessionCreateParamsSchema
@@ -53,6 +54,34 @@ describe('browser automation schemas', () => {
         browserAutomationOperationInvokeParamsSchema.safeParse(invoke(operation)).success
       ).toBe(false)
     }
+  })
+
+  it('accepts evaluation and diagnostics while bounding their results', () => {
+    for (const operation of [
+      { kind: 'evaluate', expression: '1+1' },
+      { kind: 'console', clear: true },
+      { kind: 'errors' }
+    ]) {
+      expect(
+        browserAutomationOperationInvokeParamsSchema.safeParse(invoke(operation)).success
+      ).toBe(true)
+    }
+    expect(
+      browserAutomationOperationResultDataSchema.safeParse({
+        kind: 'evaluation',
+        value: { answer: [2, null] }
+      }).success
+    ).toBe(true)
+    expect(
+      browserAutomationOperationResultDataSchema.safeParse({
+        kind: 'evaluation',
+        value: 'x'.repeat(65_536)
+      }).success
+    ).toBe(false)
+    expect(
+      browserAutomationOperationResultDataSchema.safeParse({ kind: 'evaluation', value: Infinity })
+        .success
+    ).toBe(false)
   })
 
   it('requires attach targets and forbids ephemeral target selection', () => {

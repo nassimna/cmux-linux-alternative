@@ -107,6 +107,7 @@ function templateFromWorkspace(workspace: Workspace): LayoutTemplate['workspaces
     description: workspace.description,
     color: workspace.color,
     workingDirectory: workspace.workingDirectory,
+    ...(workspace.environment === undefined ? {} : { environment: workspace.environment }),
     layout: workspace.layout as LayoutTree,
     selectedPaneId: workspace.selectedPaneId,
     panes: workspace.panes,

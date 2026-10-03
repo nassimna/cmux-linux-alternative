@@ -1168,6 +1168,11 @@ export const shortcutOverrideSchema = z.strictObject({
   shortcut: shortcutSchema.nullable()
 })
 
+export const workspaceEnvironmentSchema = z.record(
+  z.string().regex(/^[A-Za-z_][A-Za-z0-9_]*$/),
+  z.string().refine((value) => !value.includes('\0'))
+)
+
 export const workspaceSnapshotSchema = z
   .strictObject({
     id: uuidSchema,
@@ -1175,6 +1180,7 @@ export const workspaceSnapshotSchema = z
     description: normalizedString(4096, true).nullable(),
     color: normalizedString(64).nullable(),
     workingDirectory: absolutePathSchema,
+    environment: workspaceEnvironmentSchema.optional(),
     layout: paneTreeNodeSchema,
     selectedPaneId: uuidSchema,
     panes: z.array(paneSnapshotSchema).min(1),
@@ -1320,6 +1326,7 @@ export const workspaceCreateParamsSchema = z.strictObject({
   description: normalizedString(4096, true).optional(),
   color: normalizedString(64).optional(),
   workingDirectory: absolutePathSchema,
+  environment: workspaceEnvironmentSchema.optional(),
   initialTerminal: terminalLaunchRequestSchema
 })
 
@@ -1526,6 +1533,7 @@ export const layoutWorkspaceTemplateSchema = z
     description: normalizedString(4096, true).nullable(),
     color: normalizedString(64).nullable(),
     workingDirectory: absolutePathSchema,
+    environment: workspaceEnvironmentSchema.optional(),
     layout: paneTreeNodeSchema,
     selectedPaneId: uuidSchema,
     panes: layoutPaneMapSchema,
@@ -2923,6 +2931,15 @@ export const browserAutomationOperationSchema = z
       selector: automationSelectorSchema,
       limit: z.number().int().min(1).max(100)
     }),
+    z.strictObject({
+      kind: z.literal('evaluate'),
+      expression: z
+        .string()
+        .min(1)
+        .max(48 * 1_024)
+    }),
+    z.strictObject({ kind: z.literal('console'), clear: z.boolean().optional() }),
+    z.strictObject({ kind: z.literal('errors'), clear: z.boolean().optional() }),
     z.strictObject({ kind: z.literal('focus'), selector: automationSelectorSchema }),
     z.strictObject({ kind: z.literal('click'), selector: automationSelectorSchema }),
     z.strictObject({
@@ -2981,7 +2998,17 @@ export const browserAutomationElementSummarySchema = z.strictObject({
   visible: z.boolean(),
   enabled: z.boolean(),
   focused: z.boolean(),
-  editable: z.boolean()
+  editable: z.boolean(),
+  text: z.string().max(8_192).optional(),
+  value: z.string().max(8_192).optional(),
+  attributes: z.record(z.string(), z.string().max(2_048)).optional()
+})
+const browserAutomationDiagnosticSchema = z.strictObject({
+  level: z.string().max(32),
+  message: z.string().max(4_096),
+  source: z.string().max(2_048),
+  line: revisionSchema,
+  timestampMs: revisionSchema
 })
 export const browserAutomationScreenshotHandleSchema = z.strictObject({
   handleId: uuidSchema,
@@ -3004,6 +3031,21 @@ export const browserAutomationOperationResultDataSchema = z.discriminatedUnion('
     .refine(({ matches }) => serializedJsonBytes(matches) <= 16 * 1_024, {
       message: 'query result exceeds its wire bound'
     }),
+  z
+    .strictObject({ kind: z.literal('evaluation'), value: actionJsonValueSchema })
+    .refine(({ value }) => serializedJsonBytes(value) <= 64 * 1_024, {
+      message: 'evaluation result exceeds its wire bound'
+    }),
+  ...(['console', 'errors'] as const).map((kind) =>
+    z
+      .strictObject({
+        kind: z.literal(kind),
+        entries: z.array(browserAutomationDiagnosticSchema).max(100)
+      })
+      .refine(({ entries }) => serializedJsonBytes(entries) <= 64 * 1_024, {
+        message: 'diagnostics exceed their wire bound'
+      })
+  ),
   z.strictObject({ kind: z.literal('screenshot'), handle: browserAutomationScreenshotHandleSchema })
 ])
 export const browserAutomationOperationSnapshotSchema = z

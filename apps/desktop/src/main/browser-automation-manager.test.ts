@@ -29,6 +29,9 @@ class FakePage implements BrowserAutomationPage {
   public readonly opaquePageToken = {}
   public readonly navigate = vi.fn(() => Promise.resolve())
   public readonly waitForLifecycle = vi.fn(() => Promise.resolve())
+  public readonly evaluate = vi.fn(() => Promise.resolve<unknown>({ answer: 42 }))
+  public readonly readDiagnostics = vi.fn(() => [])
+  public readonly dispose = vi.fn()
   public readonly insertText = vi.fn(() => Promise.resolve())
   public readonly sendKey = vi.fn()
   public readonly capture = vi.fn(() => Promise.resolve(Buffer.from('png bytes')))
@@ -120,6 +123,46 @@ function harness(page = new FakePage()): BrowserAutomationManager {
 }
 
 describe('BrowserAutomationManager', () => {
+  it('returns evaluation, enriched query, and session diagnostics through guarded operations', async () => {
+    const page = new FakePage()
+    const manager = harness(page)
+    expect(await manager.execute(request({ kind: 'evaluate', expression: '6*7' }))).toMatchObject({
+      state: 'succeeded',
+      result: { kind: 'evaluation', value: { answer: 42 } }
+    })
+    page.executeClosedScript.mockResolvedValue([
+      {
+        index: 0,
+        tag: 'input',
+        visible: true,
+        enabled: true,
+        focused: false,
+        editable: true,
+        text: 'label',
+        value: 'abc',
+        attributes: { id: 'field' }
+      }
+    ])
+    expect(
+      await manager.execute(request({ kind: 'query', selector: '#field', limit: 1 }))
+    ).toMatchObject({
+      result: {
+        kind: 'query',
+        matches: [{ text: 'label', value: 'abc', attributes: { id: 'field' } }]
+      }
+    })
+    expect(await manager.execute(request({ kind: 'errors', clear: true }))).toMatchObject({
+      result: { kind: 'errors', entries: [] }
+    })
+    expect(page.readDiagnostics).toHaveBeenCalledWith('errors', true)
+    page.evaluate.mockResolvedValue('x'.repeat(65_536))
+    expect(await manager.execute(request({ kind: 'evaluate', expression: 'large' }))).toMatchObject(
+      { state: 'failed', errorCode: 'resource_limit' }
+    )
+    await manager.dispose()
+    expect(page.dispose).toHaveBeenCalledOnce()
+  })
+
   it('reports attached sessions, including creation in progress, without counting an idle provider', async () => {
     let confirm!: (allowed: boolean) => void
     const manager = new BrowserAutomationManager({
@@ -189,7 +232,7 @@ describe('BrowserAutomationManager', () => {
     }
   })
 
-  it('returns only bounded text-free structural query summaries', async () => {
+  it('returns bounded text with structural query summaries', async () => {
     const page = new FakePage()
     page.executeClosedScript.mockResolvedValue([
       {
@@ -199,8 +242,7 @@ describe('BrowserAutomationManager', () => {
         enabled: true,
         focused: false,
         editable: false,
-        text: 'hostile secret',
-        html: '<button>hostile secret</button>'
+        text: 'clicked:abc'
       }
     ])
     const result = await harness(page).execute(
@@ -216,7 +258,8 @@ describe('BrowserAutomationManager', () => {
           visible: true,
           enabled: true,
           focused: false,
-          editable: false
+          editable: false,
+          text: 'clicked:abc'
         }
       ]
     })
@@ -362,6 +405,42 @@ describe('BrowserAutomationManager', () => {
 })
 
 describe('createElectronAutomationPage', () => {
+  it('evaluates JSON results and buffers, clears, isolates and releases console and page errors', async () => {
+    const contents = new EventEmitter() as EventEmitter & {
+      executeJavaScript: ReturnType<typeof vi.fn>
+    }
+    contents.executeJavaScript = vi.fn(() => Promise.resolve({ answer: 2 }))
+    const page = createElectronAutomationPage({
+      contents: contents as unknown as Electron.WebContents,
+      owned: false,
+      target: targetBinding(),
+      revalidate: () => true
+    })
+    expect(await page.evaluate('Promise.resolve({answer: 1+1})')).toEqual({ answer: 2 })
+    const emit = (message: string, level = 'info') =>
+      contents.emit('console-message', {
+        message,
+        level,
+        sourceId: 'http://fixture.test',
+        lineNumber: 2
+      })
+    emit('TL_CONSOLE_LOG')
+    emit('Uncaught Error: TL_PAGE_ERROR', 'error')
+    emit('ordinary console.error', 'error')
+    expect(page.readDiagnostics('console', false)).toHaveLength(3)
+    expect(page.readDiagnostics('errors', true)).toMatchObject([
+      { message: 'Uncaught Error: TL_PAGE_ERROR' }
+    ])
+    expect(page.readDiagnostics('errors', false)).toEqual([])
+    for (let index = 0; index < 150; index++) emit('x'.repeat(4_096))
+    expect(
+      Buffer.byteLength(JSON.stringify(page.readDiagnostics('console', true)), 'utf8')
+    ).toBeLessThanOrEqual(65_536)
+    expect(page.readDiagnostics('console', false)).toEqual([])
+    page.dispose()
+    expect(contents.listenerCount('console-message')).toBe(0)
+  })
+
   it('JSON-encodes selector data into the fixed closed script and exposes no bridge primitive', async () => {
     const contents = new EventEmitter() as EventEmitter & {
       loadURL: ReturnType<typeof vi.fn>

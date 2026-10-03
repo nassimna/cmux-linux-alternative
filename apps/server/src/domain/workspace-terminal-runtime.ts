@@ -64,11 +64,15 @@ export class WorkspaceTerminalRuntime {
       for (const workspace of state.workspaces) {
         for (const tab of Object.values(workspace.tabs).sort((a, b) => a.id.localeCompare(b.id))) {
           if (tab.content.kind !== 'terminal') continue
-          const { terminal } = await this.terminals.create(tab.content.launch, {
-            workspaceId: workspace.id,
-            paneId: tab.paneId,
-            tabId: tab.id
-          })
+          const { terminal } = await this.terminals.create(
+            tab.content.launch,
+            {
+              workspaceId: workspace.id,
+              paneId: tab.paneId,
+              tabId: tab.id
+            },
+            workspace.environment
+          )
           created.push(terminal.id)
           this.sessions.set(tab.id, terminal.id)
         }
@@ -137,7 +141,8 @@ export class WorkspaceTerminalRuntime {
           workspaceId: source.id,
           paneId: request.source.paneId,
           tabId: ids.replacementTabId
-        }
+        },
+        source.environment
       )
       replacementSessionId = terminal.id
     }
@@ -196,7 +201,8 @@ export class WorkspaceTerminalRuntime {
     }
     const { terminal } = await this.terminals.create(
       { ...launch, command: [...command] },
-      { workspaceId, paneId, tabId }
+      { workspaceId, paneId, tabId },
+      store.readSnapshot().workspaces.find((workspace) => workspace.id === workspaceId)!.environment
     )
     try {
       assertBinding()
@@ -274,10 +280,14 @@ export class WorkspaceTerminalRuntime {
   /** Supplies the runtime-first terminal half of a recently closed tab reopen. */
   public recentlyClosedAdapter(): TerminalReopenAdapter {
     return {
-      prepare: async ({ workspaceId, paneId, tabId, launch }) => {
+      prepare: async ({ workspaceId, paneId, tabId, launch, environment }) => {
         if (!this.started) throw new Error('Workspace terminals have not been restored')
         if (this.sessions.has(tabId)) throw new Error('Terminal tab already has a live session')
-        const { terminal } = await this.terminals.create(launch, { workspaceId, paneId, tabId })
+        const { terminal } = await this.terminals.create(
+          launch,
+          { workspaceId, paneId, tabId },
+          environment
+        )
         let adopted = false
         let closed = false
         return {
@@ -348,16 +358,24 @@ export class WorkspaceTerminalRuntime {
               previous?.content.kind === 'terminal' &&
               template?.content.kind === 'terminal' &&
               isDeepStrictEqual(previous.content.launch, template.content.launch) &&
+              isDeepStrictEqual(
+                plan.before.workspaces.find((workspace) => workspace.tabs[tab.id])?.environment,
+                workspace.environment
+              ) &&
               oldSessionId
             ) {
               preserved.set(tab.id, oldSessionId)
               continue
             }
-            const { terminal } = await this.terminals.create(tab.content.launch, {
-              workspaceId: workspace.id,
-              paneId: tab.paneId,
-              tabId: tab.id
-            })
+            const { terminal } = await this.terminals.create(
+              tab.content.launch,
+              {
+                workspaceId: workspace.id,
+                paneId: tab.paneId,
+                tabId: tab.id
+              },
+              workspace.environment
+            )
             created.set(tab.id, terminal.id)
           }
         }
@@ -416,7 +434,8 @@ export class WorkspaceTerminalRuntime {
           cols: launch.cols,
           ...(launch.command === undefined ? {} : { command: launch.command })
         },
-        { workspaceId: ids.workspaceId, paneId: ids.paneId, tabId: ids.tabId }
+        { workspaceId: ids.workspaceId, paneId: ids.paneId, tabId: ids.tabId },
+        request.environment
       )
       let result
       try {
@@ -459,7 +478,9 @@ export class WorkspaceTerminalRuntime {
           cols: request.launch.cols,
           ...(request.launch.command === undefined ? {} : { command: request.launch.command })
         },
-        { workspaceId: request.workspaceId, paneId: request.paneId, tabId }
+        { workspaceId: request.workspaceId, paneId: request.paneId, tabId },
+        store.readSnapshot().workspaces.find((workspace) => workspace.id === request.workspaceId)!
+          .environment
       )
       let result
       try {
@@ -503,11 +524,16 @@ export class WorkspaceTerminalRuntime {
         if (!binding.isCurrent()) throw new RecentlyClosedError('unauthorized')
         return store.commitTabDuplicate(request, ids, createdAt)
       }
-      const { terminal } = await this.terminals.create(source.content.launch, {
-        workspaceId: request.target.workspaceId,
-        paneId: request.target.paneId,
-        tabId: ids.tabId
-      })
+      const { terminal } = await this.terminals.create(
+        source.content.launch,
+        {
+          workspaceId: request.target.workspaceId,
+          paneId: request.target.paneId,
+          tabId: ids.tabId
+        },
+        snapshot.workspaces.find((workspace) => workspace.id === request.target.workspaceId)!
+          .environment
+      )
       try {
         if (!binding.isCurrent()) throw new RecentlyClosedError('unauthorized')
         const result = store.commitTabDuplicate(request, ids, createdAt, terminal.id)
@@ -551,7 +577,9 @@ export class WorkspaceTerminalRuntime {
             cols: launch.cols,
             ...(launch.command === undefined ? {} : { command: launch.command })
           },
-          { workspaceId: request.workspaceId, paneId: ids.paneId, tabId: ids.tabId }
+          { workspaceId: request.workspaceId, paneId: ids.paneId, tabId: ids.tabId },
+          store.readSnapshot().workspaces.find((workspace) => workspace.id === request.workspaceId)!
+            .environment
         )
         terminalId = terminal.id
       }
@@ -614,11 +642,15 @@ export class WorkspaceTerminalRuntime {
           replacementTabId
         ]!
         if (tab.content.kind !== 'terminal') throw new Error('Replacement must be a terminal')
-        const { terminal } = await this.terminals.create(tab.content.launch, {
-          workspaceId: request.workspaceId,
-          paneId: request.paneId,
-          tabId: replacementTabId
-        })
+        const { terminal } = await this.terminals.create(
+          tab.content.launch,
+          {
+            workspaceId: request.workspaceId,
+            paneId: request.paneId,
+            tabId: replacementTabId
+          },
+          workspace.environment
+        )
         replacementSessionId = terminal.id
       }
 
@@ -692,11 +724,15 @@ export class WorkspaceTerminalRuntime {
         const replacement = candidate.workspaces[0]!
         const tab = replacement.tabs[replacementIds.tabId]!
         if (tab.content.kind !== 'terminal') throw new Error('Replacement must contain a terminal')
-        const { terminal } = await this.terminals.create(tab.content.launch, {
-          workspaceId: replacementIds.workspaceId,
-          paneId: replacementIds.paneId,
-          tabId: replacementIds.tabId
-        })
+        const { terminal } = await this.terminals.create(
+          tab.content.launch,
+          {
+            workspaceId: replacementIds.workspaceId,
+            paneId: replacementIds.paneId,
+            tabId: replacementIds.tabId
+          },
+          replacement.environment
+        )
         replacementSessionId = terminal.id
       }
 
@@ -803,7 +839,8 @@ export class WorkspaceTerminalRuntime {
         const command = request.replacement.initialTerminal.command
         const { terminal } = await this.terminals.create(
           { ...tab.content.launch, ...(command === undefined ? {} : { command }) },
-          { workspaceId: ids.workspaceId, paneId: ids.paneId, tabId: ids.tabId }
+          { workspaceId: ids.workspaceId, paneId: ids.paneId, tabId: ids.tabId },
+          candidate.workspaces[0]!.environment
         )
         replacementSessionId = terminal.id
       }
@@ -883,11 +920,15 @@ export class WorkspaceTerminalRuntime {
         const replacement = candidate.workspaces.find((item) => item.id === request.workspaceId)!
         const tab = replacement.tabs[replacementTabId]!
         if (tab.content.kind !== 'terminal') throw new Error('Replacement must be a terminal')
-        const { terminal } = await this.terminals.create(tab.content.launch, {
-          workspaceId: request.workspaceId,
-          paneId: tab.paneId,
-          tabId: tab.id
-        })
+        const { terminal } = await this.terminals.create(
+          tab.content.launch,
+          {
+            workspaceId: request.workspaceId,
+            paneId: tab.paneId,
+            tabId: tab.id
+          },
+          replacement.environment
+        )
         replacementSessionId = terminal.id
       }
 
@@ -950,11 +991,15 @@ export class WorkspaceTerminalRuntime {
         .workspaces.find((item) => item.id === request.workspaceId)!
       const tab = workspace.tabs[request.tabId]!
       if (tab.content.kind !== 'terminal') throw new Error('Validated tab is not a terminal')
-      const { terminal } = await this.terminals.create(tab.content.launch, {
-        workspaceId: request.workspaceId,
-        paneId: tab.paneId,
-        tabId: tab.id
-      })
+      const { terminal } = await this.terminals.create(
+        tab.content.launch,
+        {
+          workspaceId: request.workspaceId,
+          paneId: tab.paneId,
+          tabId: tab.id
+        },
+        workspace.environment
+      )
       let result
       try {
         result = store.commitTerminalRestart(request, updatedAt)

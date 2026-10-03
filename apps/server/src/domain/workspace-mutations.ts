@@ -144,6 +144,7 @@ function replacementWorkspace(
     description: null,
     color: null,
     workingDirectory: closing.workingDirectory,
+    ...(closing.environment === undefined ? {} : { environment: closing.environment }),
     layout: { kind: 'leaf', paneId: ids.paneId },
     selectedPaneId: ids.paneId,
     panes: {
@@ -182,6 +183,7 @@ function workspaceFromParams(
     description: request.description ?? null,
     color: request.color ?? null,
     workingDirectory: request.workingDirectory,
+    ...(request.environment === undefined ? {} : { environment: request.environment }),
     layout: { kind: 'leaf', paneId: ids.paneId },
     selectedPaneId: ids.paneId,
     panes: {

@@ -155,6 +155,19 @@ it('exposes caller automation with a runtime while keeping provider HTTP behind 
         })
       ).status
     ).toBe(400)
+    const unsupportedProfile = await fetch(createEndpoint, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ ...JSON.parse(createBody), profileKey: 'tltest' })
+    })
+    expect(unsupportedProfile.status).toBe(422)
+    expect(await unsupportedProfile.json()).toEqual({
+      error: {
+        code: 'profile_unavailable',
+        message: "Browser profile 'tltest' is unavailable; allowed profile: 'default'"
+      }
+    })
+    expect(createSession).not.toHaveBeenCalled()
     const created = await fetch(createEndpoint, { method: 'POST', headers, body: createBody })
     expect(created.status).toBe(200)
     expect(await created.json()).toMatchObject({ session: { state: 'ready' } })

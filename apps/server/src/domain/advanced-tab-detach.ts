@@ -121,6 +121,7 @@ export function detachExactTab(
     description: null,
     color: null,
     workingDirectory: from.workingDirectory,
+    ...(from.environment === undefined ? {} : { environment: from.environment }),
     layout: { kind: 'leaf', paneId: ids.paneId },
     selectedPaneId: ids.paneId,
     panes: {

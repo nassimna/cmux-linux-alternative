@@ -793,6 +793,7 @@ export {
   workspaceCardSlotV2ChangedDataSchema,
   workspaceCardSlotV2ChangedEventSchema,
   workspaceCreateParamsSchema,
+  workspaceEnvironmentSchema,
   workspaceListResultSchema,
   workspaceMoveParamsSchema,
   workspaceSelectParamsSchema,

@@ -14,6 +14,7 @@ import type {
   BrowserAutomationTargetBinding
 } from '@agent-workspace/protocol-client'
 import type { Event, NativeImage, WebContents } from 'electron'
+import { browserAutomationElementSummarySchema } from '@agent-workspace/protocol-client'
 
 const CONTENT_TTL_MS = 60_000
 const SESSION_IDLE_TTL_MS = 30 * 60_000
@@ -46,11 +47,22 @@ export interface BrowserAutomationPage {
     script: BrowserAutomationClosedScript,
     input: Readonly<{ selector: string; limit?: number }>
   ): Promise<unknown>
+  evaluate(expression: string): Promise<unknown>
+  readDiagnostics(kind: 'console' | 'errors', clear: boolean): BrowserAutomationDiagnostic[]
+  dispose(): void
   insertText(text: string): Promise<void>
   sendKey(key: BrowserAutomationKey): void
   capture(width: number, height: number): Promise<Buffer>
   onTopLevelNavigation(listener: () => void): () => void
   destroy(): Promise<void>
+}
+
+type BrowserAutomationDiagnostic = {
+  level: string
+  message: string
+  source: string
+  line: number
+  timestampMs: number
 }
 
 export interface BrowserAutomationManagerDependencies {
@@ -107,8 +119,8 @@ export class BrowserAutomationFailure extends Error {
 }
 
 /**
- * Main-only executor for the closed M5 operation set. It intentionally accepts no
- * renderer sender, raw webContents ID, caller script, CDP command, or partition.
+ * Main-only executor bound to an authorized automation session. It accepts no
+ * renderer sender, raw webContents ID, CDP command, or partition.
  */
 export class BrowserAutomationManager {
   readonly #dependencies: BrowserAutomationManagerDependencies
@@ -253,6 +265,7 @@ export class BrowserAutomationManager {
     session.pending?.abort.abort(new BrowserAutomationFailure('interrupted'))
     session.abort.abort(new BrowserAutomationFailure('interrupted'))
     session.removeNavigationListener()
+    session.page.dispose()
     this.releaseSessionScreenshots(session.id)
     if (session.page.owned) await session.page.destroy().catch(() => undefined)
   }
@@ -432,6 +445,7 @@ export class BrowserAutomationManager {
       this.scheduleSessionExpiry(session)
       return session
     } catch (error) {
+      page?.dispose()
       if (page?.owned) await page.destroy().catch(() => undefined)
       throw error
     } finally {
@@ -480,6 +494,22 @@ export class BrowserAutomationManager {
         }
         return { kind: 'query', matches }
       }
+      case 'evaluate': {
+        this.guard(request, session)
+        const value = await abortable(session.page.evaluate(operation.expression), signal)
+        this.guard(request, session)
+        if (Buffer.byteLength(JSON.stringify(value), 'utf8') > 64 * 1_024) {
+          throw new BrowserAutomationFailure('resource_limit')
+        }
+        return { kind: 'evaluation', value }
+      }
+      case 'console':
+      case 'errors':
+        this.guard(request, session)
+        return {
+          kind: operation.kind,
+          entries: session.page.readDiagnostics(operation.kind, operation.clear ?? false)
+        }
       case 'focus':
       case 'click':
         this.guard(request, session)
@@ -763,7 +793,10 @@ const CLOSED_SCRIPTS: Readonly<Record<BrowserAutomationClosedScript, string>> = 
       visible: style.display !== 'none' && style.visibility !== 'hidden' && rect.width > 0 && rect.height > 0,
       enabled: !('disabled' in element) || element.disabled !== true,
       focused: document.activeElement === element,
-      editable: name === 'input' || name === 'textarea' || element.isContentEditable === true
+      editable: name === 'input' || name === 'textarea' || element.isContentEditable === true,
+      text: (element.textContent || '').slice(0, 8192),
+      ...('value' in element ? { value: String(element.value).slice(0, 8192) } : {}),
+      attributes: Object.fromEntries(['id', 'class', 'name', 'type', 'role', 'aria-label', 'aria-expanded', 'aria-checked', 'href', 'src', 'placeholder', 'title'].filter(name => element.hasAttribute(name)).map(name => [name, element.getAttribute(name).slice(0, 2048)]))
     }
   }))`,
   focus: `(input => {
@@ -808,6 +841,29 @@ export function createElectronAutomationPage(options: {
   captureOffscreen?: (width: number, height: number) => Promise<Buffer>
 }): BrowserAutomationPage {
   const token = {}
+  const diagnostics: Record<'console' | 'errors', BrowserAutomationDiagnostic[]> = {
+    console: [],
+    errors: []
+  }
+  const append = (kind: 'console' | 'errors', entry: BrowserAutomationDiagnostic): void => {
+    const entries = diagnostics[kind]
+    entries.push(entry)
+    while (entries.length > 100 || Buffer.byteLength(JSON.stringify(entries), 'utf8') > 64 * 1_024)
+      entries.shift()
+  }
+  const onConsole = (details: Event<Electron.WebContentsConsoleMessageEventParams>): void => {
+    const entry = {
+      level: details.level,
+      message: details.message.slice(0, 4_096),
+      source: details.sourceId.slice(0, 2_048),
+      line: Math.max(0, details.lineNumber),
+      timestampMs: Date.now()
+    }
+    append('console', entry)
+    if (details.level === 'error' && /^Uncaught(?:\s|\()/u.test(details.message))
+      append('errors', entry)
+  }
+  options.contents.on('console-message', onConsole)
   return {
     opaquePageToken: token,
     owned: options.owned,
@@ -848,6 +904,24 @@ export function createElectronAutomationPage(options: {
       const source = `${CLOSED_SCRIPTS[script]}((encoded => JSON.parse(new TextDecoder().decode(Uint8Array.from(atob(encoded), character => character.charCodeAt(0)))))('${encoded}'))`
       const result: unknown = await options.contents.executeJavaScript(source, true)
       return result
+    },
+    evaluate: async (expression) => {
+      const value: unknown = await options.contents.executeJavaScript(expression, true)
+      const serialized = JSON.stringify(value === undefined ? null : value)
+      if (serialized === undefined) throw new BrowserAutomationFailure('invalid_operation')
+      if (Buffer.byteLength(serialized, 'utf8') > 64 * 1_024)
+        throw new BrowserAutomationFailure('resource_limit')
+      return JSON.parse(serialized) as unknown
+    },
+    readDiagnostics: (kind, clear) => {
+      const entries = [...diagnostics[kind]]
+      if (clear) diagnostics[kind].length = 0
+      return entries
+    },
+    dispose: () => {
+      options.contents.removeListener('console-message', onConsole)
+      diagnostics.console.length = 0
+      diagnostics.errors.length = 0
     },
     insertText: async (text) => options.contents.insertText(text),
     sendKey: (key) => {
@@ -893,34 +967,9 @@ function parseElementSummaries(value: unknown, limit: number): BrowserAutomation
   }
   return value.map((candidate, index) => {
     if (!isRecord(candidate)) throw new BrowserAutomationFailure('invalid_operation')
-    const tag = candidate.tag
-    if (
-      ![
-        'button',
-        'input',
-        'textarea',
-        'select',
-        'link',
-        'form',
-        'image',
-        'dialog',
-        'generic'
-      ].includes(String(tag)) ||
-      typeof candidate.visible !== 'boolean' ||
-      typeof candidate.enabled !== 'boolean' ||
-      typeof candidate.focused !== 'boolean' ||
-      typeof candidate.editable !== 'boolean'
-    ) {
-      throw new BrowserAutomationFailure('invalid_operation')
-    }
-    return {
-      index,
-      tag: tag as BrowserAutomationElementSummary['tag'],
-      visible: candidate.visible,
-      enabled: candidate.enabled,
-      focused: candidate.focused,
-      editable: candidate.editable
-    }
+    const parsed = browserAutomationElementSummarySchema.safeParse({ ...candidate, index })
+    if (!parsed.success) throw new BrowserAutomationFailure('invalid_operation')
+    return parsed.data as BrowserAutomationElementSummary
   })
 }
 

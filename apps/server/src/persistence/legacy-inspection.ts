@@ -4,6 +4,7 @@ import { z } from 'zod'
 import { durableApplicationStateSchema } from '@agent-workspace/contracts'
 
 import { RUST_SCHEMA_V15_SQL } from './legacy-schema-v15'
+import { BROWSER_AUTOMATION_OPERATIONS_SCHEMA_SQL } from './browser-automation-schema'
 
 const RUST_SCHEMA_VERSION = 15
 const legacySnapshotEnvelope = z.object({
@@ -15,7 +16,9 @@ const legacySnapshotEnvelope = z.object({
 export const RUST_SCHEMA_V15_TABLES = Object.keys(RUST_SCHEMA_V15_SQL)
 
 function normalizedSchema(sql: string): string {
-  return sql.replace(/\s/g, '')
+  return sql
+    .replace(/"browser_automation_operations"/g, 'browser_automation_operations')
+    .replace(/\s/g, '')
 }
 
 export class LegacyDatabaseError extends Error {
@@ -113,7 +116,14 @@ export function inspectLegacyConnection(database: Database.Database): LegacyData
     const byName = new Map(definitions.map((entry) => [entry.name, entry.sql]))
     for (const [name, expected] of Object.entries(RUST_SCHEMA_V15_SQL)) {
       const actual = byName.get(name)
-      if (actual === undefined || normalizedSchema(actual) !== normalizedSchema(expected)) {
+      if (
+        actual === undefined ||
+        (normalizedSchema(actual) !== normalizedSchema(expected) &&
+          !(
+            name === 'browser_automation_operations' &&
+            normalizedSchema(actual) === normalizedSchema(BROWSER_AUTOMATION_OPERATIONS_SCHEMA_SQL)
+          ))
+      ) {
         throw new LegacyDatabaseError(
           'invalid_schema',
           `State database ${name} table definition is incompatible`

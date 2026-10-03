@@ -18,6 +18,8 @@ import type {
   BrowserAutomationSessionCreateParams
 } from '@agent-workspace/protocol-client'
 
+import { migrateBrowserAutomationSchema } from '../persistence/browser-automation-schema'
+
 import type { BrowserAutomationProviderAuthority } from './provider-authority'
 import { BrowserAutomationScreenshotHandles, type ScreenshotOwnership } from './screenshot-handles'
 
@@ -67,6 +69,7 @@ export class BrowserAutomationDurableRecords {
     private readonly now: () => number = Date.now
   ) {
     if (digestKey.length < 32) throw new Error('Automation digest key is too short')
+    migrateBrowserAutomationSchema(database)
     this.handles = new BrowserAutomationScreenshotHandles(now)
     this.hasTombstones = Boolean(this.database.prepare(
       "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'browser_automation_tombstones'"
@@ -665,5 +668,7 @@ function sameFence(row: SessionRow | OperationRow,
 }
 
 function resultMatches(kind: string, result: BrowserAutomationOperationResultData): boolean {
-  return result.kind === (kind === 'navigate' ? 'navigation' : kind === 'query' ? 'query' : kind === 'screenshot' ? 'screenshot' : 'empty')
+  const expected = kind === 'navigate' ? 'navigation' : kind === 'evaluate' ? 'evaluation'
+    : ['query', 'screenshot', 'console', 'errors'].includes(kind) ? kind : 'empty'
+  return result.kind === expected
 }

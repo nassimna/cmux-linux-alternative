@@ -192,6 +192,7 @@ import { LegacyDatabaseError } from './legacy-inspection'
 import { observeSource, sameSourceObservation } from './source-observation'
 import { logicalDatabaseDigest } from './logical-database-digest'
 import { readLegacySnapshotConnection } from './legacy-state-reader'
+import { migrateBrowserAutomationSchema } from './browser-automation-schema'
 import { ensureNativeDatabase } from './native-state'
 import { verifyLiveCredentialStateProof } from '../remote/live-credential-utility-policy'
 import {
@@ -224,6 +225,7 @@ function workspaceCreateParams(request: WorkspaceCreateRequest) {
     name: request.name,
     workingDirectory: request.workingDirectory,
     initialTerminal: request.initialTerminal,
+    ...(request.environment === undefined ? {} : { environment: request.environment }),
     ...(request.description === undefined ? {} : { description: request.description }),
     ...(request.color === undefined ? {} : { color: request.color })
   }
@@ -609,6 +611,7 @@ export class ApplicationStateStore {
       try {
         database.pragma('foreign_keys = ON')
         readLegacySnapshotConnection(database)
+        migrateBrowserAutomationSchema(database)
         const epoch = randomUUID()
         database
           .transaction(() => {

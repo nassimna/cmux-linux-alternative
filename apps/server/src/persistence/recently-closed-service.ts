@@ -38,6 +38,7 @@ export interface TerminalReopenAdapter {
     paneId: string
     tabId: string
     launch: { cwd: string; rows: number; cols: number }
+    environment?: { [key: string]: string } | undefined
   }): Promise<{
     terminalId: string
     /** This synchronous mapping step must finish before the durable commit. */
@@ -277,7 +278,8 @@ export class RecentlyClosedService {
       workspaceId: workspace.id,
       paneId: tab.paneId,
       tabId: tab.id,
-      launch: tab.content.launch
+      launch: tab.content.launch,
+      environment: workspace.environment
     })
     try {
       prepared.adopt()

@@ -3,6 +3,9 @@ import { randomUUID } from 'node:crypto'
 import { durableApplicationStateSchema } from '@agent-workspace/contracts'
 import { describe, expect, it } from 'vitest'
 
+import { createWorkspace } from './workspace-mutations'
+import { saveLayout } from './layout-mutations'
+
 import { TerminalService, type PtyProcess } from '../terminal/terminal-service'
 import type { ApplicationStateStore } from '../persistence/application-state-store'
 import { WorkspaceTerminalRuntime } from './workspace-terminal-runtime'
@@ -63,6 +66,7 @@ function snapshot() {
           description: null,
           color: null,
           workingDirectory: '/tmp',
+          environment: { TL_WORKSPACE_ENV: 'inherited value', AGENT_WORKSPACE_TAB_ID: 'untrusted' },
           layout: { kind: 'leaf', paneId },
           selectedPaneId: paneId,
           panes: {
@@ -110,6 +114,29 @@ function snapshot() {
 }
 
 describe('WorkspaceTerminalRuntime', () => {
+  it('persists workspace environment across durable snapshots and saved layouts', () => {
+    const fixture = snapshot()
+    const ids = { workspaceId: randomUUID(), paneId: randomUUID(), tabId: randomUUID() }
+    const environment = { FOO: 'bar', MULTILINE: 'first\nsecond' }
+    const created = createWorkspace(
+      fixture.state,
+      {
+        name: 'Environment',
+        workingDirectory: '/tmp',
+        environment,
+        initialTerminal: { cwd: '/tmp', rows: 24, cols: 80 }
+      },
+      ids,
+      2
+    )
+    const restored = durableApplicationStateSchema.parse(JSON.parse(JSON.stringify(created)))
+    expect(
+      restored.workspaces.find((workspace) => workspace.id === ids.workspaceId)?.environment
+    ).toEqual(environment)
+    const saved = saveLayout(restored, randomUUID(), 'Environment', [ids.workspaceId], 3)
+    expect(saved.savedLayouts[0]?.template.workspaces[0]?.environment).toEqual(environment)
+  })
+
   it('duplicates a browser with a fresh runtime identity and preserves its source', () => {
     const fixture = snapshot()
     const state = durableApplicationStateSchema.parse({
@@ -177,6 +204,7 @@ describe('WorkspaceTerminalRuntime', () => {
       expect(service.attach(sessionId!).terminal.cwd).toBe('/tmp')
       expect(environments).toContainEqual(
         expect.objectContaining({
+          TL_WORKSPACE_ENV: 'inherited value',
           AGENT_WORKSPACE_WORKSPACE_ID: fixture.workspaceId,
           AGENT_WORKSPACE_PANE_ID: fixture.paneId,
           AGENT_WORKSPACE_TAB_ID: tabId

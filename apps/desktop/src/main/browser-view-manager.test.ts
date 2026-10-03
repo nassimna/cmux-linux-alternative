@@ -92,6 +92,7 @@ class FakeWebContents extends EventEmitter {
   })
   public readonly reload = vi.fn()
   public readonly stop = vi.fn()
+  public readonly executeJavaScript = vi.fn(() => Promise.resolve())
   public readonly startPainting = vi.fn()
   public readonly invalidate = vi.fn()
   public readonly loadURL = vi.fn((url: string) => {
@@ -503,7 +504,12 @@ describe('BrowserViewManager', () => {
             { x: 0, y: 0, ...dimensions },
             {
               getSize: () => dimensions,
-              toPNG: () => Buffer.from('png')
+              toPNG: () =>
+                Buffer.from(
+                  automationWindow!.webContents.invalidate.mock.calls.length === 1
+                    ? 'stale resized frame'
+                    : 'png'
+                )
             }
           )
         })
@@ -546,7 +552,7 @@ describe('BrowserViewManager', () => {
     await expect(page.capture(320, 240)).resolves.toEqual(Buffer.from('png'))
     expect(automationWindow?.setContentSize).toHaveBeenCalledWith(320, 240, false)
     expect(automationWindow?.webContents.capturePage).not.toHaveBeenCalled()
-    expect(automationWindow?.webContents.invalidate).toHaveBeenCalledOnce()
+    expect(automationWindow?.webContents.invalidate).toHaveBeenCalledTimes(2)
     await page.destroy()
     expect(automationWindow?.destroy).toHaveBeenCalledOnce()
     expect(remoteSession.clearStorageData).toHaveBeenCalledOnce()

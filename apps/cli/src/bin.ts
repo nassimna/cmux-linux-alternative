@@ -43,6 +43,13 @@ import {
 } from './browser-automation'
 import { flags, jsonParams, required } from './options'
 import {
+  parseTerminalCommand,
+  readTerminalText,
+  renameTab,
+  type TerminalCommand
+} from './terminal-commands'
+import { workspaceEnvironment } from './workspace-environment'
+import {
   parseClaudeNotice,
   parseCodexNotice,
   readClaudeHookInput,
@@ -81,7 +88,7 @@ Usage:
   ternline-cli [--session-file PATH] request notification.publish|notification.markRead|notification.markUnread|notification.clear --params-json JSON
   ternline-cli [--session-file PATH] workspace list
   ternline-cli [--session-file PATH] workspace organization
-  ternline-cli [--session-file PATH] workspace create --name NAME --working-directory PATH [--terminal-cwd PATH] [--description TEXT] [--color COLOR] [--rows N] [--cols N] [--expected-revision N] [--idempotency-key UUID] [--command PROGRAM ARG...]
+  ternline-cli [--session-file PATH] workspace create --name NAME --working-directory PATH [--terminal-cwd PATH] [--description TEXT] [--color COLOR] [--env KEY=VALUE ...] [--env-file PATH] [--rows N] [--cols N] [--expected-revision N] [--idempotency-key UUID] [--command PROGRAM ARG...]
   ternline-cli [--session-file PATH] workspace pin --workspace-id UUID --pinned true|false --expected-revision N [--idempotency-key UUID]
   ternline-cli [--session-file PATH] workspace reorder --workspace-id UUID --destination-index N --expected-revision N [--idempotency-key UUID]
   ternline-cli [--session-file PATH] workspace select-many --workspace-id UUID [--workspace-id UUID ...] --focused-workspace-id UUID --expected-revision N [--idempotency-key UUID]
@@ -142,11 +149,20 @@ Usage:
   ternline-cli [--session-file PATH] request CAPABILITY --params-json JSON
   ternline-cli [--session-file PATH] terminal create --workspace-id UUID --pane-id UUID --cwd PATH [--rows N] [--cols N] [--destination-index N] [--expected-revision N] [--idempotency-key UUID] [--command PROGRAM ARG...]
   ternline-cli [--session-file PATH] terminal send --terminal-id UUID --data TEXT
+  ternline-cli [--session-file PATH] terminal read --terminal-id UUID [--lines N]
+  ternline-cli [--session-file PATH] tab rename --tab-id UUID --title TEXT
   ternline-cli [--session-file PATH] pane split --workspace-id UUID --target-pane-id UUID --axis horizontal|vertical [--placement before|after] [--ratio R] --expected-revision N [--idempotency-key UUID] terminal --cwd PATH [--rows N] [--cols N] [--command PROGRAM ARG...]
   ternline-cli [--session-file PATH] pane split --workspace-id UUID --target-pane-id UUID --axis horizontal|vertical [--placement before|after] [--ratio R] --expected-revision N [--idempotency-key UUID] browser --url URL [--profile-partition PARTITION]
   ternline-cli [--session-file PATH] pane split --workspace-id UUID --target-pane-id UUID --axis horizontal|vertical [--placement before|after] [--ratio R] --expected-revision N [--idempotency-key UUID] existing-tab --tab-id UUID
   ternline-cli [--session-file PATH] browser-automation list
   ternline-cli [--session-file PATH] browser-automation create|get|execute|cancel|read|release|destroy --params-json JSON
+  ternline-cli [--session-file PATH] browser open --url URL [--session-id UUID]
+  ternline-cli [--session-file PATH] browser click --session-id UUID --selector CSS
+  ternline-cli [--session-file PATH] browser type --session-id UUID --selector CSS --text TEXT
+  ternline-cli [--session-file PATH] browser eval --session-id UUID --expression JAVASCRIPT
+  ternline-cli [--session-file PATH] browser query --session-id UUID --selector CSS [--limit N]
+  ternline-cli [--session-file PATH] browser screenshot --session-id UUID [--width N] [--height N] [--output PATH]
+  ternline-cli [--session-file PATH] browser console|errors --session-id UUID [--clear true|false]
 
 On Linux and macOS, --session-file is optional when the desktop published its private Node
 discovery record. AGENT_WORKSPACE_NODE_SESSION_FILE can override that path. The record must be
@@ -180,6 +196,7 @@ interface WorkspaceCreateOptions {
   expectedRevision?: number
   idempotencyKey?: string
   command?: string[]
+  environment?: Record<string, string>
 }
 
 interface RevisionOptions {
@@ -199,6 +216,7 @@ interface NotificationOptions {
 }
 
 type Parsed =
+  | TerminalCommand
   | {
       sessionFile: string
       command:
@@ -365,8 +383,9 @@ function parseTerminalCreate(args: string[]): TerminalCreateOptions {
 }
 
 function parseWorkspaceCreate(args: string[]): WorkspaceCreateOptions {
+  const env = workspaceEnvironment(args)
   const { values, command } = flags(
-    args,
+    env.args,
     [
       '--name',
       '--working-directory',
@@ -385,6 +404,7 @@ function parseWorkspaceCreate(args: string[]): WorkspaceCreateOptions {
   }
   return {
     name: required(values, '--name'),
+    ...(env.environment === undefined ? {} : { environment: env.environment }),
     workingDirectory: required(values, '--working-directory'),
     rows: integerOption(values.get('--rows') ?? '24', '--rows', 1),
     cols: integerOption(values.get('--cols') ?? '80', '--cols', 1),
@@ -450,6 +470,8 @@ function parse(argv: string[]): Parsed {
   }
   const browserAutomation = parseBrowserAutomation(args, sessionFile)
   if (browserAutomation) return browserAutomation
+  const terminalCommand = parseTerminalCommand(args, sessionFile)
+  if (terminalCommand) return terminalCommand
   const organization = parseOrganizationCommand(args, sessionFile)
   if (organization) return organization
   const layoutMutation = parseLayoutCommand(args, sessionFile)
@@ -888,6 +910,16 @@ async function main(): Promise<void> {
   }
   let result: unknown
   switch (parsed.command) {
+    case 'terminal.read': {
+      const read = await readTerminalText(client, parsed.terminalId, parsed.lines)
+      if (!read.reconstructionComplete)
+        process.stderr.write('ternline-cli: Retained terminal output is incomplete\n')
+      process.stdout.write(read.text.endsWith('\n') ? read.text : `${read.text}\n`)
+      return
+    }
+    case 'tab.rename':
+      result = await renameTab(client, parsed.tabId, parsed.title)
+      break
     case 'rust.named':
       await requireCapability(parsed.capability)
       result = await runRustNamedCommand(
@@ -926,6 +958,7 @@ async function main(): Promise<void> {
     case 'browser-automation.read':
     case 'browser-automation.release':
     case 'browser-automation.destroy':
+    case 'browser.run':
       result = await runBrowserAutomation(client, parsed)
       break
     case 'identify':
@@ -962,6 +995,7 @@ async function main(): Promise<void> {
         workingDirectory: options.workingDirectory,
         ...(options.description === undefined ? {} : { description: options.description }),
         ...(options.color === undefined ? {} : { color: options.color }),
+        ...(options.environment === undefined ? {} : { environment: options.environment }),
         initialTerminal: {
           cwd: options.terminalCwd ?? options.workingDirectory,
           rows: options.rows,

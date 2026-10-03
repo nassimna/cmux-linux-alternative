@@ -168,6 +168,7 @@ export function projectApplicationSnapshot(
       description: workspace.description,
       color: workspace.color,
       workingDirectory: workspace.workingDirectory,
+      ...(workspace.environment === undefined ? {} : { environment: workspace.environment }),
       layout,
       selectedPaneId: workspace.selectedPaneId,
       panes,

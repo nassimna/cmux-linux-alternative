@@ -895,6 +895,8 @@ export class BrowserViewManager {
       captureOffscreen: (width, height) =>
         new Promise<Buffer>((resolve, reject) => {
           let settled = false
+          let repaintRequested = false
+          let repaintReady = false
           const finish = (bytes?: Buffer): void => {
             if (settled) return
             settled = true
@@ -909,7 +911,23 @@ export class BrowserViewManager {
             image: Electron.NativeImage
           ): void => {
             const size = image.getSize()
-            if (size.width === width && size.height === height) finish(image.toPNG())
+            if (size.width !== width || size.height !== height) return
+            if (!repaintRequested) {
+              repaintRequested = true
+              void contents
+                .executeJavaScript(
+                  'new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve())))'
+                )
+                .then(() => {
+                  if (!settled) {
+                    repaintReady = true
+                    contents.invalidate()
+                  }
+                })
+                .catch(() => finish())
+              return
+            }
+            if (repaintReady) finish(image.toPNG())
           }
           const timeout = setTimeout(() => finish(), 3_000)
           contents.on('paint', onPaint)

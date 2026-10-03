@@ -11,6 +11,7 @@ import type {
 } from '@agent-workspace/contracts'
 
 import { linuxListeningPorts } from './linux-listening-ports'
+import { macosListeningPorts } from './macos-listening-ports'
 import type { SshLaunchPlan } from '../remote/ssh-launch-plan'
 
 export const MAX_OUTPUT_CHUNK_BYTES = 64 * 1024
@@ -97,7 +98,8 @@ export class TerminalService {
 
   public async create(
     request: TerminalCreateParams,
-    context?: TerminalContext
+    context?: TerminalContext,
+    environment?: Record<string, string>
   ): Promise<{ terminal: TerminalDescriptor }> {
     if (this.disposed) throw new TerminalServiceError('service_stopping', 'Service is stopping')
     const cwd = resolve(request.cwd ?? process.cwd())
@@ -116,7 +118,7 @@ export class TerminalService {
       throw new TerminalServiceError('invalid_command', 'Terminal command cannot be empty')
     }
 
-    const env = { ...process.env }
+    const env = { ...process.env, ...environment }
     delete env.AGENT_WORKSPACE_SERVER_TOKEN
     delete env.AGENT_WORKSPACE_WORKSPACE_ID
     delete env.AGENT_WORKSPACE_PANE_ID
@@ -229,7 +231,9 @@ export class TerminalService {
       terminalId: id,
       listeningPorts:
         !descriptor.exited && descriptor.processId
-          ? await linuxListeningPorts(descriptor.processId)
+          ? await (process.platform === 'darwin' ? macosListeningPorts : linuxListeningPorts)(
+              descriptor.processId
+            )
           : []
     }
   }
