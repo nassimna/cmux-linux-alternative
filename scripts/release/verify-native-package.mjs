@@ -168,7 +168,7 @@ async function waitForOutput(terminalId) {
 }
 
 async function stop(child) {
-  if (!child?.pid) return
+  if (!child?.pid || child.exitCode !== null || child.signalCode !== null) return
   if (process.platform === 'win32') {
     await execFileAsync('taskkill.exe', ['/PID', String(child.pid), '/T', '/F']).catch(
       () => undefined
@@ -176,21 +176,16 @@ async function stop(child) {
     return
   }
   try {
-    process.kill(-child.pid, 'SIGTERM')
+    child.kill('SIGTERM')
   } catch (error) {
     if (error.code !== 'ESRCH') throw error
   }
   for (let attempt = 0; attempt < 20; attempt += 1) {
-    try {
-      process.kill(-child.pid, 0)
-    } catch (error) {
-      if (error.code === 'ESRCH') return
-      throw error
-    }
+    if (child.exitCode !== null || child.signalCode !== null) return
     await delay(250)
   }
   try {
-    process.kill(-child.pid, 'SIGKILL')
+    child.kill('SIGKILL')
   } catch (error) {
     if (error.code !== 'ESRCH') throw error
   }
