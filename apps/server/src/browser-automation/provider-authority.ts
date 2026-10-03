@@ -73,13 +73,15 @@ export class BrowserAutomationProviderAuthority {
   }
 
   /** Selects a current private-pipe claim; ambiguity is never resolved by window order. */
-  public claim(requested?: ActionInvocationTarget): Lease {
+  public claim(requested?: ActionInvocationTarget | string): Lease {
     const candidates = [...this.leases.values()].filter(
       ({ identity, target }) =>
         this.isCurrent(identity, target) &&
         (!requested ||
-          (requested.windowId === target.windowId &&
-            requested.windowGeneration === target.windowGeneration))
+          (typeof requested === 'string'
+            ? requested === target.windowId
+            : requested.windowId === target.windowId &&
+              requested.windowGeneration === target.windowGeneration))
     )
     if (candidates.length !== 1)
       throw new Error(candidates.length === 0 ? 'provider_unavailable' : 'provider_ineligible')

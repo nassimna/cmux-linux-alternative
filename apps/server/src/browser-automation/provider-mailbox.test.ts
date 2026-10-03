@@ -153,3 +153,22 @@ describe('browser automation provider mailbox', () => {
     mailbox.dispose()
   })
 })
+it('rejects an attachment acknowledgement for another tab in the requested window', async () => {
+  const mailbox = new BrowserAutomationProviderMailbox(() => true)
+  const request = createRequest()
+  if (request.kind !== 'create') throw new Error('expected create')
+  request.provision = { ...request.provision, mode: 'attach', requestedTabId: id('9') }
+  const published = mailbox.publish(request)
+  await mailbox.poll({ identity, timeoutMs: 0 })
+  const ack = successAck()
+  ack.session = {
+    ...ack.session!,
+    mode: 'attach',
+    target: { ...ack.session!.target, tabId: id('12') }
+  }
+  expect(() => mailbox.acknowledge(ack)).toThrow('invalid_operation')
+  ack.session.target.tabId = id('9')
+  mailbox.acknowledge(ack)
+  expect(await published.completion).toMatchObject({ kind: 'acknowledge' })
+  mailbox.dispose()
+})

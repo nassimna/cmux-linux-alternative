@@ -80,6 +80,12 @@ class FakeSession extends EventEmitter {
 }
 
 class FakeWebContents extends EventEmitter {
+  public readonly debugger = Object.assign(new EventEmitter(), {
+    isAttached: vi.fn(() => false),
+    attach: vi.fn(),
+    detach: vi.fn(),
+    sendCommand: vi.fn(() => Promise.resolve({}))
+  })
   public readonly close = vi.fn(() => {
     this.destroyed = true
   })
@@ -549,7 +555,11 @@ describe('BrowserViewManager', () => {
     expect(preferences[0]).toMatchObject({ backgroundThrottling: false, offscreen: true })
     expect(remoteSession.permissionCheck?.(null, 'media', '', {} as never)).toBe(false)
     expect(automationWindow?.webContents.loadURL).toHaveBeenCalledWith('about:blank')
+    await page.initialize()
     await expect(page.capture(320, 240)).resolves.toEqual(Buffer.from('png'))
+    expect(automationWindow?.webContents.debugger.sendCommand).toHaveBeenCalledWith(
+      'Emulation.setDeviceMetricsOverride', { width: 320, height: 240, deviceScaleFactor: 1, mobile: false }
+    )
     expect(automationWindow?.setContentSize).toHaveBeenCalledWith(320, 240, false)
     expect(automationWindow?.webContents.capturePage).not.toHaveBeenCalled()
     expect(automationWindow?.webContents.invalidate).toHaveBeenCalledTimes(2)

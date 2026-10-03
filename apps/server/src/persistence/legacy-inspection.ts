@@ -4,7 +4,7 @@ import { z } from 'zod'
 import { durableApplicationStateSchema } from '@agent-workspace/contracts'
 
 import { RUST_SCHEMA_V15_SQL } from './legacy-schema-v15'
-import { BROWSER_AUTOMATION_OPERATIONS_SCHEMA_SQL } from './browser-automation-schema'
+import { isSupportedBrowserAutomationSchema } from './browser-automation-schema'
 
 const RUST_SCHEMA_VERSION = 15
 const legacySnapshotEnvelope = z.object({
@@ -119,10 +119,7 @@ export function inspectLegacyConnection(database: Database.Database): LegacyData
       if (
         actual === undefined ||
         (normalizedSchema(actual) !== normalizedSchema(expected) &&
-          !(
-            name === 'browser_automation_operations' &&
-            normalizedSchema(actual) === normalizedSchema(BROWSER_AUTOMATION_OPERATIONS_SCHEMA_SQL)
-          ))
+          !(name === 'browser_automation_operations' && isSupportedBrowserAutomationSchema(actual)))
       ) {
         throw new LegacyDatabaseError(
           'invalid_schema',

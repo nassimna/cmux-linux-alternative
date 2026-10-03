@@ -80,6 +80,53 @@ the packaged process tree averaged 0.8893% CPU during a five-minute idle window 
 settle (strict limit below 1%). Cold/warm launch and resize passed their informational targets. This does not qualify the Node package or the unrun eight-hour soak; see
 [Performance](docs/PERFORMANCE.md).
 
+## Browser automation for agents
+
+The CLI controls an isolated browser session or attaches to an existing browser tab after
+its owner approves. Every operation uses `--session-id`; `browser open` without one creates
+an isolated session and returns its ID. For example:
+
+```sh
+ternline-cli browser open --url http://localhost:3000
+ternline-cli browser attach --tab-id UUID
+ternline-cli browser snapshot --session-id UUID
+ternline-cli browser type --session-id UUID --role textbox --name Email --text user@example.com --clear
+ternline-cli browser click --session-id UUID --role button --name Submit
+ternline-cli browser press --session-id UUID --key a --modifiers control
+ternline-cli browser wait --session-id UUID --text Saved --timeout-ms 10000
+ternline-cli browser screenshot --session-id UUID --output result.png
+```
+
+Use `--selector CSS` or `--text-target TEXT` instead of role/name locators. `browser query`
+returns matching element text, values and attributes. `browser eval --expression JAVASCRIPT`
+returns a JSON value. `browser scroll --delta-y 600 [--selector CSS]`, `browser resize
+--width 1280 --height 720`, and `browser appearance --theme light|dark|system` control the view.
+All these commands also require `--session-id UUID`.
+
+Start diagnostics before navigating to include initial page traffic:
+
+```sh
+ternline-cli browser network start --session-id UUID
+ternline-cli browser open --session-id UUID --url http://localhost:3000
+ternline-cli browser network list --session-id UUID
+ternline-cli browser network get --session-id UUID --request-id ID
+ternline-cli browser network body --session-id UUID --request-id ID
+ternline-cli browser console --session-id UUID --follow --level error
+ternline-cli browser errors --session-id UUID --after 0
+ternline-cli browser recording start --session-id UUID --width 1280 --height 720
+ternline-cli browser recording stop --session-id UUID --output flow.webm
+ternline-cli browser network stop --session-id UUID
+```
+
+Diagnostic output includes cursors for reading new events. `--follow` emits newline-delimited
+JSON and stops normally on Ctrl+C; `--clear` reads and clears the current buffer. Buffers and
+response bodies have bounded retention, so inspect the returned truncation/drop indicators.
+Screenshot and recording downloads verify artifact length and SHA-256, release the transfer
+handle, and return the absolute saved path. Network capture is session scoped; opening user
+DevTools interrupts instrumentation; create a new automation session after closing DevTools.
+Recordings capture browser content without audio, stop automatically after two minutes,
+and have a 16 MiB limit.
+
 ## License
 
 GPL-3.0-or-later. See [LICENSE](LICENSE) and [NOTICE](NOTICE).

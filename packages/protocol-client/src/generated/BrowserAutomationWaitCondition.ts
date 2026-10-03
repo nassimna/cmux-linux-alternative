@@ -2,4 +2,4 @@
 import type { BrowserAutomationSelectorCondition } from "./BrowserAutomationSelectorCondition";
 import type { BrowserAutomationWaitLifecycle } from "./BrowserAutomationWaitLifecycle";
 
-export type BrowserAutomationWaitCondition = { "kind": "lifecycle", lifecycle: BrowserAutomationWaitLifecycle, } | { "kind": "selector", selector: string, condition: BrowserAutomationSelectorCondition, };
+export type BrowserAutomationWaitCondition = { "kind": "lifecycle", lifecycle: BrowserAutomationWaitLifecycle, } | { "kind": "selector", selector: string, condition: BrowserAutomationSelectorCondition, } | {kind:"text",text:string} | {kind:"url",includes:string};

@@ -2,10 +2,27 @@ import type Database from 'better-sqlite3'
 
 import { RUST_SCHEMA_V15_SQL } from './legacy-schema-v15'
 
-export const BROWSER_AUTOMATION_OPERATIONS_SCHEMA_SQL =
+export const PREVIOUS_BROWSER_AUTOMATION_OPERATIONS_SCHEMA_SQL =
   RUST_SCHEMA_V15_SQL.browser_automation_operations
     .replace("'keyAt', 'screenshot'", "'keyAt', 'screenshot', 'evaluate', 'console', 'errors'")
     .replace("'query', 'screenshot'", "'query', 'screenshot', 'evaluation', 'console', 'errors'")
+
+export const BROWSER_AUTOMATION_OPERATIONS_SCHEMA_SQL =
+  PREVIOUS_BROWSER_AUTOMATION_OPERATIONS_SCHEMA_SQL.replace(
+    "'console', 'errors'",
+    "'console', 'errors', 'snapshot', 'scroll', 'resize', 'appearance', 'networkStart', 'networkStop', 'networkList', 'networkGet', 'networkBody', 'recordingStart', 'recordingStop'"
+  ).replace(
+    "'evaluation', 'console', 'errors'",
+    "'evaluation', 'console', 'errors', 'inspection', 'recording'"
+  )
+
+export function isSupportedBrowserAutomationSchema(sql: string): boolean {
+  return [
+    RUST_SCHEMA_V15_SQL.browser_automation_operations,
+    PREVIOUS_BROWSER_AUTOMATION_OPERATIONS_SCHEMA_SQL,
+    BROWSER_AUTOMATION_OPERATIONS_SCHEMA_SQL
+  ].some((expected) => normalize(sql) === normalize(expected))
+}
 
 function normalize(sql: string): string {
   return sql
@@ -21,7 +38,7 @@ export function migrateBrowserAutomationSchema(database: Database.Database): voi
     )
     .get() as { sql: string }
   if (normalize(definition.sql) === normalize(BROWSER_AUTOMATION_OPERATIONS_SCHEMA_SQL)) return
-  if (normalize(definition.sql) !== normalize(RUST_SCHEMA_V15_SQL.browser_automation_operations)) {
+  if (!isSupportedBrowserAutomationSchema(definition.sql)) {
     throw new Error('Browser automation operation table definition is incompatible')
   }
   database

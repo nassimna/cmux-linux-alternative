@@ -6,7 +6,11 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 
 import type { AgentWorkspaceClient } from '@agent-workspace/client-runtime'
-import { parseBrowserAutomation, runBrowserAutomation } from './browser-automation'
+import {
+  parseBrowserAutomation,
+  runBrowserAutomation,
+  followBrowserDiagnostics
+} from './browser-automation'
 
 void test('browser automation parses list and JSON commands with their existing arity', () => {
   assert.deepEqual(parseBrowserAutomation(['browser-automation', 'list'], '/private/session'), {
@@ -184,7 +188,7 @@ void test('browser open creates a default ephemeral session before navigating', 
       return Promise.resolve({
         operation: {
           state: 'succeeded',
-          navigationEpoch: 1,
+          navigationEpoch: 0,
           result: { kind: 'navigation', navigationEpoch: 1 }
         }
       })
@@ -262,12 +266,13 @@ void test('screenshot output verifies bytes and releases its handle, including o
   const session = { automationSessionId: randomUUID(), generation: 1, navigationEpoch: 0 }
   let released = 0
   let corrupt = false
+  let kind = 'screenshot'
   const client = {
     identify: () => Promise.resolve({ idempotencyEpoch: randomUUID() }),
     listBrowserAutomationSessions: () => Promise.resolve({ sessions: [session] }),
     invokeBrowserAutomationUntilTerminal: () =>
       Promise.resolve({
-        operation: { state: 'succeeded', result: { kind: 'screenshot', handle } }
+        operation: { state: 'succeeded', result: { kind, handle } }
       }),
     readBrowserAutomationScreenshot: ({ chunkIndex }: { chunkIndex: number }) =>
       Promise.resolve({
@@ -293,11 +298,137 @@ void test('screenshot output verifies bytes and releases its handle, including o
     await runBrowserAutomation(client, parsed)
     assert.deepEqual(await readFile(output), png)
     assert.equal(released, 1)
-    corrupt = true
-    await assert.rejects(runBrowserAutomation(client, parsed), /Screenshot content does not match/)
+    kind = 'recording'
+    await runBrowserAutomation(client, parsed)
     assert.equal(released, 2)
+    corrupt = true
+    await assert.rejects(
+      runBrowserAutomation(client, parsed),
+      /Browser artifact content does not match/
+    )
+    assert.equal(released, 3)
     assert.deepEqual(await readFile(output), png)
   } finally {
     await rm(directory, { recursive: true, force: true })
   }
+})
+
+void test('agent controls parse semantic targets, waits, diagnostics and recording without JSON plumbing', () => {
+  const parse = (tail: string[]) =>
+    parseBrowserAutomation(
+      ['browser', ...tail, '--session-id', 'session'],
+      '/private/session'
+    ) as Extract<ReturnType<typeof parseBrowserAutomation>, { command: 'browser.run' }>
+  assert.deepEqual(
+    parse(['type', '--role', 'textbox', '--name', 'Email', '--text', '', '--clear']).operation,
+    { kind: 'typeText', locator: { role: 'textbox', name: 'Email' }, text: '', clear: true }
+  )
+  assert.deepEqual(parse(['press', '--key', 'a', '--modifiers', 'control,shift']).operation, {
+    kind: 'key',
+    key: 'a',
+    modifiers: ['control', 'shift']
+  })
+  assert.deepEqual(parse(['press', '--key', 'Enter', '--text-target', 'Submit']).operation, {
+    kind: 'keyAt',
+    locator: { text: 'Submit' },
+    key: 'Enter'
+  })
+  assert.deepEqual(parse(['wait', '--url', '/done', '--timeout-ms', '1000']).operation, {
+    kind: 'wait',
+    condition: { kind: 'url', includes: '/done' }
+  })
+  assert.equal(parse(['wait', '--text', 'Saved', '--timeout-ms', '1000']).timeoutMs, 1000)
+  assert.deepEqual(parse(['scroll', '--delta-y', '-600']).operation, {
+    kind: 'scroll',
+    deltaX: 0,
+    deltaY: -600
+  })
+  assert.deepEqual(parse(['appearance', '--theme', 'dark']).operation, {
+    kind: 'appearance',
+    colorScheme: 'dark'
+  })
+  assert.deepEqual(parse(['network', 'list', '--after', '0']).operation, {
+    kind: 'networkList',
+    after: 0
+  })
+  assert.deepEqual(parse(['network', 'body', '--request-id', 'request']).operation, {
+    kind: 'networkBody',
+    requestId: 'request'
+  })
+  assert.deepEqual(parse(['recording', 'start']).operation, {
+    kind: 'recordingStart',
+    width: 1280,
+    height: 720
+  })
+  assert.equal(parse(['console', '--follow']).follow, true)
+  assert.throws(() => parse(['click', '--selector', 'button', '--role', 'button']), /Choose/)
+  assert.throws(() => parse(['press', '--key', 'a', '--modifiers', 'unknown']), /--modifiers/)
+  assert.throws(() => parse(['wait', '--text', 'Saved', '--url', '/done']), /exactly one/)
+  assert.throws(() => parse(['recording', 'stop']), /--output is required/)
+})
+
+void test('attach derives the owning window and delegates exact lifecycle binding to the provider', async () => {
+  const tabId = randomUUID()
+  const workspaceId = randomUUID()
+  const windowId = randomUUID()
+  const seen: unknown[] = []
+  const client = {
+    identify: () => Promise.resolve({ idempotencyEpoch: randomUUID() }),
+    stateSnapshot: () =>
+      Promise.resolve({
+        snapshot: {
+          workspaces: [{ id: workspaceId, tabs: { [tabId]: { content: { kind: 'browser' } } } }],
+          windowPlacements: [{ id: windowId, workspaceIds: [workspaceId] }]
+        }
+      }),
+    createBrowserAutomationSession: (params: unknown) => {
+      seen.push(params)
+      return Promise.resolve({ session: {} })
+    }
+  } as unknown as AgentWorkspaceClient
+  await runBrowserAutomation(
+    client,
+    parseBrowserAutomation(['browser', 'attach', '--tab-id', tabId], '/private/session')!
+  )
+  assert.equal((seen[0] as { attachWindowId: string }).attachWindowId, windowId)
+  assert.equal((seen[0] as { attachTabId: string }).attachTabId, tabId)
+  assert.equal((seen[0] as { mode: string }).mode, 'attach')
+})
+
+void test('diagnostic follow advances its cursor, clears once and stops without duplicate output', async () => {
+  const controller = new AbortController()
+  const session = { automationSessionId: 'session', generation: 1, navigationEpoch: 3 }
+  const operations: Record<string, unknown>[] = []
+  const emitted: unknown[] = []
+  const client = {
+    identify: () => Promise.resolve({ idempotencyEpoch: randomUUID() }),
+    listBrowserAutomationSessions: () => Promise.resolve({ sessions: [session] }),
+    invokeBrowserAutomationUntilTerminal: (params: { operation: Record<string, unknown> }) => {
+      operations.push(params.operation)
+      if (operations.length === 2) controller.abort()
+      return Promise.resolve({
+        operation: {
+          state: 'succeeded',
+          navigationEpoch: 3,
+          result: {
+            kind: 'console',
+            entries: operations.length === 1 ? [{ sequence: 1 }] : [],
+            cursor: 1
+          }
+        }
+      })
+    }
+  } as unknown as AgentWorkspaceClient
+  const parsed = parseBrowserAutomation(
+    ['browser', 'console', '--session-id', 'session', '--follow', '--clear'],
+    '/private/session'
+  ) as Extract<ReturnType<typeof parseBrowserAutomation>, { command: 'browser.run' }>
+  await followBrowserDiagnostics(client, parsed, controller.signal, (value) => {
+    emitted.push(value)
+  })
+  assert.deepEqual(operations, [
+    { kind: 'console', clear: true },
+    { kind: 'console', clear: false, after: 1 }
+  ])
+  assert.equal(emitted.length, 1)
 })

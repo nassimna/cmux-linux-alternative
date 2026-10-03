@@ -38,6 +38,7 @@ import {
 import { runJsonMutation, supportsJsonMutation } from './json-mutations'
 import {
   parseBrowserAutomation,
+  followBrowserDiagnostics,
   runBrowserAutomation,
   type BrowserAutomationCommand
 } from './browser-automation'
@@ -157,12 +158,24 @@ Usage:
   ternline-cli [--session-file PATH] browser-automation list
   ternline-cli [--session-file PATH] browser-automation create|get|execute|cancel|read|release|destroy --params-json JSON
   ternline-cli [--session-file PATH] browser open --url URL [--session-id UUID]
-  ternline-cli [--session-file PATH] browser click --session-id UUID --selector CSS
-  ternline-cli [--session-file PATH] browser type --session-id UUID --selector CSS --text TEXT
+  ternline-cli [--session-file PATH] browser attach --tab-id UUID
+  ternline-cli [--session-file PATH] browser snapshot --session-id UUID
+  ternline-cli [--session-file PATH] browser click --session-id UUID (--selector CSS | --role ROLE [--name NAME] | --text-target TEXT)
+  ternline-cli [--session-file PATH] browser type --session-id UUID (--selector CSS | --role ROLE [--name NAME] | --text-target TEXT) --text TEXT [--clear]
+  ternline-cli [--session-file PATH] browser press --session-id UUID --key KEY [--modifiers control,shift] [--selector CSS | --role ROLE [--name NAME] | --text-target TEXT]
+  ternline-cli [--session-file PATH] browser wait --session-id UUID (--text TEXT | --url SUBSTRING | --selector CSS) [--timeout-ms N]
+  ternline-cli [--session-file PATH] browser scroll --session-id UUID [--delta-x N] [--delta-y N] [--selector CSS]
+  ternline-cli [--session-file PATH] browser resize --session-id UUID [--width N] [--height N]
+  ternline-cli [--session-file PATH] browser appearance --session-id UUID --theme light|dark|system
   ternline-cli [--session-file PATH] browser eval --session-id UUID --expression JAVASCRIPT
-  ternline-cli [--session-file PATH] browser query --session-id UUID --selector CSS [--limit N]
+  ternline-cli [--session-file PATH] browser query --session-id UUID (--selector CSS | --role ROLE [--name NAME] | --text-target TEXT) [--limit N]
   ternline-cli [--session-file PATH] browser screenshot --session-id UUID [--width N] [--height N] [--output PATH]
-  ternline-cli [--session-file PATH] browser console|errors --session-id UUID [--clear true|false]
+  ternline-cli [--session-file PATH] browser console|errors --session-id UUID [--clear] [--follow] [--level debug|info|warning|error] [--after N]
+  ternline-cli [--session-file PATH] browser network start|stop --session-id UUID
+  ternline-cli [--session-file PATH] browser network list --session-id UUID [--after N]
+  ternline-cli [--session-file PATH] browser network get|body --session-id UUID --request-id ID
+  ternline-cli [--session-file PATH] browser recording start --session-id UUID [--width N] [--height N]
+  ternline-cli [--session-file PATH] browser recording stop --session-id UUID --output PATH
 
 On Linux and macOS, --session-file is optional when the desktop published its private Node
 discovery record. AGENT_WORKSPACE_NODE_SESSION_FILE can override that path. The record must be
@@ -958,7 +971,23 @@ async function main(): Promise<void> {
     case 'browser-automation.read':
     case 'browser-automation.release':
     case 'browser-automation.destroy':
+    case 'browser.attach':
     case 'browser.run':
+      if (parsed.command === 'browser.run' && parsed.follow) {
+        const controller = new AbortController()
+        const stop = () => controller.abort()
+        process.once('SIGINT', stop)
+        process.once('SIGTERM', stop)
+        try {
+          await followBrowserDiagnostics(client, parsed, controller.signal, (value) => {
+            process.stdout.write(`${JSON.stringify(value)}\n`)
+          })
+        } finally {
+          process.removeListener('SIGINT', stop)
+          process.removeListener('SIGTERM', stop)
+        }
+        return
+      }
       result = await runBrowserAutomation(client, parsed)
       break
     case 'identify':

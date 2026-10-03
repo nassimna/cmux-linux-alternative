@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import {
+  browserAutomationOperationSchema,
   browserAutomationOperationInvokeParamsSchema,
   browserAutomationOperationResultDataSchema,
   browserAutomationProviderAcknowledgeParamsSchema,
@@ -26,7 +27,7 @@ function invoke(operation: unknown): unknown {
 }
 
 describe('browser automation schemas', () => {
-  it('accepts only the closed key variants and rejects explicit null ambiguity', () => {
+  it('accepts keyboard operations and rejects explicit null ambiguity', () => {
     expect(
       browserAutomationOperationInvokeParamsSchema.safeParse(invoke({ kind: 'key', key: 'enter' }))
         .success
@@ -95,6 +96,21 @@ describe('browser automation schemas', () => {
     ).toBe(false)
     expect(
       browserAutomationSessionCreateParamsSchema.safeParse({
+        mode: 'attach',
+        ...base,
+        attachTabId: ID,
+        attachWindowId: SECOND_ID
+      }).success
+    ).toBe(true)
+    expect(
+      browserAutomationSessionCreateParamsSchema.safeParse({
+        mode: 'attach',
+        ...base,
+        attachTabId: ID
+      }).success
+    ).toBe(false)
+    expect(
+      browserAutomationSessionCreateParamsSchema.safeParse({
         mode: 'ephemeral',
         ...base,
         target: {
@@ -157,4 +173,55 @@ describe('browser automation schemas', () => {
       ).toBe(false)
     }
   })
+
+  it('requires the correct media type for screenshot and recording results', () => {
+    const handle = {
+      handleId: ID,
+      width: 320,
+      height: 240,
+      byteLength: 3,
+      sha256: '0'.repeat(64),
+      chunkCount: 1,
+      expiresAtMs: 1
+    }
+    for (const [kind, mediaType] of [
+      ['screenshot', 'image/png'],
+      ['recording', 'video/webm']
+    ]) {
+      expect(
+        browserAutomationOperationResultDataSchema.safeParse({
+          kind,
+          handle: { ...handle, mediaType }
+        }).success
+      ).toBe(true)
+      expect(
+        browserAutomationOperationResultDataSchema.safeParse({
+          kind,
+          handle: { ...handle, mediaType: mediaType === 'image/png' ? 'video/webm' : 'image/png' }
+        }).success
+      ).toBe(false)
+    }
+  })
+})
+
+it('accepts browser inspection/control operations and requires unambiguous targets', () => {
+  for (const operation of [
+    { kind: 'snapshot' },
+    { kind: 'networkGet', requestId: '1' },
+    { kind: 'networkBody', requestId: '1' },
+    { kind: 'recordingStart', width: 320, height: 240 },
+    { kind: 'appearance', colorScheme: 'dark' },
+    { kind: 'click', locator: { role: 'button', name: 'Send' } },
+    { kind: 'typeText', locator: { text: 'Message' }, clear: true, text: 'abc' },
+    { kind: 'key', key: 'a', modifiers: ['control'] },
+    { kind: 'wait', condition: { kind: 'text', text: 'Saved' } }
+  ])
+    expect(browserAutomationOperationSchema.safeParse(operation).success).toBe(true)
+  expect(
+    browserAutomationOperationSchema.safeParse({
+      kind: 'click',
+      selector: 'button',
+      locator: { text: 'Send' }
+    }).success
+  ).toBe(false)
 })

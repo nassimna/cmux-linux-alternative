@@ -314,6 +314,7 @@ export class BrowserAutomationDurableRecords {
     const digest = this.sessionDigest({
       mode: request.provision.mode, profileKey: request.provision.profileKey,
       ...(request.provision.requestedTarget ? { target: request.provision.requestedTarget } : {}),
+      ...(request.provision.requestedTabId ? { attachTabId: request.provision.requestedTabId, attachWindowId: request.target.windowId } : {}),
       idempotency: { epoch: options.idempotencyEpoch, key: options.idempotencyKey },
       correlationId: request.correlationId
     })
@@ -482,7 +483,7 @@ export class BrowserAutomationDurableRecords {
           !resultMatches(operation.operation_kind, result) ||
           (result.kind === 'navigation' && result.navigationEpoch !== operation.navigation_epoch + 1)))
         throw new Error('invalid_operation')
-      if (result?.kind === 'screenshot') {
+      if (result?.kind === 'screenshot' || result?.kind === 'recording') {
         const session = this.session(operation.automation_session_id)
         if (!session || session.state !== 'ready' || session.generation !== operation.session_generation ||
             !sameFence(session, ack.identity, ack.target)) throw new Error('session_generation_mismatch')
@@ -628,8 +629,12 @@ export class BrowserAutomationDurableRecords {
 
   private sessionDigest(params: BrowserAutomationSessionCreateParams): string {
     return this.digest('sessionCreate', {
-      mode: params.mode, profileKey: params.profileKey, target: params.target ?? null,
-      idempotency: params.idempotency, correlationId: params.correlationId
+      mode: params.mode,
+      profileKey: params.profileKey,
+      target: params.target ?? null,
+      ...(params.attachTabId ? { attachTabId: params.attachTabId, attachWindowId: params.attachWindowId } : {}),
+      idempotency: params.idempotency,
+      correlationId: params.correlationId
     })
   }
 
@@ -668,7 +673,32 @@ function sameFence(row: SessionRow | OperationRow,
 }
 
 function resultMatches(kind: string, result: BrowserAutomationOperationResultData): boolean {
-  const expected = kind === 'navigate' ? 'navigation' : kind === 'evaluate' ? 'evaluation'
-    : ['query', 'screenshot', 'console', 'errors'].includes(kind) ? kind : 'empty'
+  if (
+    result.kind === 'navigation' &&
+    ['click', 'key', 'keyAt', 'typeText', 'evaluate', 'wait'].includes(kind)
+  )
+    return true
+  const expected =
+    kind === 'navigate'
+      ? 'navigation'
+      : kind === 'evaluate'
+        ? 'evaluation'
+        : kind === 'recordingStop'
+          ? 'recording'
+          : [
+                'snapshot',
+                'resize',
+                'appearance',
+                'networkStart',
+                'networkStop',
+                'networkList',
+                'networkGet',
+                'networkBody',
+                'recordingStart'
+              ].includes(kind)
+            ? 'inspection'
+            : ['query', 'screenshot', 'console', 'errors'].includes(kind)
+              ? kind
+              : 'empty'
   return result.kind === expected
 }

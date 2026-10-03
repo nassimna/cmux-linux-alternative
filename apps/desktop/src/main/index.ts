@@ -1501,6 +1501,12 @@ function createBrowserAutomationManager(approvedProfileKey: string): BrowserAuto
       if (!entry) return Promise.reject(new Error('Automation target window is stale'))
       return Promise.resolve(entry.binding.browserViews.createEphemeralAutomationPage(snapshot))
     },
+    resolveAttachment: (tabId, target) => {
+      const entry = windowRegistry.get(target.windowId)
+      if (!entry || entry.generation !== target.windowGeneration || entry.window.isDestroyed())
+        return undefined
+      return entry.binding.browserViews.resolveAutomationTarget(tabId, target)
+    },
     confirmAttachment: async (target, signal) => {
       if (signal.aborted) return false
       const entry = requireEntry(target)

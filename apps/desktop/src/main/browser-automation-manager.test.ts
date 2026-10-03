@@ -27,10 +27,15 @@ const LIFECYCLE = '10000000-0000-4000-8000-000000000009'
 
 class FakePage implements BrowserAutomationPage {
   public readonly opaquePageToken = {}
+  public readonly initialize = vi.fn(() => Promise.resolve())
+  public readonly inspect = vi.fn(() => Promise.resolve<unknown>({ requests: [] }))
+  public readonly stopRecording = vi.fn(() =>
+    Promise.resolve({ bytes: Buffer.from('webm'), width: 320, height: 240 })
+  )
   public readonly navigate = vi.fn(() => Promise.resolve())
   public readonly waitForLifecycle = vi.fn(() => Promise.resolve())
   public readonly evaluate = vi.fn(() => Promise.resolve<unknown>({ answer: 42 }))
-  public readonly readDiagnostics = vi.fn(() => [])
+  public readonly readDiagnostics = vi.fn(() => ({ entries: [], cursor: 0, dropped: 0 }))
   public readonly dispose = vi.fn()
   public readonly insertText = vi.fn(() => Promise.resolve())
   public readonly sendKey = vi.fn()
@@ -154,13 +159,69 @@ describe('BrowserAutomationManager', () => {
     expect(await manager.execute(request({ kind: 'errors', clear: true }))).toMatchObject({
       result: { kind: 'errors', entries: [] }
     })
-    expect(page.readDiagnostics).toHaveBeenCalledWith('errors', true)
+    expect(page.readDiagnostics).toHaveBeenCalledWith('errors', true, undefined, undefined)
     page.evaluate.mockResolvedValue('x'.repeat(65_536))
     expect(await manager.execute(request({ kind: 'evaluate', expression: 'large' }))).toMatchObject(
       { state: 'failed', errorCode: 'resource_limit' }
     )
     await manager.dispose()
     expect(page.dispose).toHaveBeenCalledOnce()
+  })
+
+  it.each(['before', 'during'])(
+    'waits for a URL with navigation %s the wait and reports the new epoch',
+    async (timing) => {
+      const page = new FakePage()
+      const manager = harness(page)
+      await manager.createSession(session())
+      if (timing === 'before') {
+        page.navigateTopLevel()
+        page.evaluate.mockResolvedValue(true)
+      } else
+        page.evaluate.mockResolvedValueOnce(false).mockImplementation(() => {
+          page.navigateTopLevel()
+          return Promise.resolve(true)
+        })
+      expect(
+        await manager.execute(
+          request({ kind: 'wait', condition: { kind: 'url', includes: '/next' } })
+        )
+      ).toMatchObject({ state: 'succeeded', result: { kind: 'navigation', navigationEpoch: 1 } })
+      await manager.dispose()
+    }
+  )
+
+  it('accepts a link navigation caused by a click and reports the new epoch', async () => {
+    const page = new FakePage()
+    page.executeClosedScript.mockImplementation(() => {
+      page.navigateTopLevel()
+      return Promise.resolve(true)
+    })
+    const manager = harness(page)
+    expect(await manager.execute(request({ kind: 'click', selector: 'a' }))).toMatchObject({
+      state: 'succeeded',
+      result: { kind: 'navigation', navigationEpoch: 1 }
+    })
+    await manager.dispose()
+  })
+
+  it('returns inspection and recording through the same session ownership and artifact transfer', async () => {
+    const page = new FakePage()
+    const manager = harness(page)
+    expect(await manager.execute(request({ kind: 'networkList' }))).toMatchObject({
+      state: 'succeeded',
+      result: { kind: 'inspection', value: { requests: [] } }
+    })
+    const recorded = await manager.execute(request({ kind: 'recordingStop' }))
+    expect(recorded).toMatchObject({
+      state: 'succeeded',
+      result: { kind: 'recording', handle: { mediaType: 'video/webm' } }
+    })
+    if (recorded.result?.kind !== 'recording') throw new Error('recording missing')
+    expect(manager.readScreenshot(SESSION, 1, recorded.result.handle.handleId, 0).dataBase64).toBe(
+      Buffer.from('webm').toString('base64')
+    )
+    await manager.dispose()
   })
 
   it('reports attached sessions, including creation in progress, without counting an idle provider', async () => {
@@ -285,8 +346,8 @@ describe('BrowserAutomationManager', () => {
     expect(page.executeClosedScript).toHaveBeenCalledWith('focus', { selector: '#field' })
     expect(page.executeClosedScript).toHaveBeenCalledWith('click', { selector: '#submit' })
     expect(page.insertText).toHaveBeenCalledWith('private text')
-    expect(page.sendKey).toHaveBeenCalledWith('enter')
-    expect(page.sendKey).toHaveBeenCalledWith('tab')
+    expect(page.sendKey).toHaveBeenCalledWith('enter', undefined)
+    expect(page.sendKey).toHaveBeenCalledWith('tab', undefined)
     expect(page.waitForLifecycle).toHaveBeenCalledWith('load', expect.any(AbortSignal))
   })
 
@@ -405,42 +466,6 @@ describe('BrowserAutomationManager', () => {
 })
 
 describe('createElectronAutomationPage', () => {
-  it('evaluates JSON results and buffers, clears, isolates and releases console and page errors', async () => {
-    const contents = new EventEmitter() as EventEmitter & {
-      executeJavaScript: ReturnType<typeof vi.fn>
-    }
-    contents.executeJavaScript = vi.fn(() => Promise.resolve({ answer: 2 }))
-    const page = createElectronAutomationPage({
-      contents: contents as unknown as Electron.WebContents,
-      owned: false,
-      target: targetBinding(),
-      revalidate: () => true
-    })
-    expect(await page.evaluate('Promise.resolve({answer: 1+1})')).toEqual({ answer: 2 })
-    const emit = (message: string, level = 'info') =>
-      contents.emit('console-message', {
-        message,
-        level,
-        sourceId: 'http://fixture.test',
-        lineNumber: 2
-      })
-    emit('TL_CONSOLE_LOG')
-    emit('Uncaught Error: TL_PAGE_ERROR', 'error')
-    emit('ordinary console.error', 'error')
-    expect(page.readDiagnostics('console', false)).toHaveLength(3)
-    expect(page.readDiagnostics('errors', true)).toMatchObject([
-      { message: 'Uncaught Error: TL_PAGE_ERROR' }
-    ])
-    expect(page.readDiagnostics('errors', false)).toEqual([])
-    for (let index = 0; index < 150; index++) emit('x'.repeat(4_096))
-    expect(
-      Buffer.byteLength(JSON.stringify(page.readDiagnostics('console', true)), 'utf8')
-    ).toBeLessThanOrEqual(65_536)
-    expect(page.readDiagnostics('console', false)).toEqual([])
-    page.dispose()
-    expect(contents.listenerCount('console-message')).toBe(0)
-  })
-
   it('JSON-encodes selector data into the fixed closed script and exposes no bridge primitive', async () => {
     const contents = new EventEmitter() as EventEmitter & {
       loadURL: ReturnType<typeof vi.fn>

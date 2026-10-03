@@ -804,6 +804,28 @@ export class BrowserViewManager {
     if (entry) this.destroyEntry(entry, false)
   }
 
+  public resolveAutomationTarget(
+    tabId: string,
+    window: BrowserAutomationTargetBinding['window']
+  ): BrowserAutomationTargetBinding | undefined {
+    const entry = [...this.entries.values()].find(
+      (entry) =>
+        entry.tabId === tabId &&
+        this.isCurrentEntry(entry) &&
+        !entry.automationBlocked &&
+        !entry.view.webContents.isDestroyed()
+    )
+    if (!entry?.lifecycleId) return undefined
+    return {
+      workspaceId: entry.workspaceId,
+      paneId: entry.paneId,
+      tabId: entry.tabId,
+      browserSessionId: entry.browserSessionId,
+      browserLifecycleId: entry.lifecycleId,
+      window
+    }
+  }
+
   /** Main-only exact attachment. No renderer/preload route reaches this method. */
   public acquireAutomationPage(
     target: BrowserAutomationTargetBinding,

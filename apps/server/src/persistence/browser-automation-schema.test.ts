@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto'
 import Database from 'better-sqlite3'
 import { expect, it } from 'vitest'
 
-import { migrateBrowserAutomationSchema } from './browser-automation-schema'
+import { migrateBrowserAutomationSchema, PREVIOUS_BROWSER_AUTOMATION_OPERATIONS_SCHEMA_SQL } from './browser-automation-schema'
 import { RUST_SCHEMA_V15_SQL } from './legacy-schema-v15'
 import { NATIVE_SCHEMA_SQL } from './native-schema'
 
@@ -59,7 +59,9 @@ function expectNewKinds(database: Database.Database, sessionId: string): void {
   for (const [operation, result] of [
     ['evaluate', 'evaluation'],
     ['console', 'console'],
-    ['errors', 'errors']
+    ['errors', 'errors'],
+    ['networkList', 'inspection'],
+    ['recordingStop', 'recording']
   ]) {
     insertOperation(database, sessionId, operation!, result!)
   }
@@ -86,12 +88,12 @@ it('creates fresh native operation tables with evaluation and diagnostics constr
   }
 })
 
-it('migrates populated version-15 operation tables without losing rows, sequence, indexes or constraints', () => {
+it.each([RUST_SCHEMA_V15_SQL.browser_automation_operations, PREVIOUS_BROWSER_AUTOMATION_OPERATIONS_SCHEMA_SQL])('migrates populated supported operation tables without losing rows or constraints', (definition) => {
   const database = new Database(':memory:')
   try {
     database.pragma('foreign_keys = ON')
     database.exec(RUST_SCHEMA_V15_SQL.browser_automation_sessions)
-    database.exec(RUST_SCHEMA_V15_SQL.browser_automation_operations)
+    database.exec(definition)
     database.exec('CREATE INDEX retained_browser_state ON browser_automation_operations(state)')
     database.exec(`CREATE TABLE retained_browser_audit (operation_id TEXT);
       CREATE TRIGGER retained_browser_update AFTER UPDATE ON browser_automation_operations

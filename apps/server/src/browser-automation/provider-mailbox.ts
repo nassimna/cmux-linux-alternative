@@ -212,21 +212,50 @@ export class BrowserAutomationProviderMailbox {
           ? value.session === undefined && value.result === undefined
           : value.session === undefined && value.result !== undefined
       if (!valid) throw new BrowserAutomationMailboxError('invalid_operation')
-      if (entry.request.kind === 'create' && value.session &&
-          (value.session.mode !== entry.request.provision.mode ||
-           value.session.profileKey !== entry.request.provision.profileKey ||
-           value.session.createdAtMs !== entry.request.provision.createdAtMs ||
-           (entry.request.provision.requestedTarget !== undefined &&
-            !sameBinding(value.session.target, entry.request.provision.requestedTarget))))
+      if (
+        entry.request.kind === 'create' &&
+        value.session &&
+        (value.session.mode !== entry.request.provision.mode ||
+          value.session.profileKey !== entry.request.provision.profileKey ||
+          value.session.createdAtMs !== entry.request.provision.createdAtMs ||
+          (entry.request.provision.requestedTabId !== undefined &&
+            value.session.target.tabId !== entry.request.provision.requestedTabId) ||
+          (entry.request.provision.requestedTarget !== undefined &&
+            !sameBinding(value.session.target, entry.request.provision.requestedTarget)))
+      )
         throw new BrowserAutomationMailboxError('invalid_operation')
       if (entry.request.kind === 'execute' && value.result) {
         const operation = entry.request.request.operation.operation
-        const expectedResult = operation.kind === 'navigate' ? 'navigation'
-          : operation.kind === 'evaluate' ? 'evaluation'
-            : ['query', 'screenshot', 'console', 'errors'].includes(operation.kind) ? operation.kind : 'empty'
-        if (value.result.kind !== expectedResult ||
-            (value.result.kind === 'navigation' &&
-             value.result.navigationEpoch !== entry.request.request.operation.navigationEpoch + 1))
+        const expectedResult =
+          operation.kind === 'navigate' ||
+          (value.result.kind === 'navigation' &&
+            (['click', 'key', 'keyAt', 'typeText', 'evaluate'].includes(operation.kind) ||
+              (operation.kind === 'wait' && operation.condition.kind === 'url')))
+            ? 'navigation'
+            : operation.kind === 'evaluate'
+              ? 'evaluation'
+              : operation.kind === 'recordingStop'
+                ? 'recording'
+                : [
+                      'snapshot',
+                      'resize',
+                      'appearance',
+                      'networkStart',
+                      'networkStop',
+                      'networkList',
+                      'networkGet',
+                      'networkBody',
+                      'recordingStart'
+                    ].includes(operation.kind)
+                  ? 'inspection'
+                  : ['query', 'screenshot', 'console', 'errors'].includes(operation.kind)
+                    ? operation.kind
+                    : 'empty'
+        if (
+          value.result.kind !== expectedResult ||
+          (value.result.kind === 'navigation' &&
+            value.result.navigationEpoch !== entry.request.request.operation.navigationEpoch + 1)
+        )
           throw new BrowserAutomationMailboxError('invalid_operation')
       }
     }

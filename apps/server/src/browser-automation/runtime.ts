@@ -57,7 +57,9 @@ export class BrowserAutomationRuntime {
       if (!pending) throw new Error('interrupted')
       return pending
     }
-    const { identity, target } = this.authority.claim(params.target?.window)
+    const { identity, target } = this.authority.claim(
+      params.target?.window ?? params.attachWindowId
+    )
     const instant = this.instant()
     const request: BrowserAutomationProviderRequest = {
       kind: 'create',
@@ -69,6 +71,7 @@ export class BrowserAutomationRuntime {
         mode: params.mode,
         profileKey: params.profileKey,
         ...(params.target ? { requestedTarget: params.target } : {}),
+        ...(params.attachTabId ? { requestedTabId: params.attachTabId } : {}),
         createdAtMs: instant,
         expiresAtMs: instant + SESSION_TTL_MS
       },

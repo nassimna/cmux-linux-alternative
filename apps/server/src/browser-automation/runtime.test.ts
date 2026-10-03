@@ -9,7 +9,7 @@ import { BrowserAutomationProviderAuthority } from './provider-authority'
 import { BrowserAutomationDurableRecords } from './durable-records'
 import { BrowserAutomationRuntime } from './runtime'
 
-it('publishes create, execute, and destroy through an exact private provider lease', async () => {
+it.each(['navigate', 'click', 'wait'] as const)('publishes sessions through an exact private provider lease with %s navigation', async (navigationKind) => {
   const database = new Database(':memory:')
   database.pragma('foreign_keys = ON')
   database.exec(RUST_SCHEMA_V15_SQL.browser_automation_sessions)
@@ -46,6 +46,19 @@ it('publishes create, execute, and destroy through an exact private provider lea
     .rejects.toThrow('idempotency_conflict')
   const listed = runtime.listSessions()
   expect(listed).toHaveLength(1)
+  const attachParams = { ...createParams, mode: 'attach' as const,
+    attachTabId: ready.target.tabId, attachWindowId: windowId,
+    idempotency: { epoch, key: randomUUID() } }
+  const { caller_id: callerId } = database.prepare('SELECT caller_id FROM browser_automation_sessions LIMIT 1')
+    .get() as { caller_id: string }
+  records.stageSession({ ...create, operationId: randomUUID(), provision: {
+    ...create.provision, automationSessionId: randomUUID(), mode: 'attach',
+    requestedTabId: ready.target.tabId
+  } }, { callerId,
+    idempotencyEpoch: epoch, idempotencyKey: attachParams.idempotency.key })
+  expect(records.sessionReplay(attachParams, callerId)).toMatchObject({ state: 'pending' })
+  expect(() => records.sessionReplay({ ...attachParams, attachTabId: randomUUID() }, callerId))
+    .toThrow('idempotency_conflict')
   expect(runtime.getSession({ automationSessionId: ready.automationSessionId, generation: 1 }))
     .toMatchObject({ state: 'ready' })
   const otherCaller = new BrowserAutomationRuntime(authority, records, randomUUID(), () => epoch, () => 1_000)
@@ -71,7 +84,8 @@ it('publishes create, execute, and destroy through an exact private provider lea
   for (const [operation, result] of [
     [{ kind: 'evaluate', expression: '1+1' }, { kind: 'evaluation', value: 2 }],
     [{ kind: 'console' }, { kind: 'console', entries: [] }],
-    [{ kind: 'errors', clear: true }, { kind: 'errors', entries: [] }]
+    [{ kind: 'errors', clear: true }, { kind: 'errors', entries: [] }],
+    [{ kind: 'networkList' }, { kind: 'inspection', value: { requests: [] } }]
   ] as [BrowserAutomationOperation, BrowserAutomationOperationResultData][]) {
     const params = { automationSessionId: ready.automationSessionId,
       sessionGeneration: 1, navigationEpoch: 1, operationId: randomUUID(), attemptEpoch: 1,
@@ -89,7 +103,10 @@ it('publishes create, execute, and destroy through an exact private provider lea
 
   const navigateParams = { automationSessionId: ready.automationSessionId,
     sessionGeneration: 1, navigationEpoch: 1, operationId: randomUUID(), attemptEpoch: 1,
-    timeoutMs: 10_000, operation: { kind: 'navigate' as const, url: 'https://example.com/' },
+    timeoutMs: 10_000, operation: navigationKind === 'navigate'
+      ? { kind: 'navigate' as const, url: 'https://example.com/' }
+      : navigationKind === 'click' ? { kind: 'click' as const, selector: 'a' }
+        : { kind: 'wait' as const, condition: { kind: 'url' as const, includes: '/next' } },
     idempotency: { epoch, key: randomUUID() }, correlationId: randomUUID() }
   expect(await runtime.invoke(navigateParams)).toMatchObject({ state: 'queued' })
   const navigation = (await authority.mailbox.poll({ identity, timeoutMs: 0 })).request

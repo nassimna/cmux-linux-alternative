@@ -2841,12 +2841,21 @@ export const browserAutomationSessionCreateParamsSchema = z
     mode: browserAutomationSessionModeSchema,
     profileKey: automationProfileKeySchema,
     target: browserAutomationTargetBindingSchema.optional(),
+    attachTabId: uuidSchema.optional(),
+    attachWindowId: uuidSchema.optional(),
     idempotency: actionIdempotencySchema,
     correlationId: uuidSchema
   })
-  .refine(({ mode, target }) => (mode === 'attach') === (target !== undefined), {
-    message: 'attach requires one exact target and ephemeral forbids one'
-  })
+  .refine(
+    ({ mode, target, attachTabId, attachWindowId }) =>
+      mode === 'attach'
+        ? (target !== undefined && attachTabId === undefined && attachWindowId === undefined) ||
+          (target === undefined && attachTabId !== undefined && attachWindowId !== undefined)
+        : target === undefined && attachTabId === undefined && attachWindowId === undefined,
+    {
+      message: 'attach requires an exact target or one tab and window; ephemeral forbids either'
+    }
+  )
 export const browserAutomationSessionSnapshotSchema = z.strictObject({
   automationSessionId: uuidSchema,
   generation: automationPositiveEpochSchema,
@@ -2869,12 +2878,16 @@ export const browserAutomationSessionProvisionSchema = z
     mode: browserAutomationSessionModeSchema,
     profileKey: automationProfileKeySchema,
     requestedTarget: browserAutomationTargetBindingSchema.optional(),
+    requestedTabId: uuidSchema.optional(),
     createdAtMs: revisionSchema,
     expiresAtMs: revisionSchema
   })
   .refine(
-    ({ mode, requestedTarget, createdAtMs, expiresAtMs }) =>
-      (mode === 'attach') === (requestedTarget !== undefined) && expiresAtMs > createdAtMs,
+    ({ mode, requestedTarget, requestedTabId, createdAtMs, expiresAtMs }) =>
+      (mode === 'attach'
+        ? (requestedTarget !== undefined) !== (requestedTabId !== undefined)
+        : requestedTarget === undefined && requestedTabId === undefined) &&
+      expiresAtMs > createdAtMs,
     { message: 'invalid automation session provision' }
   )
 export const browserAutomationSessionResultSchema = z.strictObject({
@@ -2904,70 +2917,126 @@ export const browserAutomationWaitConditionSchema = z.discriminatedUnion('kind',
     kind: z.literal('selector'),
     selector: automationSelectorSchema,
     condition: browserAutomationSelectorConditionSchema
+  }),
+  z.strictObject({ kind: z.literal('text'), text: z.string().min(1).max(1024) }),
+  z.strictObject({ kind: z.literal('url'), includes: z.string().min(1).max(2048) })
+])
+export const browserAutomationKeySchema = z.string().min(1).max(32)
+const browserAutomationLocatorSchema = z
+  .strictObject({
+    role: z.string().min(1).max(64).optional(),
+    name: z.string().max(1024).optional(),
+    text: z.string().min(1).max(1024).optional()
   })
-])
-export const browserAutomationKeySchema = z.enum([
-  'enter',
-  'escape',
-  'tab',
-  'arrowUp',
-  'arrowDown',
-  'arrowLeft',
-  'arrowRight',
-  'home',
-  'end',
-  'pageUp',
-  'pageDown',
-  'backspace',
-  'delete',
-  'space'
-])
+  .refine((value) =>
+    value.role !== undefined
+      ? value.text === undefined
+      : value.text !== undefined && value.name === undefined
+  )
+const automationTargetFields = {
+  selector: automationSelectorSchema.optional(),
+  locator: browserAutomationLocatorSchema.optional()
+}
+const hasOneAutomationTarget = (value: { selector?: string | undefined; locator?: unknown }) =>
+  (value.selector === undefined) !== (value.locator === undefined)
+const automationModifiersSchema = z.array(z.enum(['alt', 'control', 'meta', 'shift'])).max(4)
 export const browserAutomationOperationSchema = z
   .discriminatedUnion('kind', [
     z.strictObject({ kind: z.literal('navigate'), url: automationSafeUrlSchema }),
     z.strictObject({ kind: z.literal('wait'), condition: browserAutomationWaitConditionSchema }),
-    z.strictObject({
-      kind: z.literal('query'),
-      selector: automationSelectorSchema,
-      limit: z.number().int().min(1).max(100)
-    }),
+    z
+      .strictObject({
+        kind: z.literal('query'),
+        ...automationTargetFields,
+        limit: z.number().int().min(1).max(100)
+      })
+      .refine(hasOneAutomationTarget),
     z.strictObject({
       kind: z.literal('evaluate'),
       expression: z
         .string()
         .min(1)
-        .max(48 * 1_024)
+        .max(48 * 1024)
     }),
-    z.strictObject({ kind: z.literal('console'), clear: z.boolean().optional() }),
-    z.strictObject({ kind: z.literal('errors'), clear: z.boolean().optional() }),
-    z.strictObject({ kind: z.literal('focus'), selector: automationSelectorSchema }),
-    z.strictObject({ kind: z.literal('click'), selector: automationSelectorSchema }),
+    ...(['console', 'errors'] as const).map((kind) =>
+      z.strictObject({
+        kind: z.literal(kind),
+        clear: z.boolean().optional(),
+        after: revisionSchema.optional(),
+        level: z.string().max(32).optional()
+      })
+    ),
+    ...(['focus', 'click'] as const).map((kind) =>
+      z
+        .strictObject({ kind: z.literal(kind), ...automationTargetFields })
+        .refine(hasOneAutomationTarget)
+    ),
+    z
+      .strictObject({
+        kind: z.literal('typeText'),
+        ...automationTargetFields,
+        clear: z.boolean().optional(),
+        text: z
+          .string()
+          .refine(
+            (value) => !value.includes('\0') && new TextEncoder().encode(value).length <= 48 * 1024
+          )
+      })
+      .refine(hasOneAutomationTarget),
     z.strictObject({
-      kind: z.literal('typeText'),
-      selector: automationSelectorSchema,
-      text: z
-        .string()
-        .refine(
-          (value) => !value.includes('\0') && new TextEncoder().encode(value).length <= 48 * 1_024
-        )
-    }),
-    z.strictObject({ kind: z.literal('key'), key: browserAutomationKeySchema }),
-    z.strictObject({
-      kind: z.literal('keyAt'),
-      selector: automationSelectorSchema,
-      key: browserAutomationKeySchema
+      kind: z.literal('key'),
+      key: browserAutomationKeySchema,
+      modifiers: automationModifiersSchema.optional()
     }),
     z
       .strictObject({
+        kind: z.literal('keyAt'),
+        ...automationTargetFields,
+        key: browserAutomationKeySchema,
+        modifiers: automationModifiersSchema.optional()
+      })
+      .refine(hasOneAutomationTarget),
+    z
+      .strictObject({
         kind: z.literal('screenshot'),
-        width: z.number().int().min(1).max(4_096),
-        height: z.number().int().min(1).max(4_096)
+        width: z.number().int().min(1).max(4096),
+        height: z.number().int().min(1).max(4096)
       })
-      .refine(({ width, height }) => width * height <= 16_000_000, {
-        message: 'screenshot pixel count exceeds its bound'
+      .refine(({ width, height }) => width * height <= 16_000_000),
+    z.strictObject({ kind: z.literal('snapshot') }),
+    z.strictObject({
+      kind: z.literal('scroll'),
+      deltaX: z.number().finite().min(-100000).max(100000),
+      deltaY: z.number().finite().min(-100000).max(100000),
+      selector: automationSelectorSchema.optional()
+    }),
+    z
+      .strictObject({
+        kind: z.literal('resize'),
+        width: z.number().int().min(1).max(4096),
+        height: z.number().int().min(1).max(4096)
       })
+      .refine(({ width, height }) => width * height <= 16_000_000),
+    z.strictObject({
+      kind: z.literal('appearance'),
+      colorScheme: z.enum(['light', 'dark', 'system'])
+    }),
+    ...(['networkStart', 'networkStop', 'recordingStop'] as const).map((kind) =>
+      z.strictObject({ kind: z.literal(kind) })
+    ),
+    z.strictObject({ kind: z.literal('networkList'), after: revisionSchema.optional() }),
+    ...(['networkGet', 'networkBody'] as const).map((kind) =>
+      z.strictObject({ kind: z.literal(kind), requestId: z.string().min(1).max(128) })
+    ),
+    z
+      .strictObject({
+        kind: z.literal('recordingStart'),
+        width: z.number().int().min(1).max(4096),
+        height: z.number().int().min(1).max(4096)
+      })
+      .refine(({ width, height }) => width * height <= 16_000_000)
   ])
-  .refine((operation) => serializedJsonBytes(operation) <= 64 * 1_024, {
+  .refine((operation) => serializedJsonBytes(operation) <= 64 * 1024, {
     message: 'automation operation exceeds its wire bound'
   })
 export const browserAutomationOperationInvokeParamsSchema = z.strictObject({
@@ -3008,14 +3077,17 @@ const browserAutomationDiagnosticSchema = z.strictObject({
   message: z.string().max(4_096),
   source: z.string().max(2_048),
   line: revisionSchema,
-  timestampMs: revisionSchema
+  timestampMs: revisionSchema,
+  sequence: revisionSchema.optional(),
+  args: z.array(actionJsonValueSchema).max(20).optional(),
+  stack: z.string().max(8192).optional()
 })
 export const browserAutomationScreenshotHandleSchema = z.strictObject({
   handleId: uuidSchema,
   width: z.number().int().min(1).max(4_096),
   height: z.number().int().min(1).max(4_096),
   byteLength: revisionSchema.min(1).max(16 * 1_024 * 1_024),
-  mediaType: z.literal('image/png'),
+  mediaType: z.enum(['image/png', 'video/webm']),
   sha256: lowercaseSha256Schema,
   chunkCount: z.number().int().min(1).max(32),
   expiresAtMs: revisionSchema
@@ -3040,13 +3112,25 @@ export const browserAutomationOperationResultDataSchema = z.discriminatedUnion('
     z
       .strictObject({
         kind: z.literal(kind),
-        entries: z.array(browserAutomationDiagnosticSchema).max(100)
+        entries: z.array(browserAutomationDiagnosticSchema).max(100),
+        cursor: revisionSchema.optional(),
+        dropped: revisionSchema.optional()
       })
       .refine(({ entries }) => serializedJsonBytes(entries) <= 64 * 1_024, {
         message: 'diagnostics exceed their wire bound'
       })
   ),
-  z.strictObject({ kind: z.literal('screenshot'), handle: browserAutomationScreenshotHandleSchema })
+  z.strictObject({
+    kind: z.literal('screenshot'),
+    handle: browserAutomationScreenshotHandleSchema.extend({ mediaType: z.literal('image/png') })
+  }),
+  z.strictObject({
+    kind: z.literal('recording'),
+    handle: browserAutomationScreenshotHandleSchema.extend({ mediaType: z.literal('video/webm') })
+  }),
+  z
+    .strictObject({ kind: z.literal('inspection'), value: actionJsonValueSchema })
+    .refine(({ value }) => serializedJsonBytes(value) <= 64 * 1024)
 ])
 export const browserAutomationOperationSnapshotSchema = z
   .strictObject({
