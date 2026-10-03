@@ -14,6 +14,8 @@
     "build:service": "cargo build --release -p agent-workspace-service -p agent-workspace-cli",
     "build:sidecars": "cargo build --release -p agent-workspace-service -p agent-workspace-cli",
     "dev": "pnpm build:service:debug && pnpm --filter @agent-workspace/desktop dev",
+    "dev:website": "pnpm --filter @ternline/website dev",
+    "build:website": "pnpm --filter @ternline/website build",
     "format": "prettier --write . && cargo fmt --all",
     "format:check": "prettier --check . && cargo fmt --all -- --check",
     "generate:protocol": "cargo test -p agent-workspace-protocol export_bindings -- --nocapture",
@@ -44,6 +46,7 @@
     "eslint-plugin-react-hooks": "catalog:",
     "globals": "catalog:",
     "prettier": "catalog:",
+    "prettier-plugin-astro": "1.1.0",
     "typescript": "catalog:",
     "typescript-eslint": "catalog:"
   }
