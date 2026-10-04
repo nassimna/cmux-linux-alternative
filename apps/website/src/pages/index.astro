@@ -9,7 +9,10 @@ const version = rootPackage.version
 const release = `${repository}/releases/tag/v${version}`
 const releaseFiles = `${repository}/releases/download/v${version}`
 const documentation = `${repository}/blob/main`
-const favicon = `${import.meta.env.BASE_URL.replace(/\/$/, '')}/favicon.svg`
+const publicPath = import.meta.env.BASE_URL.replace(/\/$/, '')
+const favicon = `${publicPath}/favicon.svg`
+const publicKey = `${publicPath}/ternline.pub`
+const hasSignatures = process.env.RELEASE_SIGNATURES_AVAILABLE === 'true'
 const description =
   'Connect your servers. Keep terminals, local browser previews, and context together. Let your shell or agent app drive Ternline through the CLI.'
 const screenshotDescription =
@@ -360,7 +363,7 @@ const sessions = [
           </div>
           <div class="mt-5 flex flex-wrap items-center justify-between gap-3 text-xs leading-relaxed text-muted">
             <p>
-              Early, unsigned builds.{' '}
+              Early builds without macOS or Windows code signing.{' '}
               <a
                 href={`${documentation}/docs/INSTALLATION.md`}
                 class="text-accent underline underline-offset-4"
@@ -368,12 +371,19 @@ const sessions = [
                 Installation notes
               </a>
             </p>
-            <div class="flex gap-5">
+            <div class="flex flex-wrap gap-5">
               <a
                 href={`${releaseFiles}/SHA256SUMS`}
                 class="underline underline-offset-4 hover:text-ink"
               >
                 Checksums
+              </a>
+              <a
+                href={publicKey}
+                download="ternline.pub"
+                class="underline underline-offset-4 hover:text-ink"
+              >
+                Public key
               </a>
               <a
                 href={`${documentation}/README.md`}
@@ -383,6 +393,71 @@ const sessions = [
               </a>
             </div>
           </div>
+          <details
+            id="verify-downloads"
+            class="group mt-5 rounded-md border border-line px-5 py-4 text-sm"
+          >
+            <summary class="flex list-none items-center justify-between gap-5 text-ink">
+              Verify a download
+              <span aria-hidden="true" class="text-lg text-muted group-open:hidden">
+                +
+              </span>
+              <span aria-hidden="true" class="hidden text-lg text-muted group-open:block">
+                −
+              </span>
+            </summary>
+            {hasSignatures ? (
+              <div class="mt-4 space-y-4 text-xs leading-relaxed text-muted">
+                <p>
+                  Optional: check that your installer was signed with Ternline’s release key and has
+                  not changed. This does not remove macOS or Windows security warnings.
+                </p>
+                <ol class="list-decimal space-y-2 pl-5">
+                  <li>
+                    Download your installer and its matching <code>.sig</code> file from the{' '}
+                    <a href={release} class="text-accent underline underline-offset-4">
+                      release files
+                    </a>
+                    .
+                  </li>
+                  <li>
+                    Download our{' '}
+                    <a
+                      href={publicKey}
+                      download="ternline.pub"
+                      class="text-accent underline underline-offset-4"
+                    >
+                      public key
+                    </a>{' '}
+                    and put all three files in the same folder.
+                  </li>
+                  <li>
+                    Install{' '}
+                    <a
+                      href="https://jedisct1.github.io/minisign/"
+                      class="text-accent underline underline-offset-4"
+                    >
+                      Minisign
+                    </a>{' '}
+                    and run this command, replacing <code>FILE</code> with your installer’s
+                    filename.
+                  </li>
+                </ol>
+                <pre class="overflow-x-auto rounded border border-line bg-[#15121e] p-3 text-ink"><code>minisign -Vm FILE -x FILE.sig -p ternline.pub</code></pre>
+                <p>
+                  Install only if verification succeeds. If it fails, do not run the installer. Keep
+                  a trusted copy of the public key for future downloads. Signatures confirm the
+                  file’s origin and integrity; they are not a malware scan.
+                </p>
+              </div>
+            ) : (
+              <p class="mt-4 text-xs leading-relaxed text-muted">
+                This release does not include signature files. Use the checksums above to check your
+                download for corruption. Signature verification will be available with future signed
+                releases.
+              </p>
+            )}
+          </details>
         </section>
 
         <section
