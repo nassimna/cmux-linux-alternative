@@ -6,8 +6,8 @@ The website recommends your OS and offers every installer so you can choose anot
 architecture. On Macs that do not expose their CPU architecture to the browser, choose Apple
 Silicon or Intel manually using **About This Mac**.
 
-The current release is an unsigned prerelease. It does not include macOS notarization or Windows
-Authenticode signing and may show an operating-system trust prompt. There is no stable support
+These prereleases do not include macOS notarization or Windows Authenticode signing and may
+show an operating-system trust prompt. There is no stable support
 guarantee. Only install assets from this project's release page after verifying their checksums.
 
 ## Packages and prerequisites
@@ -34,6 +34,35 @@ grep 'agent-workspace-VERSION-x86_64.AppImage$' SHA256SUMS
 On macOS use `shasum -a 256 FILE`. On Windows use `Get-FileHash FILE -Algorithm SHA256` in
 PowerShell. Compare the complete hash to the matching filename in `SHA256SUMS`. SHA-256 detects
 mismatch with the supplied manifest; it does not replace code signing or trusted delivery.
+
+### Optional signature verification
+
+Releases that include `.sig` files support verification with
+[Minisign](https://jedisct1.github.io/minisign/). Older releases without those files support
+checksum comparison only. Download the installer, its matching `INSTALLER.sig` file from the
+same release, and [Ternline’s public key](../apps/website/public/ternline.pub). The website also
+offers the public key beside its download links. Keep a trusted copy for subsequent releases;
+do not rely on a replacement key supplied by an unofficial download mirror.
+
+Install Minisign using its official instructions. In the folder containing the three files,
+replace `FILE` with your installer’s actual filename and run:
+
+```sh
+minisign -Vm FILE -x FILE.sig -p ternline.pub
+```
+
+The same command works for AppImage, DEB, RPM, DMG, ZIP, and EXE downloads. For example:
+
+```sh
+minisign -Vm agent-workspace-VERSION-x86_64.AppImage -x agent-workspace-VERSION-x86_64.AppImage.sig -p ternline.pub
+```
+
+Install only if verification succeeds. A failure means the file or signature does not match
+the trusted key; do not run that download. You can also verify `SHA256SUMS` with
+`minisign -Vm SHA256SUMS -x SHA256SUMS.sig -p ternline.pub` before comparing installer hashes.
+These signatures authenticate files signed with Ternline’s key. They are not a malware scan,
+do not provide Apple or Microsoft publisher trust, and are not automatically checked by the
+browser or the current in-app updater.
 
 ## Install and launch
 

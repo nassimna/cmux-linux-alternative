@@ -290,9 +290,19 @@ jobs:
             }
           }, null, 2))
           EOF
+      - name: Include the download verification key
+        run: cp apps/website/public/ternline.pub release-assets/ternline.pub
       - name: Create combined checksums
         working-directory: release-assets
         run: find . -maxdepth 1 -type f ! -name SHA256SUMS -printf '%f\n' | sort | xargs sha256sum > SHA256SUMS
+      - name: Install download signing tooling
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends minisign
+      - name: Test download signature verification
+        run: bash scripts/release/sign-downloads.test.sh
+      - name: Sign and verify release downloads
+        env:
+          MINISIGN_SECRET_KEY: ${{ secrets.MINISIGN_SECRET_KEY }}
+        run: bash scripts/release/sign-downloads.sh release-assets
       - name: Create prerelease
         env:
           GH_TOKEN: ${{ github.token }}
@@ -305,4 +315,4 @@ jobs:
           if gh release view "$tag" >/dev/null 2>&1; then echo "Release $tag already exists" >&2; exit 1; fi
           gh release create "$tag" release-assets/* --verify-tag --prerelease \
             --title "Ternline ${tag}" \
-            --notes 'Unsigned alpha desktop packages for Linux, macOS, and Windows. Verify downloads against SHA256SUMS.'
+            --notes 'Alpha desktop packages for Linux, macOS, and Windows. Downloads and SHA256SUMS have Minisign signatures; see the installation guide for verification. macOS and Windows packages do not have platform code signing or notarization.'

@@ -49,6 +49,8 @@ The release contains:
 - Windows x64 NSIS EXE.
 - Platform alpha updater manifests and their blockmaps.
 - Deterministic `SHA256SUMS` and a `release-manifest.json` identifying the version and source commit.
+- `ternline.pub` and a Minisign `.sig` for every download, updater manifest, blockmap, and
+  checksum manifest.
 
 Publication rejects colliding artifact names and verifies every expected installer is present.
 The macOS updater manifest combines both architectures and retains their individual hashes.
@@ -71,10 +73,31 @@ Unsigned macOS builds require manual installation;
 
 ## Signing and qualification limits
 
-These are unsigned prereleases: signing secrets are not configured. The native build disables
-macOS signing/notarization explicitly. Windows installers have no Authenticode signature.
-Checksums are integrity evidence and do not replace code signing or trusted delivery. A stable
+These prereleases have detached download signatures once the release signing key is configured.
+The native build disables macOS signing/notarization explicitly. Windows installers have no
+Authenticode signature. Detached signatures do not replace platform code signing. A stable
 release requires maintainer-owned signing and notarization credentials and their verification.
+
+### Download signing key
+
+The tracked verification key is `apps/website/public/ternline.pub`. Keep its corresponding
+private key outside the repository, with owner-only permissions and a secure backup. Generate
+the pair once with Minisign, using an unencrypted secret key for unattended CI:
+
+```sh
+minisign -G -W -s /PRIVATE/DIRECTORY/ternline.key -p apps/website/public/ternline.pub
+```
+
+Do not regenerate or overwrite an existing release key. Configure the repository Actions
+secret `MINISIGN_SECRET_KEY` with the complete contents of `ternline.key`; never publish that
+file. The local key is unencrypted and must remain private. The public key is safe to publish.
+
+The publish job installs Minisign, runs `bash scripts/release/sign-downloads.test.sh`, copies
+the public key into the release, creates checksums, and runs
+`bash scripts/release/sign-downloads.sh release-assets`. The signer verifies the checksums,
+creates each detached signature, and verifies it against the tracked public key. A missing
+secret or mismatched key blocks publication. Temporary private-key files are removed when the
+signer exits. These signatures do not change the in-app updater’s verification behavior.
 
 Hosted startup and CLI/PTY checks do not prove physical-device GPU behavior, desktop notifications,
 installer trust UX, accessibility with assistive technology, an eight-hour soak, or complete
@@ -115,6 +138,10 @@ GitHub Pages must use GitHub Actions as its build source. **Deploy website** bui
 base path `/ternline/` and only publishes after the versioned GitHub release assets
 exist. Its manual dispatch supports subsequent website-only updates after verifying that release.
 The site derives the version from the root manifest; every platform link addresses that exact tag.
+The deployment checks for a complete installer signature set, `SHA256SUMS.sig`, and `ternline.pub`
+before enabling the website’s verification instructions through `RELEASE_SIGNATURES_AVAILABLE`.
+Older releases without signatures keep checksum guidance; an incomplete signature set blocks
+deployment. The website serves the tracked public key under the same `/ternline/` base path.
 
 ## Rollback
 
