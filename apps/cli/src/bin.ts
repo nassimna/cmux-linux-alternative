@@ -43,6 +43,7 @@ import {
   type BrowserAutomationCommand
 } from './browser-automation'
 import { flags, jsonParams, required } from './options'
+import { parseBrowserFetch, runBrowserFetch, type BrowserFetchCommand } from './browser-fetch'
 import {
   parseTerminalCommand,
   readTerminalText,
@@ -157,6 +158,7 @@ Usage:
   ternline-cli [--session-file PATH] pane split --workspace-id UUID --target-pane-id UUID --axis horizontal|vertical [--placement before|after] [--ratio R] --expected-revision N [--idempotency-key UUID] existing-tab --tab-id UUID
   ternline-cli [--session-file PATH] browser-automation list
   ternline-cli [--session-file PATH] browser-automation create|get|execute|cancel|read|release|destroy --params-json JSON
+  ternline-cli browser fetch --engine lightpanda --url URL [--executable PATH] [--format markdown|html] [--wait-selector CSS] [--timeout-ms N]
   ternline-cli [--session-file PATH] browser open --url URL [--session-id UUID]
   ternline-cli [--session-file PATH] browser attach --tab-id UUID
   ternline-cli [--session-file PATH] browser snapshot --session-id UUID
@@ -230,6 +232,7 @@ interface NotificationOptions {
 
 type Parsed =
   | TerminalCommand
+  | BrowserFetchCommand
   | {
       sessionFile: string
       command:
@@ -481,6 +484,8 @@ function parse(argv: string[]): Parsed {
   if (args.length === 1 && args[0] === 'identify') {
     return { sessionFile, command: 'identify' }
   }
+  const browserFetch = parseBrowserFetch(args, sessionFile)
+  if (browserFetch) return browserFetch
   const browserAutomation = parseBrowserAutomation(args, sessionFile)
   if (browserAutomation) return browserAutomation
   const terminalCommand = parseTerminalCommand(args, sessionFile)
@@ -851,6 +856,10 @@ async function main(): Promise<void> {
     return
   }
   const parsed = parse(args)
+  if (parsed.command === 'browser.fetch') {
+    process.stdout.write(`${JSON.stringify(await runBrowserFetch(parsed))}\n`)
+    return
+  }
   if (parsed.command === 'hook.install') {
     await hookInstall(parsed.agent)
     process.stdout.write('installed\n')

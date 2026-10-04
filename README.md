@@ -81,6 +81,19 @@ settle (strict limit below 1%). Cold/warm launch and resize passed their informa
 
 ## Browser automation for agents
 
+For experimental page reading without a desktop session, use an independently installed
+[Lightpanda 1.0.0](https://github.com/lightpanda-io/browser/releases/tag/1.0.0) executable:
+
+```sh
+ternline-cli browser fetch --engine lightpanda --url https://nassimna.github.io/ternline/ --executable /path/to/lightpanda
+```
+
+This opt-in command returns JSON containing Markdown or HTML after JavaScript execution.
+It starts a fresh process, disables telemetry, and does not reuse desktop cookies or profiles.
+Lightpanda does not render page pixels; embedded panes, interactive automation, screenshots,
+and recordings continue to use Chromium. See the [CLI reference](docs/CLI.md#lightpanda-page-reading)
+for limits and readiness options.
+
 The CLI controls an isolated browser session or attaches to an existing browser tab after
 its owner approves. Every operation uses `--session-id`; `browser open` without one creates
 an isolated session and returns its ID. For example:

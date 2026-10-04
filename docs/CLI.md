@@ -55,3 +55,37 @@ agent-workspace-node terminal send --terminal-id TERMINAL_UUID --data $'pwd\n'
 
 The local `hook install`, `hook uninstall`, and `hook status` commands do not require a running
 desktop. Agent hooks consume bounded input and publish through the authenticated Node service.
+
+## Lightpanda page reading
+
+`browser fetch` is an experimental, opt-in command for agents that need page content after
+JavaScript execution. It runs without a desktop or private session file. Install
+[Lightpanda 1.0.0](https://github.com/lightpanda-io/browser/releases/tag/1.0.0) separately;
+Ternline does not download or bundle it. Linux and macOS executables are available; native
+Windows is not supported by Lightpanda. Run the CLI and Linux executable inside WSL on Windows.
+
+```sh
+ternline-cli browser fetch --engine lightpanda --url https://nassimna.github.io/ternline/ --executable /absolute/path/to/lightpanda
+ternline-cli browser fetch --engine lightpanda --url http://localhost:3000 --format html --wait-selector '#ready'
+```
+
+`--executable` defaults to `LIGHTPANDA_EXECUTABLE`, then `lightpanda` on PATH. `--format` is
+`markdown` (default) or `html`. The JSON response has `engine`, `format`, and `result`;
+`result` is Lightpanda's fetch JSON, including `url`, `http_status`, `content`, and `error`.
+The content includes DOM changes made by page scripts. Lightpanda waits for page load by
+default; `--wait-selector` waits for a CSS selector on asynchronous pages, within Lightpanda's
+five-second readiness window. Empty pages may return empty content. Navigation, readiness,
+and HTTP 400+ errors fail with a nonzero CLI exit.
+
+`--timeout-ms` is a hard process deadline, default 30,000ms and maximum 120,000ms. Each output
+stream is limited to 1 MiB and each HTTP response to 8 MiB; overflow fails rather than returning
+partial output. Each command starts a fresh process without loading or saving desktop cookies
+or profiles. Telemetry and crash dumps are disabled. These bounds do not cap total process memory.
+
+This command executes website JavaScript in an external executable. It does not inherit the
+embedded browser's sandbox, permission, or navigation policy. HTTP(S) entry URLs must have no
+credentials; page scripts and redirects can still reach other URLs, including local services.
+It provides content reading, with no authenticated desktop attachment, form interaction,
+rendered screenshots, or recordings. Use the existing Chromium browser commands for those
+journeys and for visual testing. See [Lightpanda's architecture](https://lightpanda.io/docs/core-concepts/architecture-overview)
+and [fetch reference](https://lightpanda.io/docs/reference/cli/fetch).
