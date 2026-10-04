@@ -5,12 +5,14 @@ import {
   actionInvokeParamsSchema,
   actionCancelParamsSchema,
   paneSplitRequestSchema,
+  workspaceCloseRequestSchema,
   workspaceBatchCloseRequestSchema
 } from '@agent-workspace/contracts'
 
 import { flags, required } from './options'
 
-type Operation = 'workspace.closeSelected' | 'pane.split' | 'action.invoke' | 'action.cancel'
+type Operation =
+  'workspace.close' | 'workspace.closeSelected' | 'pane.split' | 'action.invoke' | 'action.cancel'
 
 export interface ParityCommand {
   sessionFile: string
@@ -37,6 +39,17 @@ function integer(value: string, flag: string, minimum: number, maximum = Number.
 const revisionFlags = ['--expected-revision', '--idempotency-key'] as const
 
 export function parseParityCommand(args: string[], sessionFile: string): ParityCommand | undefined {
+  if (args[0] === 'workspace' && args[1] === 'close') {
+    const { values } = flags(args.slice(2), ['--workspace-id', ...revisionFlags])
+    required(values, '--workspace-id')
+    if (values.has('--expected-revision')) {
+      integer(required(values, '--expected-revision'), '--expected-revision', 0)
+    }
+    if (values.has('--idempotency-key') && !values.has('--expected-revision')) {
+      throw new Error('--idempotency-key requires --expected-revision for safe retries')
+    }
+    return { sessionFile, command: 'parity.mutate', operation: 'workspace.close', values }
+  }
   if (args[0] === 'workspace' && args[1] === 'close-selected') {
     const { values, command } = flags(
       args.slice(2),
@@ -194,6 +207,12 @@ export function parityRequest(parsed: ParityCommand, idempotencyEpoch?: string) 
     idempotencyEpoch,
     idempotencyKey: values.get('--idempotency-key') ?? randomUUID()
   }
+  if (parsed.operation === 'workspace.close') {
+    return workspaceCloseRequestSchema.parse({
+      workspaceId: required(values, '--workspace-id'),
+      ...identity
+    })
+  }
   if (parsed.operation === 'workspace.closeSelected') {
     const workingDirectory = values.get('--replacement-working-directory')
     return workspaceBatchCloseRequestSchema.parse({
@@ -270,13 +289,20 @@ export function parityRequest(parsed: ParityCommand, idempotencyEpoch?: string) 
   })
 }
 
-export function runParityCommand(
+export async function runParityCommand(
   client: AgentWorkspaceClient,
   parsed: ParityCommand,
   epoch?: string
 ): Promise<unknown> {
+  if (parsed.operation === 'workspace.close' && !parsed.values.has('--expected-revision')) {
+    const { snapshot } = await client.stateSnapshot()
+    parsed = { ...parsed, values: new Map(parsed.values) }
+    parsed.values.set('--expected-revision', String(snapshot.revision))
+  }
   const request = parityRequest(parsed, epoch)
   switch (parsed.operation) {
+    case 'workspace.close':
+      return client.closeWorkspace(workspaceCloseRequestSchema.parse(request))
     case 'workspace.closeSelected':
       return client.closeSelectedWorkspaces(workspaceBatchCloseRequestSchema.parse(request))
     case 'pane.split':

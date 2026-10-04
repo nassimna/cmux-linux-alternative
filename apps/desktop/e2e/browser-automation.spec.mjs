@@ -224,7 +224,11 @@ test('attach mode requires trusted approval for the exact live target', async ({
       exactTarget.idempotencyEpoch
     ]
 
-    await expectCliFailure(sessionFile, attachArgs(exactTarget.browserLifecycleId), 'policy_denied')
+    await expectCliFailure(
+      sessionFile,
+      attachArgs(exactTarget.browserLifecycleId),
+      'approval_denied'
+    )
     const approved = await cli(sessionFile, attachArgs(exactTarget.browserLifecycleId))
     attachedSession = approved.session
     expect(attachedSession).toMatchObject({ mode: 'attach', state: 'ready' })
@@ -835,6 +839,290 @@ test('packaged M5 provider and window races terminate once and preserve exact ro
     await application?.close().catch(() => undefined)
     await target.close().catch(() => undefined)
     await rm(profileDirectory, { force: true, recursive: true, maxRetries: 3, retryDelay: 100 })
+  }
+})
+
+// eslint-disable-next-line no-empty-pattern
+test('round 2 CLI feedback survives SPA startup and autonomous navigation', async ({}, testInfo) => {
+  test.setTimeout(180_000)
+  const profileDirectory = await mkdtemp(join(tmpdir(), 'ternline-round2-'))
+  const evidenceDirectory = join(evidenceRoot, 'round2')
+  await mkdir(evidenceDirectory, { recursive: true })
+  await writeFile(join(profileDirectory, '.zshrc'), '# Task-owned round 2 shell.\n')
+  const target = await createBrowserAutomationTestServer()
+  let application
+  let sessionFile
+  const sessions = []
+  try {
+    const harness = await createPackagedElectronHarness(profileDirectory)
+    sessionFile = join(profileDirectory, 'runtime', 'node-cli-session.json')
+    const environment = { ...process.env }
+    delete environment.ELECTRON_RUN_AS_NODE
+    application = await electron.launch({
+      args: [dialogHarnessEntry, `--user-data-dir=${profileDirectory}`, '--disable-gpu'],
+      cwd: desktopDirectory,
+      executablePath: harness.executablePath,
+      env: {
+        ...environment,
+        ...harness.electronEnvironment,
+        AGENT_WORKSPACE_E2E_DIALOG_RESPONSES: JSON.stringify({ messageResponses: [0, 1] }),
+        ELECTRON_DISABLE_SECURITY_WARNINGS: 'true',
+        HOME: profileDirectory,
+        TMPDIR: harness.runtimeDirectory,
+        XDG_RUNTIME_DIR: harness.runtimeDirectory,
+        ZDOTDIR: profileDirectory
+      },
+      timeout: 20_000
+    })
+    const renderer = await application.firstWindow()
+    await expect(renderer.locator('.terminal-pane')).toHaveAttribute('data-process-id', /^\d+$/, {
+      timeout: 20_000
+    })
+    await waitForAutomationCapability(sessionFile)
+    for (const path of ['/', '/push', '/replace', '/redirect']) {
+      const opened = await cli(sessionFile, ['browser', 'open', '--url', `${target.origin}${path}`])
+      expect(opened.operation.state).toBe('succeeded')
+      sessions.push(opened.session)
+    }
+    const sessionId = sessions[1].automationSessionId
+    const browser = (...args) => cli(sessionFile, ['browser', ...args, '--session-id', sessionId])
+    expect(await browser('eval', '--expression', 'location.pathname')).toEqual({
+      kind: 'evaluation',
+      value: '/pushed'
+    })
+    const query = await browser('query', '--selector', 'h1')
+    expect(query.matches[0]).toMatchObject({
+      tag: 'h1',
+      role: 'heading',
+      text: 'M5 hostile automation target'
+    })
+    expect(query).not.toHaveProperty('session')
+    expect(await browser('eval', '--verbose', '--expression', 'Promise.resolve(42)')).toMatchObject(
+      {
+        session: { automationSessionId: sessionId },
+        operation: { result: { kind: 'evaluation', value: 42 } }
+      }
+    )
+    for (const [expression, message] of [
+      ['throw new Error("boom")', 'Error: boom'],
+      ['nope.x', 'ReferenceError: nope is not defined']
+    ]) {
+      const output = await cliFailureOutput(sessionFile, [
+        'browser',
+        'eval',
+        '--session-id',
+        sessionId,
+        '--expression',
+        expression
+      ])
+      expect(output).toContain('evaluation_failed')
+      expect(output).toContain(message)
+      expect(output).toContain('at ')
+    }
+    expect(
+      await browser('eval', '--expression', 'history.pushState({},"","/x"); location.pathname')
+    ).toMatchObject({ kind: 'evaluation', value: '/x', navigation: { url: `${target.origin}/x` } })
+    const beforeNavigation = (await cli(sessionFile, ['browser-automation', 'list'])).sessions.find(
+      (item) => item.automationSessionId === sessionId
+    ).navigationEpoch
+    await browser(
+      'eval',
+      '--expression',
+      'setTimeout(()=>location.replace("/next"),50); "scheduled"'
+    )
+    await expect
+      .poll(
+        async () =>
+          (await cli(sessionFile, ['browser-automation', 'list'])).sessions.find(
+            (item) => item.automationSessionId === sessionId
+          ).navigationEpoch,
+        { timeout: 15_000 }
+      )
+      .toBeGreaterThan(beforeNavigation)
+    expect(await browser('eval', '--expression', 'document.title')).toEqual({
+      kind: 'evaluation',
+      value: 'M5 navigation target'
+    })
+    expect((await cli(sessionFile, ['browser-automation', 'list'])).sessions).toHaveLength(4)
+    expect(
+      await cli(sessionFile, [
+        'browser',
+        'eval',
+        '--session-id',
+        sessions[0].automationSessionId,
+        '--expression',
+        'document.title'
+      ])
+    ).toEqual({ kind: 'evaluation', value: 'M5 hostile automation target' })
+
+    const workspace = await cli(sessionFile, [
+      'workspace',
+      'create',
+      '--name',
+      'Round 2 ports',
+      '--working-directory',
+      profileDirectory
+    ])
+    const portCommand = `python3 -m http.server 0 --bind 127.0.0.1\n`
+    await cli(sessionFile, [
+      'terminal',
+      'send',
+      '--terminal-id',
+      workspace.terminalId,
+      '--data',
+      portCommand
+    ])
+    let port
+    await expect
+      .poll(
+        async () => {
+          const { stdout } = await execFileAsync(cliBinary, [
+            '--session-file',
+            sessionFile,
+            'terminal',
+            'read',
+            '--terminal-id',
+            workspace.terminalId
+          ])
+          port = Number(stdout.match(/Serving HTTP on .* port (\d+)/u)?.[1])
+          return port
+        },
+        { timeout: 10_000 }
+      )
+      .toBeGreaterThan(0)
+    await expect
+      .poll(async () =>
+        (
+          await cli(sessionFile, ['terminal', 'ports', '--terminal-id', workspace.terminalId])
+        ).listeningPorts.includes(port)
+      )
+      .toBe(true)
+    await cli(sessionFile, ['workspace', 'close', '--workspace-id', workspace.workspaceId])
+    expect(
+      (await cli(sessionFile, ['state', 'snapshot'])).snapshot.workspaces.find(
+        (item) => item.id === workspace.workspaceId
+      )
+    ).toBeUndefined()
+
+    await createBrowserSplit(renderer)
+    await navigateBrowser(renderer, `${target.origin}/push`)
+    const tabId = await renderer.evaluate(async () => {
+      const { snapshot } = await globalThis.desktopBridge.listWorkspaces()
+      const workspace = snapshot.workspaces.find(({ id }) => id === snapshot.selectedWorkspaceId)
+      return workspace.panes.find(({ id }) => id === workspace.selectedPaneId).selectedTabId
+    })
+    const attachArgs = ['browser', 'attach', '--tab-id', tabId]
+    await expectCliFailure(sessionFile, attachArgs, 'approval_denied')
+    const attached = await cli(sessionFile, attachArgs)
+    sessions.push(attached.session)
+    const attachedId = attached.session.automationSessionId
+    await cli(sessionFile, [
+      'browser',
+      'type',
+      '--session-id',
+      attachedId,
+      '--selector',
+      '#typed',
+      '--text',
+      'round 2 verified',
+      '--clear'
+    ])
+    await cli(sessionFile, [
+      'browser',
+      'click',
+      '--session-id',
+      attachedId,
+      '--selector',
+      '#commit'
+    ])
+    expect(
+      await cli(sessionFile, [
+        'browser',
+        'eval',
+        '--session-id',
+        attachedId,
+        '--expression',
+        'globalThis.__m5InputCommitted'
+      ])
+    ).toEqual({ kind: 'evaluation', value: true })
+    await cli(sessionFile, [
+      'browser',
+      'screenshot',
+      '--session-id',
+      attachedId,
+      '--width',
+      '1000',
+      '--height',
+      '700',
+      '--output',
+      join(evidenceDirectory, 'attached-browser.png')
+    ])
+
+    await cli(sessionFile, [
+      'browser',
+      'recording',
+      'start',
+      '--session-id',
+      attachedId,
+      '--width',
+      '1000',
+      '--height',
+      '700'
+    ])
+    await cli(sessionFile, [
+      'browser',
+      'type',
+      '--session-id',
+      attachedId,
+      '--selector',
+      '#typed',
+      '--text',
+      'recorded interaction',
+      '--clear'
+    ])
+    await cli(sessionFile, [
+      'browser',
+      'click',
+      '--session-id',
+      attachedId,
+      '--selector',
+      '#commit'
+    ])
+    await delay(600)
+    const recording = await cli(sessionFile, [
+      'browser',
+      'recording',
+      'stop',
+      '--session-id',
+      attachedId,
+      '--output',
+      join(evidenceDirectory, 'flow.webm')
+    ])
+    expect(recording).toMatchObject({
+      kind: 'recording',
+      output: join(evidenceDirectory, 'flow.webm')
+    })
+    expect((await readFile(recording.output)).byteLength).toBeGreaterThan(1000)
+    await testInfo.attach('Approved browser attachment (1000x700 isolated Electron fixture)', {
+      path: join(evidenceDirectory, 'attached-browser.png'),
+      contentType: 'image/png'
+    })
+  } finally {
+    for (const session of sessions) {
+      if (sessionFile)
+        await cli(sessionFile, [
+          'browser-automation',
+          'destroy',
+          '--params-json',
+          JSON.stringify({
+            automationSessionId: session.automationSessionId,
+            generation: session.generation
+          })
+        ]).catch(() => undefined)
+    }
+    await application?.close().catch(() => undefined)
+    await target.close().catch(() => undefined)
+    await rm(profileDirectory, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 })
   }
 })
 

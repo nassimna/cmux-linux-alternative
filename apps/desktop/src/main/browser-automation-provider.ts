@@ -88,7 +88,13 @@ export class BrowserAutomationProvider {
       let result: BrowserAutomationProviderPollResult
       try {
         result = await this.options.transport.poll(
-          { identity: this.options.identity, timeoutMs: POLL_TIMEOUT_MS },
+          {
+            identity: this.options.identity,
+            timeoutMs: POLL_TIMEOUT_MS,
+            navigationUpdates: [...this.options.managers()].flatMap((manager) =>
+              manager.navigationUpdates()
+            )
+          },
           signal
         )
       } catch (error) {
@@ -158,12 +164,10 @@ export class BrowserAutomationProvider {
     if (request.kind === 'create') {
       try {
         const session = await manager.createProvision(request.provision, request.target)
-        if (
-          signal.aborted ||
-          !this.isCurrentManager(manager, request.target) ||
-          !manager.canAcknowledgeSession(session)
-        ) {
-          return
+        if (signal.aborted || !this.isCurrentManager(manager, request.target)) return
+        if (!manager.canAcknowledgeSession(session)) {
+          await manager.destroySession(session.automationSessionId, session.generation)
+          throw new BrowserAutomationFailure('target_stale')
         }
         await this.options.transport.acknowledge({
           identity: this.options.identity,
@@ -284,9 +288,11 @@ export class BrowserAutomationProvider {
       operationId: snapshot.operationId,
       correlationId: snapshot.correlationId,
       attemptEpoch: snapshot.attemptEpoch,
+      navigationEpoch: snapshot.navigationEpoch,
       state: snapshot.state,
       ...(snapshot.result === undefined ? {} : { result: snapshot.result }),
-      ...(snapshot.errorCode === undefined ? {} : { errorCode: snapshot.errorCode })
+      ...(snapshot.errorCode === undefined ? {} : { errorCode: snapshot.errorCode }),
+      ...(snapshot.error === undefined ? {} : { error: snapshot.error })
     })
   }
 

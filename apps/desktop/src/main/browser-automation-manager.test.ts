@@ -34,6 +34,10 @@ class FakePage implements BrowserAutomationPage {
   )
   public readonly navigate = vi.fn(() => Promise.resolve())
   public readonly waitForLifecycle = vi.fn(() => Promise.resolve())
+  public url = 'https://example.test/'
+  public getURL(): string {
+    return this.url
+  }
   public readonly evaluate = vi.fn(() => Promise.resolve<unknown>({ answer: 42 }))
   public readonly readDiagnostics = vi.fn(() => ({ entries: [], cursor: 0, dropped: 0 }))
   public readonly dispose = vi.fn()
@@ -128,6 +132,112 @@ function harness(page = new FakePage()): BrowserAutomationManager {
 }
 
 describe('BrowserAutomationManager', () => {
+  it('preserves evaluation values during navigation and recovers after a stale command', async () => {
+    const page = new FakePage()
+    page.evaluate.mockImplementation(() => {
+      page.navigateTopLevel()
+      page.url = 'https://example.test/next'
+      return Promise.resolve('/next')
+    })
+    const manager = harness(page)
+    expect(
+      await manager.execute(request({ kind: 'evaluate', expression: 'navigate()' }))
+    ).toMatchObject({
+      state: 'succeeded',
+      navigationEpoch: 1,
+      result: {
+        kind: 'evaluation',
+        value: '/next',
+        navigation: { url: 'https://example.test/next', navigationEpoch: 1 }
+      }
+    })
+    const next = request({ kind: 'focus', selector: '#target' })
+    expect(await manager.execute(next)).toMatchObject({
+      state: 'failed',
+      errorCode: 'stale_navigation',
+      navigationEpoch: 1
+    })
+    expect(page.executeClosedScript).not.toHaveBeenCalled()
+    next.session.navigationEpoch = next.operation.navigationEpoch = 1
+    expect(await manager.execute(next)).toMatchObject({ state: 'succeeded' })
+    page.evaluate.mockImplementation(() => {
+      page.url = 'https://example.test/' + 'x'.repeat(65_536)
+      return Promise.resolve('value')
+    })
+    const evaluation = request({ kind: 'evaluate', expression: 'changeUrl()' })
+    evaluation.session.navigationEpoch = evaluation.operation.navigationEpoch = 1
+    expect(await manager.execute(evaluation)).toMatchObject({
+      state: 'failed',
+      errorCode: 'resource_limit'
+    })
+    expect(await manager.execute(evaluation)).toMatchObject({
+      state: 'succeeded',
+      result: { kind: 'evaluation', value: 'value' }
+    })
+    await manager.dispose()
+  })
+
+  it('waits for a new browser tab to mount before requesting attachment approval', async () => {
+    const page = new FakePage(false)
+    const resolveAttachment = vi.fn().mockReturnValueOnce(undefined).mockReturnValue(page.target)
+    const confirmAttachment = vi.fn(() => Promise.resolve(true))
+    const manager = new BrowserAutomationManager({
+      acquireAttachedPage: () => Promise.resolve(page),
+      createEphemeralPage: () => Promise.resolve(page),
+      resolveAttachment,
+      confirmAttachment,
+      now: Date.now,
+      schedule: (callback, delayMs) => setTimeout(callback, delayMs),
+      cancelSchedule: clearTimeout
+    })
+    expect(
+      await manager.createProvision(
+        {
+          automationSessionId: SESSION,
+          generation: 1,
+          mode: 'attach',
+          profileKey: 'private',
+          requestedTabId: TAB,
+          createdAtMs: Date.now(),
+          expiresAtMs: Date.now() + 120_000
+        },
+        page.target.window
+      )
+    ).toMatchObject({ state: 'ready', target: page.target })
+    expect(resolveAttachment).toHaveBeenCalledTimes(2)
+    expect(confirmAttachment).toHaveBeenCalledOnce()
+    await manager.dispose()
+  })
+
+  it('expires pending approval and ignores a late Allow response', async () => {
+    vi.useFakeTimers()
+    let allow!: (approved: boolean) => void
+    const page = new FakePage(false)
+    const manager = new BrowserAutomationManager({
+      acquireAttachedPage: () => Promise.resolve(page),
+      createEphemeralPage: () => Promise.resolve(page),
+      confirmAttachment: () =>
+        new Promise((resolve) => {
+          allow = resolve
+        }),
+      now: Date.now,
+      schedule: (callback, delayMs) => setTimeout(callback, delayMs),
+      cancelSchedule: clearTimeout
+    })
+    try {
+      const creation = manager.createSession(session('attach'))
+      const failure = expect(creation).rejects.toThrow('approval_timeout')
+      await vi.advanceTimersByTimeAsync(60_000)
+      await failure
+      allow(true)
+      await Promise.resolve()
+      expect(page.initialize).not.toHaveBeenCalled()
+      expect(manager.diagnosticCounts.sessions).toBe(0)
+    } finally {
+      await manager.dispose()
+      vi.useRealTimers()
+    }
+  })
   it('returns evaluation, enriched query, and session diagnostics through guarded operations', async () => {
     const page = new FakePage()
     const manager = harness(page)
@@ -461,11 +571,60 @@ describe('BrowserAutomationManager', () => {
       schedule: (callback, delayMs) => setTimeout(callback, delayMs),
       cancelSchedule: (handle) => clearTimeout(handle)
     })
-    await expect(manager.createSession(session('attach'))).rejects.toThrow('policy_denied')
+    await expect(manager.createSession(session('attach'))).rejects.toThrow('approval_denied')
   })
 })
 
 describe('createElectronAutomationPage', () => {
+  it('ignores same-document and subframe navigation while reporting page evaluation errors', async () => {
+    const debuggerApi = Object.assign(new EventEmitter(), {
+      isAttached: () => false,
+      attach: vi.fn(),
+      detach: vi.fn(),
+      sendCommand: vi.fn((method: string) =>
+        Promise.resolve(
+          method === 'Runtime.evaluate'
+            ? {
+                result: {},
+                exceptionDetails: {
+                  text: 'Uncaught',
+                  exception: {
+                    description: 'ReferenceError: nope is not defined\n    at <anonymous>:1:1'
+                  }
+                }
+              }
+            : {}
+        )
+      )
+    })
+    const contents = Object.assign(new EventEmitter(), {
+      debugger: debuggerApi,
+      isDestroyed: () => false
+    })
+    const page = createElectronAutomationPage({
+      contents: contents as unknown as Electron.WebContents,
+      owned: true,
+      target: targetBinding(),
+      revalidate: () => true
+    })
+    const navigation = vi.fn()
+    const remove = page.onTopLevelNavigation(navigation)
+    contents.emit('did-start-navigation', { isMainFrame: true, isSameDocument: true })
+    contents.emit('did-start-navigation', { isMainFrame: false, isSameDocument: false })
+    expect(navigation).not.toHaveBeenCalled()
+    contents.emit('did-start-navigation', { isMainFrame: true, isSameDocument: false })
+    expect(navigation).toHaveBeenCalledOnce()
+    await page.initialize()
+    await expect(page.evaluate('nope.x')).rejects.toMatchObject({
+      code: 'evaluation_failed',
+      details: {
+        message: 'ReferenceError: nope is not defined',
+        stack: 'ReferenceError: nope is not defined\n    at <anonymous>:1:1'
+      }
+    })
+    remove()
+    page.dispose()
+  })
   it('JSON-encodes selector data into the fixed closed script and exposes no bridge primitive', async () => {
     const contents = new EventEmitter() as EventEmitter & {
       loadURL: ReturnType<typeof vi.fn>

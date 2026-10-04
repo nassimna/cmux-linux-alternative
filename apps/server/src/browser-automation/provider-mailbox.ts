@@ -205,6 +205,9 @@ export class BrowserAutomationProviderMailbox {
         value.sessionGeneration !== expectedGeneration ||
         value.attemptEpoch !== expectedAttempt)
       throw new BrowserAutomationMailboxError('provider_epoch_mismatch')
+    if (entry.request.kind === 'execute' && value.navigationEpoch !== undefined &&
+        value.navigationEpoch < entry.request.request.operation.navigationEpoch)
+      throw new BrowserAutomationMailboxError('invalid_operation')
     if (value.state === 'succeeded') {
       const valid = entry.request.kind === 'create'
         ? value.session !== undefined && value.result === undefined
@@ -254,7 +257,8 @@ export class BrowserAutomationProviderMailbox {
         if (
           value.result.kind !== expectedResult ||
           (value.result.kind === 'navigation' &&
-            value.result.navigationEpoch !== entry.request.request.operation.navigationEpoch + 1)
+            (value.result.navigationEpoch <= entry.request.request.operation.navigationEpoch ||
+             (value.navigationEpoch !== undefined && value.result.navigationEpoch !== value.navigationEpoch)))
         )
           throw new BrowserAutomationMailboxError('invalid_operation')
       }

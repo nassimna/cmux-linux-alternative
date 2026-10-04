@@ -128,11 +128,9 @@ export class BrowserAutomationRuntime {
       this.callerId
     )
     if (!session || session.state !== 'ready') throw new Error('session_not_found')
-    if (
-      session.generation !== params.sessionGeneration ||
-      session.navigationEpoch !== params.navigationEpoch
-    )
+    if (session.generation !== params.sessionGeneration)
       throw new Error('session_generation_mismatch')
+    if (session.navigationEpoch !== params.navigationEpoch) throw new Error('stale_navigation')
     const { identity, target } = this.authority.claim(session.target.window)
     const request: BrowserAutomationProviderRequest = {
       kind: 'execute',

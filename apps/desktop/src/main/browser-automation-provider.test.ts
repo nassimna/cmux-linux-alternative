@@ -42,6 +42,7 @@ function page(
     navigate: () => Promise.resolve(),
     waitForLifecycle: () => Promise.resolve(),
     executeClosedScript: () => Promise.resolve(true),
+    getURL: () => 'about:blank',
     evaluate: () => Promise.resolve(null),
     readDiagnostics: () => ({ entries: [], cursor: 0, dropped: 0 }),
     dispose: () => undefined,
@@ -133,6 +134,26 @@ function acknowledgement(params: BrowserAutomationProviderAcknowledgeParams) {
   })
 }
 
+function attachmentRequest(): Extract<BrowserAutomationProviderRequest, { kind: 'create' }> {
+  return {
+    kind: 'create',
+    identity,
+    target,
+    provision: {
+      automationSessionId: ID,
+      generation: 1,
+      mode: 'attach',
+      profileKey: 'private',
+      requestedTabId: binding.tabId,
+      createdAtMs: Date.now(),
+      expiresAtMs: Date.now() + 60_000
+    },
+    operationId: ID_2,
+    correlationId: ID_3,
+    attemptEpoch: 4
+  }
+}
+
 describe('BrowserAutomationProvider', () => {
   it('acknowledges lifecycle requests with exact service IDs and main-owned ephemeral binding', async () => {
     const manager = new BrowserAutomationManager({
@@ -215,6 +236,188 @@ describe('BrowserAutomationProvider', () => {
     expect(manager.diagnosticCounts.sessions).toBe(1)
     await provider.stop()
     expect(manager.diagnosticCounts.sessions).toBe(0)
+  })
+
+  it.each([true, false])(
+    'settles an attachment after the approval decision is %s',
+    async (allowed) => {
+      let decide!: (allowed: boolean) => void
+      const confirmAttachment = vi.fn<BrowserAutomationManagerDependencies['confirmAttachment']>(
+        () =>
+          new Promise<boolean>((resolve) => {
+            decide = resolve
+          })
+      )
+      const acquireAttachedPage = vi.fn((target: typeof binding) =>
+        Promise.resolve({ ...page(target), owned: false })
+      )
+      const manager = new BrowserAutomationManager({
+        acquireAttachedPage,
+        createEphemeralPage: () => Promise.reject(new Error('not used')),
+        resolveAttachment: () => binding,
+        confirmAttachment,
+        now: Date.now,
+        schedule: (callback, delayMs) => setTimeout(callback, delayMs),
+        cancelSchedule: (handle) => clearTimeout(handle)
+      })
+      const acknowledge = vi.fn(acknowledgement)
+      const onProviderLost = vi.fn()
+      const provider = new BrowserAutomationProvider({
+        identity,
+        transport: {
+          poll: pollRequests([attachmentRequest()]),
+          acknowledge,
+          respondTransfer: () => Promise.resolve()
+        },
+        resolveManager: () => manager,
+        managers: () => [manager],
+        onProviderLost
+      })
+      provider.start()
+      await vi.waitFor(() => expect(confirmAttachment).toHaveBeenCalledOnce())
+      expect(acknowledge).not.toHaveBeenCalled()
+      expect(acquireAttachedPage).not.toHaveBeenCalled()
+      decide(allowed)
+      await vi.waitFor(() => expect(acknowledge).toHaveBeenCalledOnce())
+      expect(acknowledge.mock.calls[0]![0]).toMatchObject({
+        automationSessionId: ID,
+        sessionGeneration: 1,
+        operationId: ID_2,
+        correlationId: ID_3,
+        attemptEpoch: 4,
+        ...(allowed
+          ? { state: 'succeeded', session: { mode: 'attach', target: binding, navigationEpoch: 1 } }
+          : { state: 'failed', errorCode: 'approval_denied' })
+      })
+      expect(manager.diagnosticCounts.sessions).toBe(allowed ? 1 : 0)
+      expect(onProviderLost).not.toHaveBeenCalled()
+      await provider.stop()
+    }
+  )
+
+  it('acknowledges a tab invalidated during attachment initialization instead of waiting for timeout', async () => {
+    let live = true
+    const manager = new BrowserAutomationManager({
+      acquireAttachedPage: (target) =>
+        Promise.resolve({
+          ...page(target),
+          owned: false,
+          revalidate: () => live,
+          initialize: () => {
+            live = false
+            return Promise.resolve()
+          }
+        }),
+      createEphemeralPage: () => Promise.reject(new Error('not used')),
+      resolveAttachment: () => binding,
+      confirmAttachment: () => Promise.resolve(true),
+      now: Date.now,
+      schedule: (callback, delayMs) => setTimeout(callback, delayMs),
+      cancelSchedule: (handle) => clearTimeout(handle)
+    })
+    const acknowledge = vi.fn(acknowledgement)
+    const onProviderLost = vi.fn()
+    const provider = new BrowserAutomationProvider({
+      identity,
+      transport: {
+        poll: pollRequests([attachmentRequest()]),
+        acknowledge,
+        respondTransfer: () => Promise.resolve()
+      },
+      resolveManager: () => manager,
+      managers: () => [manager],
+      onProviderLost
+    })
+    provider.start()
+    await vi.waitFor(() => expect(acknowledge).toHaveBeenCalledOnce())
+    expect(acknowledge.mock.calls[0]![0]).toMatchObject({
+      operationId: ID_2,
+      state: 'failed',
+      errorCode: 'target_stale'
+    })
+    expect(manager.diagnosticCounts.sessions).toBe(0)
+    expect(onProviderLost).not.toHaveBeenCalled()
+    await provider.stop()
+  })
+
+  it('stopping the provider cancels a pending approval and fences a late Allow', async () => {
+    let allow!: (allowed: boolean) => void
+    const confirmAttachment = vi.fn<BrowserAutomationManagerDependencies['confirmAttachment']>(
+      () =>
+        new Promise<boolean>((resolve) => {
+          allow = resolve
+        })
+    )
+    const acquireAttachedPage = vi.fn((target: typeof binding) =>
+      Promise.resolve({ ...page(target), owned: false })
+    )
+    const manager = new BrowserAutomationManager({
+      acquireAttachedPage,
+      createEphemeralPage: () => Promise.reject(new Error('not used')),
+      resolveAttachment: () => binding,
+      confirmAttachment,
+      now: Date.now,
+      schedule: (callback, delayMs) => setTimeout(callback, delayMs),
+      cancelSchedule: (handle) => clearTimeout(handle)
+    })
+    const acknowledge = vi.fn(acknowledgement)
+    const provider = new BrowserAutomationProvider({
+      identity,
+      transport: {
+        poll: pollRequests([attachmentRequest()]),
+        acknowledge,
+        respondTransfer: () => Promise.resolve()
+      },
+      resolveManager: () => manager,
+      managers: () => [manager],
+      onProviderLost: vi.fn()
+    })
+    provider.start()
+    await vi.waitFor(() => expect(confirmAttachment).toHaveBeenCalledOnce())
+    await provider.stop()
+    const signal = confirmAttachment.mock.calls[0]![1]
+    expect(signal.aborted).toBe(true)
+    allow(true)
+    await Promise.resolve()
+    expect(acquireAttachedPage).not.toHaveBeenCalled()
+    expect(acknowledge).not.toHaveBeenCalled()
+    expect(manager.diagnosticCounts.sessions).toBe(0)
+  })
+
+  it('publishes current navigation epochs under the provider identity', async () => {
+    let navigate!: () => void
+    const manager = new BrowserAutomationManager({
+      acquireAttachedPage: () => Promise.resolve(undefined),
+      createEphemeralPage: (snapshot) =>
+        Promise.resolve({
+          ...page(snapshot.target),
+          onTopLevelNavigation: (listener) => {
+            navigate = listener
+            return () => undefined
+          }
+        }),
+      confirmAttachment: () => Promise.resolve(false),
+      now: Date.now,
+      schedule: (callback, delayMs) => setTimeout(callback, delayMs),
+      cancelSchedule: (handle) => clearTimeout(handle)
+    })
+    await manager.createSession(session())
+    navigate()
+    const poll = vi.fn(pollRequests([]))
+    const provider = new BrowserAutomationProvider({
+      identity,
+      transport: { poll, acknowledge: acknowledgement, respondTransfer: () => Promise.resolve() },
+      resolveManager: () => manager,
+      managers: () => [manager],
+      onProviderLost: vi.fn()
+    })
+    provider.start()
+    await vi.waitFor(() => expect(poll).toHaveBeenCalledOnce())
+    expect(poll.mock.calls[0]![0]).toMatchObject({
+      identity,
+      navigationUpdates: [{ automationSessionId: ID, sessionGeneration: 1, navigationEpoch: 1 }]
+    })
+    await provider.stop()
   })
 
   it('continues polling so a cancel request aborts a long operation', async () => {

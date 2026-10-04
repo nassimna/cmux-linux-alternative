@@ -1522,7 +1522,8 @@ function createBrowserAutomationManager(approvedProfileKey: string): BrowserAuto
         noLink: true,
         title: 'Allow browser automation?',
         message: 'Allow automation to control the selected browser tab?',
-        detail: 'This one-time approval applies only to the exact current tab and window.'
+        detail: 'This one-time approval applies only to the exact current tab and window.',
+        signal
       })
       return !signal.aborted && requireEntry(target) === entry && result.response === 1
     },

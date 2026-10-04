@@ -341,6 +341,9 @@ const AUTOMATION_CALLER_ERRORS = new Set([
   'session_limit',
   'session_expired',
   'invalid_operation',
+  'evaluation_failed',
+  'approval_denied',
+  'approval_timeout',
   'idempotency_expired',
   'idempotency_conflict',
   'interrupted',
@@ -495,16 +498,17 @@ export function createApp(
       const status =
         code === 'session_not_found'
           ? 404
-          : code === 'policy_denied'
+          : code === 'policy_denied' || code === 'approval_denied'
             ? 403
             : code === 'provider_unavailable' ||
                 code === 'interrupted' ||
                 code === 'timeout' ||
+                code === 'approval_timeout' ||
                 code === 'capability_unavailable'
               ? 503
               : code === 'automation_backpressure' || code === 'session_limit'
                 ? 429
-                : code === 'invalid_operation'
+                : code === 'invalid_operation' || code === 'evaluation_failed'
                   ? 422
                   : 409
       return c.json({ error: { code, message: code } }, status)
@@ -866,6 +870,7 @@ export function createApp(
     }
     app.post('/v1/browser-automation/provider/poll', async (c) => {
       const params = await parseBody(c.req.json(), browserAutomationProviderPollParamsSchema)
+      browserAutomation.records.updateNavigation(params)
       return c.json(
         browserAutomationProviderPollResultSchema.parse(
           await browserAutomation.authority.mailbox.poll(params)
