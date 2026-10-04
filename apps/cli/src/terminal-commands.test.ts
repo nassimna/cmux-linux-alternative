@@ -4,6 +4,26 @@ import { test } from 'node:test'
 import type { AgentWorkspaceClient } from '@agent-workspace/client-runtime'
 import { parseTerminalCommand, readTerminalText, renameTab } from './terminal-commands'
 
+void test('terminal ports requires a terminal ID and rejects unrelated options', () => {
+  const terminalId = randomUUID()
+  assert.deepEqual(
+    parseTerminalCommand(['terminal', 'ports', '--terminal-id', terminalId], '/private/session'),
+    { sessionFile: '/private/session', command: 'terminal.ports', terminalId }
+  )
+  assert.throws(
+    () => parseTerminalCommand(['terminal', 'ports'], '/private/session'),
+    /--terminal-id is required/
+  )
+  assert.throws(
+    () =>
+      parseTerminalCommand(
+        ['terminal', 'ports', '--terminal-id', terminalId, '--lines', '2'],
+        '/private/session'
+      ),
+    /Unknown or repeated option/
+  )
+})
+
 void test('terminal read joins decoded chunks before decoding UTF8, strips controls, and tails complete lines', async () => {
   const bytes = Buffer.from('\u001b[32mfirst\u001b[0m\r\nsecond: café\r\nthird\r\n')
   const split = bytes.indexOf(Buffer.from('é')) + 1

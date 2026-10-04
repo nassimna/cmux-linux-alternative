@@ -50,8 +50,37 @@ operations. Examples:
 ```sh
 agent-workspace-node workspace list
 agent-workspace-node workspace create --name Project --working-directory /absolute/project
+agent-workspace-node workspace close --workspace-id WORKSPACE_UUID
 agent-workspace-node terminal send --terminal-id TERMINAL_UUID --data $'pwd\n'
+agent-workspace-node terminal ports --terminal-id TERMINAL_UUID
 ```
+
+`terminal ports` returns the terminal ID and its sorted `listeningPorts` array from the runtime
+metadata endpoint. `workspace close` targets the specified workspace and obtains the current
+revision, idempotency epoch, and a new request key automatically. To retry the same close after
+a lost response, supply both `--expected-revision N` and the original `--idempotency-key UUID`.
+
+Browser operations print `operation.result` by default. Add `--verbose` for the full session and
+operation response. A new `browser open` still includes `session.automationSessionId` so later
+commands can target it; `browser attach` and the raw `browser-automation` commands retain their
+full responses. For example:
+
+```sh
+ternline-cli browser open --url http://127.0.0.1:5174
+ternline-cli browser eval --session-id SESSION_UUID --expression 'document.title'
+ternline-cli browser snapshot --session-id SESSION_UUID --verbose
+```
+
+Each browser command obtains the current session generation and navigation epoch. If navigation
+races with execution, it refreshes the session and retries `stale_navigation` once. Other failures
+are reported immediately. Evaluation failures include `evaluation_failed`, the page error message,
+and its stack when available. Evaluation retains the script value when it changes the URL and
+includes a separate `navigation` field. Query results use the real HTML `tag` and a separate `role`.
+Attachment waits up to five seconds for a new tab; approval denial and the 60-second approval
+deadline return `approval_denied` and `approval_timeout`. Console/error follow mode emits compact diagnostic results unless
+`--verbose` is supplied. Screenshot and recording output retain the saved `output` path; artifact
+bytes are verified and the handle is released after saving. Stopped WebM recordings include duration
+and seek metadata.
 
 The local `hook install`, `hook uninstall`, and `hook status` commands do not require a running
 desktop. Agent hooks consume bounded input and publish through the authenticated Node service.

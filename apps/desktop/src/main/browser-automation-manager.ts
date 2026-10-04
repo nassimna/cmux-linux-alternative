@@ -18,7 +18,10 @@ import {
   BrowserAutomationDevtools,
   BrowserAutomationDevtoolsFailure
 } from './browser-automation-devtools'
-import { browserAutomationElementSummarySchema } from '@agent-workspace/protocol-client'
+import {
+  browserAutomationElementSummarySchema,
+  browserAutomationOperationResultDataSchema
+} from '@agent-workspace/protocol-client'
 
 const CONTENT_TTL_MS = 60_000
 const SESSION_IDLE_TTL_MS = 30 * 60_000
@@ -64,6 +67,7 @@ export interface BrowserAutomationPage {
       editable?: boolean | undefined
     }>
   ): Promise<unknown>
+  getURL(): string
   evaluate(expression: string): Promise<unknown>
   readDiagnostics(
     kind: 'console' | 'errors',
@@ -145,8 +149,11 @@ interface ScreenshotRecord {
 }
 
 export class BrowserAutomationFailure extends Error {
-  public constructor(public readonly code: BrowserAutomationErrorCode) {
-    super(code)
+  public constructor(
+    public readonly code: BrowserAutomationErrorCode,
+    public readonly details?: { message: string; stack?: string }
+  ) {
+    super(details?.message ?? code)
   }
 }
 
@@ -179,12 +186,7 @@ export class BrowserAutomationManager {
     this.assertActive()
     this.purgeExpiredContent()
     const session = await this.ensureSession(request.session)
-    this.guard(
-      request,
-      session,
-      request.operation.operation.kind === 'wait' &&
-        request.operation.operation.condition.kind === 'url'
-    )
+    this.guardTargetOnly(request, session)
     if (session.pending) throw new BrowserAutomationFailure('automation_backpressure')
     session.lastUsedAtMs = this.#dependencies.now()
     this.scheduleSessionExpiry(session)
@@ -205,17 +207,34 @@ export class BrowserAutomationManager {
       request.operation.timeoutMs
     )
     try {
+      this.guard(
+        request,
+        session,
+        request.operation.operation.kind === 'wait' &&
+          request.operation.operation.condition.kind === 'url'
+      )
       let result = await this.runOperation(request, session, controller.signal)
       this.guard(request, session, session.pending?.allowsNavigation)
       if (
+        result.kind !== 'evaluation' &&
         session.pending?.allowsNavigation &&
         session.navigationEpoch !== request.operation.navigationEpoch
       )
         result = { kind: 'navigation', navigationEpoch: session.navigationEpoch }
+      if (!browserAutomationOperationResultDataSchema.safeParse(result).success) {
+        throw new BrowserAutomationFailure('resource_limit')
+      }
       return this.snapshot(request, session, 'succeeded', result)
     } catch (error) {
       const code = failureCode(error, controller.signal)
-      return this.snapshot(request, session, terminalState(code), undefined, code)
+      return this.snapshot(
+        request,
+        session,
+        terminalState(code),
+        undefined,
+        code,
+        error instanceof BrowserAutomationFailure ? error.details : undefined
+      )
     } finally {
       this.#dependencies.cancelSchedule(timeout)
       if (session.pending?.operationId === request.operation.operationId) delete session.pending
@@ -226,12 +245,19 @@ export class BrowserAutomationManager {
     provision: BrowserAutomationSessionProvision,
     window: BrowserAutomationTargetBinding['window']
   ): Promise<BrowserAutomationSessionSnapshot> {
+    let resolvedTarget = provision.requestedTarget
+    if (provision.mode === 'attach' && !resolvedTarget && provision.requestedTabId) {
+      const deadline = this.#dependencies.now() + 5_000
+      resolvedTarget = this.#dependencies.resolveAttachment?.(provision.requestedTabId, window)
+      while (!resolvedTarget && this.#dependencies.now() < deadline) {
+        await delay(this.#dependencies, 50)
+        this.assertActive()
+        resolvedTarget = this.#dependencies.resolveAttachment?.(provision.requestedTabId, window)
+      }
+    }
     const target =
       provision.mode === 'attach'
-        ? (provision.requestedTarget ??
-          (provision.requestedTabId
-            ? this.#dependencies.resolveAttachment?.(provision.requestedTabId, window)
-            : undefined))
+        ? resolvedTarget
         : {
             workspaceId: randomUUID(),
             paneId: randomUUID(),
@@ -271,6 +297,18 @@ export class BrowserAutomationManager {
 
   public async createSession(snapshot: BrowserAutomationSessionSnapshot): Promise<void> {
     await this.ensureSession(snapshot)
+  }
+
+  public navigationUpdates(): Array<{
+    automationSessionId: string
+    sessionGeneration: number
+    navigationEpoch: number
+  }> {
+    return [...this.#sessions.values()].map((session) => ({
+      automationSessionId: session.id,
+      sessionGeneration: session.generation,
+      navigationEpoch: session.navigationEpoch
+    }))
   }
 
   public canAcknowledgeSession(snapshot: BrowserAutomationSessionSnapshot): boolean {
@@ -447,15 +485,30 @@ export class BrowserAutomationManager {
       abort
     })
     let page: BrowserAutomationPage | undefined
+    let approvalTimeout: ReturnType<typeof setTimeout> | undefined
     try {
       if (snapshot.mode === 'attach') {
-        if (!(await this.#dependencies.confirmAttachment(snapshot.target, abort.signal))) {
-          throw new BrowserAutomationFailure('policy_denied')
+        approvalTimeout = this.#dependencies.schedule(
+          () => abort.abort(new BrowserAutomationFailure('approval_timeout')),
+          60_000
+        )
+        if (
+          !(await abortable(
+            this.#dependencies.confirmAttachment(snapshot.target, abort.signal),
+            abort.signal
+          ))
+        ) {
+          throw new BrowserAutomationFailure('approval_denied')
         }
+        this.#dependencies.cancelSchedule(approvalTimeout)
+        approvalTimeout = undefined
         if (abort.signal.aborted || this.#disposed) throw abort.signal.reason
-        page = await this.#dependencies.acquireAttachedPage(
-          snapshot.target,
-          snapshot.profileKey,
+        page = await abortable(
+          this.#dependencies.acquireAttachedPage(
+            snapshot.target,
+            snapshot.profileKey,
+            abort.signal
+          ),
           abort.signal
         )
         if (!page || page.owned) throw new BrowserAutomationFailure('target_not_found')
@@ -468,7 +521,7 @@ export class BrowserAutomationManager {
         throw new BrowserAutomationFailure('target_stale')
       }
 
-      await page.initialize()
+      await abortable(page.initialize(), abort.signal)
       if (abort.signal.aborted || this.#disposed) throw abort.signal.reason
       const session: LocalSession = {
         id: snapshot.automationSessionId,
@@ -504,6 +557,7 @@ export class BrowserAutomationManager {
       if (page?.owned) await page.destroy().catch(() => undefined)
       throw error
     } finally {
+      if (approvalTimeout !== undefined) this.#dependencies.cancelSchedule(approvalTimeout)
       this.#pendingCreations.delete(snapshot.automationSessionId)
     }
   }
@@ -552,12 +606,20 @@ export class BrowserAutomationManager {
       }
       case 'evaluate': {
         this.guard(request, session)
+        const previousUrl = session.page.getURL()
         const value = await abortable(session.page.evaluate(operation.expression), signal)
         this.guard(request, session, true)
         if (Buffer.byteLength(JSON.stringify(value), 'utf8') > 64 * 1_024) {
           throw new BrowserAutomationFailure('resource_limit')
         }
-        return { kind: 'evaluation', value }
+        const url = session.page.getURL()
+        return {
+          kind: 'evaluation',
+          value,
+          ...(url === previousUrl
+            ? {}
+            : { navigation: { url, navigationEpoch: session.navigationEpoch } })
+        }
       }
       case 'console':
       case 'errors':
@@ -826,7 +888,8 @@ export class BrowserAutomationManager {
     session: LocalSession,
     state: BrowserAutomationOperationSnapshot['state'],
     result?: BrowserAutomationOperationResultData,
-    errorCode?: BrowserAutomationErrorCode
+    errorCode?: BrowserAutomationErrorCode,
+    error?: BrowserAutomationOperationSnapshot['error']
   ): BrowserAutomationOperationSnapshot {
     return {
       automationSessionId: session.id,
@@ -838,6 +901,7 @@ export class BrowserAutomationManager {
       state,
       ...(result === undefined ? {} : { result }),
       ...(errorCode === undefined ? {} : { errorCode }),
+      ...(error === undefined ? {} : { error }),
       updatedAtMs: this.#dependencies.now()
     }
   }
@@ -918,13 +982,15 @@ const CLOSED_SCRIPTS: Readonly<Record<BrowserAutomationClosedScript, string>> = 
   })`,
   query: `(input => (${findTargetsSource})(input).slice(0, input.limit).map((element, index) => {
     const name = element.tagName.toLowerCase()
-    const tag = name === 'a' ? 'link' : name === 'img' ? 'image' :
-      ['button','input','textarea','select','form','dialog'].includes(name) ? name : 'generic'
+    const role = element.getAttribute('role') || (/^h[1-6]$/.test(name) ? 'heading' :
+      name === 'a' ? 'link' : name === 'img' ? 'image' :
+      ['button','input','textarea','select','form','dialog'].includes(name) ? name : 'generic')
     const style = getComputedStyle(element)
     const rect = element.getBoundingClientRect()
     return {
       index,
-      tag,
+      tag: name,
+      role,
       visible: style.display !== 'none' && style.visibility !== 'hidden' && rect.width > 0 && rect.height > 0,
       enabled: !('disabled' in element) || element.disabled !== true,
       focused: document.activeElement === element,
@@ -1137,10 +1203,29 @@ export function createElectronAutomationPage(options: {
         }
       }
     },
+    getURL: () => options.contents.getURL(),
     evaluate: async (expression) => {
-      const value: unknown = await options.contents.executeJavaScript(expression, true)
-      const serialized = JSON.stringify(value === undefined ? null : value)
-      if (serialized === undefined) throw new BrowserAutomationFailure('invalid_operation')
+      const reply = await devtools.command<{
+        result: { value?: unknown; description?: string }
+        exceptionDetails?: { text: string; exception?: { description?: string; value?: unknown } }
+      }>('Runtime.evaluate', {
+        expression,
+        awaitPromise: true,
+        returnByValue: true,
+        userGesture: true
+      })
+      if (reply.exceptionDetails) {
+        const description =
+          reply.exceptionDetails.exception?.description ??
+          (typeof reply.exceptionDetails.exception?.value === 'string'
+            ? reply.exceptionDetails.exception.value
+            : reply.exceptionDetails.text)
+        throw new BrowserAutomationFailure('evaluation_failed', {
+          message: description.split('\n')[0]!.slice(0, 4096),
+          stack: description.slice(0, 8192)
+        })
+      }
+      const serialized = JSON.stringify(reply.result.value ?? null)
       if (Buffer.byteLength(serialized, 'utf8') > 64 * 1_024)
         throw new BrowserAutomationFailure('resource_limit')
       return JSON.parse(serialized) as unknown
@@ -1173,7 +1258,11 @@ export function createElectronAutomationPage(options: {
     },
     onTopLevelNavigation: (listener) => {
       const handler = (event: Event): void => {
-        if ('isMainFrame' in event && event.isMainFrame === false) return
+        if (
+          ('isMainFrame' in event && event.isMainFrame === false) ||
+          ('isSameDocument' in event && event.isSameDocument === true)
+        )
+          return
         listener()
       }
       options.contents.on('did-start-navigation', handler)

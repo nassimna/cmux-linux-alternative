@@ -15,7 +15,8 @@ import type {
   BrowserAutomationProviderAcknowledgeParams,
   BrowserAutomationProviderRequest,
   BrowserAutomationSessionSnapshot,
-  BrowserAutomationSessionCreateParams
+  BrowserAutomationSessionCreateParams,
+  BrowserAutomationProviderPollParams
 } from '@agent-workspace/protocol-client'
 
 import { migrateBrowserAutomationSchema } from '../persistence/browser-automation-schema'
@@ -58,7 +59,7 @@ type StageOptions = {
 
 /** Durable v15 records. Callers must publish only after staging succeeds. */
 export class BrowserAutomationDurableRecords {
-  private readonly results = new Map<string, { value: BrowserAutomationOperationResultData; expiresAtMs: number }>()
+  private readonly results = new Map<string, { value?: BrowserAutomationOperationResultData; error?: BrowserAutomationOperationSnapshot['error']; expiresAtMs: number }>()
   public readonly handles: BrowserAutomationScreenshotHandles
   private readonly hasTombstones: boolean
 
@@ -452,13 +453,28 @@ export class BrowserAutomationDurableRecords {
     this.handles.releaseSession(request.session.automationSessionId)
   }
 
+  public updateNavigation(input: BrowserAutomationProviderPollParams): void {
+    if (!this.authority.isCurrent(input.identity)) throw new Error('provider_epoch_mismatch')
+    const instant = this.instant()
+    for (const update of input.navigationUpdates ?? []) {
+      const session = this.session(update.automationSessionId)
+      if (!session || session.state !== 'ready' || session.generation !== update.sessionGeneration) continue
+      if (!sameFence(session, input.identity, { windowId: session.window_id, windowGeneration: session.window_generation }))
+        throw new Error('provider_epoch_mismatch')
+      this.database.prepare(`UPDATE browser_automation_sessions SET navigation_epoch = ?, updated_at_ms = ?
+        WHERE automation_session_id = ? AND navigation_epoch < ?`).run(
+        update.navigationEpoch, instant, update.automationSessionId, update.navigationEpoch
+      )
+    }
+  }
+
   /** Commit an exact provider acknowledgement before releasing its mailbox entry. */
   public acknowledge(input: BrowserAutomationProviderAcknowledgeParams): BrowserAutomationOperationSnapshot {
     const ack = browserAutomationProviderAcknowledgeParamsSchema.parse(input) as BrowserAutomationProviderAcknowledgeParams
     this.authority.mailbox.validateAcknowledge(ack)
     const instant = this.instant()
     let screenshotOwnership: ScreenshotOwnership | undefined
-    let acceptedResult = false
+    let acceptedContent = false
     const snapshot = this.database.transaction(() => {
       const session = this.session(ack.automationSessionId)
       if (session?.lifecycle_operation_id === ack.operationId) {
@@ -481,7 +497,7 @@ export class BrowserAutomationDurableRecords {
       const result = ack.result ?? undefined
       if (ack.state === 'succeeded' && (!result ||
           !resultMatches(operation.operation_kind, result) ||
-          (result.kind === 'navigation' && result.navigationEpoch !== operation.navigation_epoch + 1)))
+          (result.kind === 'navigation' && result.navigationEpoch <= operation.navigation_epoch)))
         throw new Error('invalid_operation')
       if (result?.kind === 'screenshot' || result?.kind === 'recording') {
         const session = this.session(operation.automation_session_id)
@@ -506,27 +522,27 @@ export class BrowserAutomationDurableRecords {
         ack.state, result?.kind ?? null, digest, bytes, ack.errorCode ?? null,
         instant, instant, ack.operationId
       )
-      if (result?.kind === 'navigation') {
-        const advanced = this.database.prepare(`UPDATE browser_automation_sessions
-          SET navigation_epoch = navigation_epoch + 1, updated_at_ms = ?
-          WHERE automation_session_id = ? AND generation = ? AND navigation_epoch = ?
-          AND state = 'ready'`).run(
-          instant, ack.automationSessionId, ack.sessionGeneration, operation.navigation_epoch
-        )
-        if (advanced.changes !== 1) throw new Error('stale_navigation')
-      }
-      acceptedResult = result !== undefined
+      const navigationEpoch = ack.navigationEpoch ?? (result?.kind === 'navigation' ? result.navigationEpoch : operation.navigation_epoch)
+      if (navigationEpoch < operation.navigation_epoch) throw new Error('stale_navigation')
+      this.database.prepare(`UPDATE browser_automation_sessions
+        SET navigation_epoch = MAX(navigation_epoch, ?), updated_at_ms = ?
+        WHERE automation_session_id = ? AND generation = ? AND state = 'ready'`).run(
+        navigationEpoch, instant, ack.automationSessionId, ack.sessionGeneration
+      )
+      acceptedContent = result !== undefined || ack.error !== undefined
       return this.operationSnapshot(this.operation(ack.operationId)!, instant, result)
     })()
     if (screenshotOwnership) this.handles.register(screenshotOwnership)
-    if (acceptedResult && ack.result) {
+    if (acceptedContent) {
       for (const [operationId, retained] of this.results) {
         if (retained.expiresAtMs <= instant) this.results.delete(operationId)
       }
       while (this.results.size >= MAX_EPHEMERAL_RESULTS) {
         this.results.delete(this.results.keys().next().value!)
       }
-      this.results.set(ack.operationId, { value: ack.result, expiresAtMs: instant + CONTENT_TTL_MS })
+      this.results.set(ack.operationId, { ...(ack.result ? { value: ack.result } : {}),
+        ...(ack.error ? { error: ack.error } : {}), expiresAtMs: instant + CONTENT_TTL_MS })
+      if (ack.error) snapshot.error = ack.error
     }
     this.authority.mailbox.acknowledge(ack)
     return snapshot
@@ -604,10 +620,11 @@ export class BrowserAutomationDurableRecords {
       operationId: row.operation_id,
       correlationId: row.correlation_id,
       attemptEpoch: row.attempt_epoch,
-      navigationEpoch: row.navigation_epoch,
+      navigationEpoch: this.session(row.automation_session_id)?.navigation_epoch ?? row.navigation_epoch,
       state: expired ? 'resultExpired' : row.state,
       ...(result ? { result } : {}),
       ...(expired ? { errorCode: 'result_expired' } : row.error_code ? { errorCode: row.error_code } : {}),
+      ...(retained?.error && retained.expiresAtMs > instant ? { error: retained.error } : {}),
       updatedAtMs: row.updated_at_ms
     }) as BrowserAutomationOperationSnapshot
   }

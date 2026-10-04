@@ -122,11 +122,42 @@ it.each(['navigate', 'click', 'wait'] as const)('publishes sessions through an e
   expect(runtime.getSession({ automationSessionId: ready.automationSessionId, generation: 1 })
     .navigationEpoch).toBe(2)
 
+  const evaluation = { ...navigateParams, navigationEpoch: 2, operationId: randomUUID(),
+    operation: { kind: 'evaluate' as const, expression: 'navigate(); location.pathname' },
+    idempotency: { epoch, key: randomUUID() }, correlationId: randomUUID() }
+  await runtime.invoke(evaluation)
+  await authority.mailbox.poll({ identity, timeoutMs: 0 })
+  records.acknowledge({ identity, target, automationSessionId: ready.automationSessionId,
+    sessionGeneration: 1, operationId: evaluation.operationId,
+    correlationId: evaluation.correlationId, attemptEpoch: 1, navigationEpoch: 4,
+    state: 'succeeded', result: { kind: 'evaluation', value: '/next' } })
+  expect(await runtime.invoke(evaluation)).toMatchObject({ state: 'succeeded',
+    navigationEpoch: 4, result: { kind: 'evaluation', value: '/next' } })
+  expect(runtime.listSessions()[0]?.navigationEpoch).toBe(4)
+  records.updateNavigation({ identity, timeoutMs: 0, navigationUpdates: [{
+    automationSessionId: ready.automationSessionId, sessionGeneration: 1, navigationEpoch: 6
+  }] })
+  expect(runtime.listSessions()[0]?.navigationEpoch).toBe(6)
+  await expect(runtime.invoke({ ...evaluation, operationId: randomUUID(),
+    idempotency: { epoch, key: randomUUID() } })).rejects.toThrow('stale_navigation')
+  const failedEvaluation = { ...evaluation, navigationEpoch: 6, operationId: randomUUID(),
+    idempotency: { epoch, key: randomUUID() }, correlationId: randomUUID() }
+  await runtime.invoke(failedEvaluation)
+  await authority.mailbox.poll({ identity, timeoutMs: 0 })
+  const error = { message: 'Error: boom', stack: 'Error: boom\n    at <anonymous>:1:1' }
+  records.acknowledge({ identity, target, automationSessionId: ready.automationSessionId,
+    sessionGeneration: 1, operationId: failedEvaluation.operationId,
+    correlationId: failedEvaluation.correlationId, attemptEpoch: 1, navigationEpoch: 7,
+    state: 'failed', errorCode: 'evaluation_failed', error })
+  expect(await runtime.invoke(failedEvaluation)).toMatchObject({
+    state: 'failed', navigationEpoch: 7, errorCode: 'evaluation_failed', error
+  })
+
   const bytes = Buffer.from('png')
   const handleId = randomUUID()
   const sha256 = createHash('sha256').update(bytes).digest('hex')
   const screenshot = runtime.invoke({ automationSessionId: ready.automationSessionId,
-    sessionGeneration: 1, navigationEpoch: 2, operationId: randomUUID(), attemptEpoch: 1,
+    sessionGeneration: 1, navigationEpoch: 7, operationId: randomUUID(), attemptEpoch: 1,
     timeoutMs: 10_000, operation: { kind: 'screenshot', width: 1, height: 1 },
     idempotency: { epoch, key: randomUUID() }, correlationId: randomUUID() })
   const capture = (await authority.mailbox.poll({ identity, timeoutMs: 0 })).request
@@ -180,7 +211,7 @@ it.each(['navigate', 'click', 'wait'] as const)('publishes sessions through an e
 
   const inFlightCancel = { automationSessionId: ready.automationSessionId,
     sessionGeneration: 1, operationId: randomUUID(), correlationId: randomUUID() }
-  const inFlightRequest = { ...inFlightCancel, navigationEpoch: 2, attemptEpoch: 1,
+  const inFlightRequest = { ...inFlightCancel, navigationEpoch: 7, attemptEpoch: 1,
     timeoutMs: 10_000, operation: { kind: 'wait' as const,
       condition: { kind: 'lifecycle' as const, lifecycle: 'load' as const } },
     idempotency: { epoch, key: randomUUID() } }
@@ -196,7 +227,7 @@ it.each(['navigate', 'click', 'wait'] as const)('publishes sessions through an e
 
   const cancelParams = { automationSessionId: ready.automationSessionId,
     sessionGeneration: 1, operationId: randomUUID(), correlationId: randomUUID() }
-  const cancellable = { ...cancelParams, navigationEpoch: 2, attemptEpoch: 1,
+  const cancellable = { ...cancelParams, navigationEpoch: 7, attemptEpoch: 1,
     timeoutMs: 10_000, operation: { kind: 'wait' as const,
       condition: { kind: 'lifecycle' as const, lifecycle: 'load' as const } },
     idempotency: { epoch, key: randomUUID() } }

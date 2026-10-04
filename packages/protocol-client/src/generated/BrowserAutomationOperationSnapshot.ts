@@ -3,4 +3,4 @@ import type { BrowserAutomationErrorCode } from "./BrowserAutomationErrorCode";
 import type { BrowserAutomationOperationResultData } from "./BrowserAutomationOperationResultData";
 import type { BrowserAutomationOperationState } from "./BrowserAutomationOperationState";
 
-export type BrowserAutomationOperationSnapshot = { automationSessionId: string, sessionGeneration: number, operationId: string, correlationId: string, attemptEpoch: number, navigationEpoch: number, state: BrowserAutomationOperationState, result?: BrowserAutomationOperationResultData, errorCode?: BrowserAutomationErrorCode, updatedAtMs: number, };
+export type BrowserAutomationOperationSnapshot = { automationSessionId: string, sessionGeneration: number, operationId: string, correlationId: string, attemptEpoch: number, navigationEpoch: number, state: BrowserAutomationOperationState, result?: BrowserAutomationOperationResultData, errorCode?: BrowserAutomationErrorCode, error?: { message: string, stack?: string }, updatedAtMs: number, };

@@ -87,12 +87,24 @@ export async function createBrowserAutomationTestServer() {
       response.end('<title>M5 navigation target</title><h1>M5 navigation target</h1>')
       return
     }
+    if (url.pathname === '/redirect') {
+      response.writeHead(302, { location: '/push' })
+      response.end()
+      return
+    }
     response.writeHead(200, {
       'cache-control': 'no-store',
       'content-security-policy': "default-src 'self' 'unsafe-inline'",
       'content-type': 'text/html; charset=utf-8'
     })
-    response.end(html)
+    response.end(
+      url.pathname === '/push' || url.pathname === '/replace'
+        ? html.replace(
+            '<script>',
+            `<script>history.${url.pathname === '/push' ? 'pushState' : 'replaceState'}({}, '', '/pushed');`
+          )
+        : html
+    )
   })
 
   await new Promise((resolvePromise, reject) => {

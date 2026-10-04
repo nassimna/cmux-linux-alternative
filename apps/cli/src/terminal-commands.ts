@@ -6,12 +6,21 @@ import { flags, required } from './options'
 
 export type TerminalCommand =
   | { sessionFile: string; command: 'terminal.read'; terminalId: string; lines?: number }
+  | { sessionFile: string; command: 'terminal.ports'; terminalId: string }
   | { sessionFile: string; command: 'tab.rename'; tabId: string; title: string }
 
 export function parseTerminalCommand(
   args: string[],
   sessionFile: string
 ): TerminalCommand | undefined {
+  if (args[0] === 'terminal' && args[1] === 'ports') {
+    const { values } = flags(args.slice(2), ['--terminal-id'])
+    return {
+      sessionFile,
+      command: 'terminal.ports',
+      terminalId: required(values, '--terminal-id')
+    }
+  }
   if (args[0] === 'terminal' && args[1] === 'read') {
     const { values } = flags(args.slice(2), ['--terminal-id', '--lines'])
     const raw = values.get('--lines')

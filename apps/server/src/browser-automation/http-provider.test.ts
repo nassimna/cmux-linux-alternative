@@ -172,6 +172,24 @@ it('exposes caller automation with a runtime while keeping provider HTTP behind 
     expect(created.status).toBe(200)
     expect(await created.json()).toMatchObject({ session: { state: 'ready' } })
     expect(createSession).toHaveBeenCalledOnce()
+    for (const [code, status] of [
+      ['approval_denied', 403],
+      ['approval_timeout', 503]
+    ] as const) {
+      createSession.mockRejectedValueOnce(new Error(code))
+      const failed = await fetch(createEndpoint, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          ...JSON.parse(createBody),
+          mode: 'attach',
+          attachTabId: snapshot.target.tabId,
+          attachWindowId: snapshot.target.window.windowId
+        })
+      })
+      expect(failed.status).toBe(status)
+      expect(await failed.json()).toEqual({ error: { code, message: code } })
+    }
     const listed = await fetch(createEndpoint, { headers })
     expect(await listed.json()).toEqual({ sessions: [] })
     expect(listSessions).toHaveBeenCalledOnce()

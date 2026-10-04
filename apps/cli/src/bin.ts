@@ -90,6 +90,7 @@ Usage:
   ternline-cli [--session-file PATH] workspace list
   ternline-cli [--session-file PATH] workspace organization
   ternline-cli [--session-file PATH] workspace create --name NAME --working-directory PATH [--terminal-cwd PATH] [--description TEXT] [--color COLOR] [--env KEY=VALUE ...] [--env-file PATH] [--rows N] [--cols N] [--expected-revision N] [--idempotency-key UUID] [--command PROGRAM ARG...]
+  ternline-cli [--session-file PATH] workspace close --workspace-id UUID [--expected-revision N] [--idempotency-key UUID]
   ternline-cli [--session-file PATH] workspace pin --workspace-id UUID --pinned true|false --expected-revision N [--idempotency-key UUID]
   ternline-cli [--session-file PATH] workspace reorder --workspace-id UUID --destination-index N --expected-revision N [--idempotency-key UUID]
   ternline-cli [--session-file PATH] workspace select-many --workspace-id UUID [--workspace-id UUID ...] --focused-workspace-id UUID --expected-revision N [--idempotency-key UUID]
@@ -151,6 +152,7 @@ Usage:
   ternline-cli [--session-file PATH] terminal create --workspace-id UUID --pane-id UUID --cwd PATH [--rows N] [--cols N] [--destination-index N] [--expected-revision N] [--idempotency-key UUID] [--command PROGRAM ARG...]
   ternline-cli [--session-file PATH] terminal send --terminal-id UUID --data TEXT
   ternline-cli [--session-file PATH] terminal read --terminal-id UUID [--lines N]
+  ternline-cli [--session-file PATH] terminal ports --terminal-id UUID
   ternline-cli [--session-file PATH] tab rename --tab-id UUID --title TEXT
   ternline-cli [--session-file PATH] pane split --workspace-id UUID --target-pane-id UUID --axis horizontal|vertical [--placement before|after] [--ratio R] --expected-revision N [--idempotency-key UUID] terminal --cwd PATH [--rows N] [--cols N] [--command PROGRAM ARG...]
   ternline-cli [--session-file PATH] pane split --workspace-id UUID --target-pane-id UUID --axis horizontal|vertical [--placement before|after] [--ratio R] --expected-revision N [--idempotency-key UUID] browser --url URL [--profile-partition PARTITION]
@@ -176,6 +178,10 @@ Usage:
   ternline-cli [--session-file PATH] browser network get|body --session-id UUID --request-id ID
   ternline-cli [--session-file PATH] browser recording start --session-id UUID [--width N] [--height N]
   ternline-cli [--session-file PATH] browser recording stop --session-id UUID --output PATH
+
+Browser operations print operation.result by default. Add --verbose for the full response.
+A new browser open session always includes session.automationSessionId. Artifact output includes
+the saved output path. Browser commands refresh the session and retry stale_navigation once.
 
 On Linux and macOS, --session-file is optional when the desktop published its private Node
 discovery record. AGENT_WORKSPACE_NODE_SESSION_FILE can override that path. The record must be
@@ -923,6 +929,9 @@ async function main(): Promise<void> {
   }
   let result: unknown
   switch (parsed.command) {
+    case 'terminal.ports':
+      result = await client.runtimeMetadata(parsed.terminalId)
+      break
     case 'terminal.read': {
       const read = await readTerminalText(client, parsed.terminalId, parsed.lines)
       if (!read.reconstructionComplete)

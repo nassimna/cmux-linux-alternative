@@ -2825,6 +2825,9 @@ export const browserAutomationErrorCodeSchema = z.enum([
   'provider_epoch_mismatch',
   'automation_backpressure',
   'invalid_operation',
+  'evaluation_failed',
+  'approval_denied',
+  'approval_timeout',
   'invalid_selector',
   'unsafe_url',
   'policy_denied',
@@ -3058,20 +3061,11 @@ export const browserAutomationOperationInvokeParamsSchema = z.strictObject({
   idempotency: actionIdempotencySchema,
   correlationId: uuidSchema
 })
-export const browserAutomationElementTagSchema = z.enum([
-  'button',
-  'input',
-  'textarea',
-  'select',
-  'link',
-  'form',
-  'image',
-  'dialog',
-  'generic'
-])
+export const browserAutomationElementTagSchema = z.string().min(1).max(128)
 export const browserAutomationElementSummarySchema = z.strictObject({
   index: z.number().int().min(0).max(99),
   tag: browserAutomationElementTagSchema,
+  role: z.string().max(128).optional(),
   visible: z.boolean(),
   enabled: z.boolean(),
   focused: z.boolean(),
@@ -3112,8 +3106,14 @@ export const browserAutomationOperationResultDataSchema = z.discriminatedUnion('
       message: 'query result exceeds its wire bound'
     }),
   z
-    .strictObject({ kind: z.literal('evaluation'), value: actionJsonValueSchema })
-    .refine(({ value }) => serializedJsonBytes(value) <= 64 * 1_024, {
+    .strictObject({
+      kind: z.literal('evaluation'),
+      value: actionJsonValueSchema,
+      navigation: z
+        .strictObject({ url: z.string().max(65_536), navigationEpoch: automationEpochSchema })
+        .optional()
+    })
+    .refine(({ value, navigation }) => serializedJsonBytes({ value, navigation }) <= 64 * 1_024, {
       message: 'evaluation result exceeds its wire bound'
     }),
   ...(['console', 'errors'] as const).map((kind) =>
@@ -3140,6 +3140,10 @@ export const browserAutomationOperationResultDataSchema = z.discriminatedUnion('
     .strictObject({ kind: z.literal('inspection'), value: actionJsonValueSchema })
     .refine(({ value }) => serializedJsonBytes(value) <= 64 * 1024)
 ])
+const browserAutomationEvaluationErrorSchema = z.strictObject({
+  message: z.string().max(4_096),
+  stack: z.string().max(8_192).optional()
+})
 export const browserAutomationOperationSnapshotSchema = z
   .strictObject({
     automationSessionId: uuidSchema,
@@ -3151,6 +3155,7 @@ export const browserAutomationOperationSnapshotSchema = z
     state: browserAutomationOperationStateSchema,
     result: browserAutomationOperationResultDataSchema.optional(),
     errorCode: browserAutomationErrorCodeSchema.optional(),
+    error: browserAutomationEvaluationErrorSchema.optional(),
     updatedAtMs: revisionSchema
   })
   .refine(
@@ -3201,7 +3206,17 @@ export const browserAutomationScreenshotReleaseResultSchema = z.strictObject({
 })
 export const browserAutomationProviderPollParamsSchema = z.strictObject({
   identity: desktopProviderIdentitySchema.extend({ providerEpoch: revisionSchema.min(1) }),
-  timeoutMs: z.number().int().min(0).max(30_000)
+  timeoutMs: z.number().int().min(0).max(30_000),
+  navigationUpdates: z
+    .array(
+      z.strictObject({
+        automationSessionId: uuidSchema,
+        sessionGeneration: automationPositiveEpochSchema,
+        navigationEpoch: automationEpochSchema
+      })
+    )
+    .max(64)
+    .optional()
 })
 export const browserAutomationExecutionRequestSchema = z.strictObject({
   identity: desktopProviderIdentitySchema.extend({ providerEpoch: revisionSchema.min(1) }),
@@ -3270,7 +3285,9 @@ export const browserAutomationProviderAcknowledgeParamsSchema = z
     state: z.enum(['succeeded', 'failed', 'canceled', 'expired', 'interrupted', 'resultExpired']),
     session: browserAutomationSessionSnapshotSchema.optional(),
     result: browserAutomationOperationResultDataSchema.optional(),
-    errorCode: browserAutomationErrorCodeSchema.optional()
+    errorCode: browserAutomationErrorCodeSchema.optional(),
+    navigationEpoch: automationEpochSchema.optional(),
+    error: browserAutomationEvaluationErrorSchema.optional()
   })
   .superRefine((value, context) => {
     const success = value.state === 'succeeded'

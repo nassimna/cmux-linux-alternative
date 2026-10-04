@@ -1,4 +1,4 @@
-import type { AgentWorkspaceClient } from '@agent-workspace/client-runtime'
+import { ServerError, type AgentWorkspaceClient } from '@agent-workspace/client-runtime'
 import { createHash, randomUUID } from 'node:crypto'
 import { writeFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
@@ -19,6 +19,7 @@ export type BrowserAutomationCommand =
       output?: string
       timeoutMs?: number
       follow?: boolean
+      verbose?: boolean
     }
   | {
       sessionFile: string
@@ -75,12 +76,12 @@ export function parseBrowserAutomation(
     if (!verb || !Object.hasOwn(actionFlags, verb)) return undefined
     const tail = args.slice(nested ? 3 : 2)
     const normalized = tail.flatMap((value, index) =>
-      ['--clear', '--follow'].includes(value) &&
+      ['--clear', '--follow', '--verbose'].includes(value) &&
       (tail[index + 1] === undefined || tail[index + 1]!.startsWith('--'))
         ? [value, 'true']
         : [value]
     )
-    const { values } = flags(normalized, ['--session-id', ...actionFlags[verb]!])
+    const { values } = flags(normalized, ['--session-id', '--verbose', ...actionFlags[verb]!])
     const number = (flag: string, fallback: number, maximum: number, minimum = 1) => {
       const value = values.get(flag) ?? String(fallback)
       if (
@@ -255,7 +256,8 @@ export function parseBrowserAutomation(
       ...(sessionId === undefined ? {} : { sessionId }),
       ...(values.has('--output') ? { output: required(values, '--output') } : {}),
       ...(values.has('--timeout-ms') ? { timeoutMs: number('--timeout-ms', 30_000, 120_000) } : {}),
-      ...(values.has('--follow') ? boolean('--follow') : {})
+      ...(values.has('--follow') ? boolean('--follow') : {}),
+      ...(values.has('--verbose') ? boolean('--verbose') : {})
     }
   }
   if (args[0] !== 'browser-automation') return undefined
@@ -315,7 +317,7 @@ export async function runBrowserAutomation(
       const identity = await client.identify()
       if (!identity.idempotencyEpoch)
         throw new Error('Browser automation is unavailable in this session')
-      const session =
+      const initialSession =
         parsed.sessionId === undefined
           ? (
               await client.createBrowserAutomationSession({
@@ -328,10 +330,10 @@ export async function runBrowserAutomation(
           : (await client.listBrowserAutomationSessions()).sessions.find(
               (item) => item.automationSessionId === parsed.sessionId
             )
-      if (!session) throw new Error('Browser automation session was not found')
-      let result: Awaited<ReturnType<AgentWorkspaceClient['invokeBrowserAutomationUntilTerminal']>>
-      try {
-        result = await client.invokeBrowserAutomationUntilTerminal({
+      if (!initialSession) throw new Error('Browser automation session was not found')
+      let session = initialSession
+      const invoke = () =>
+        client.invokeBrowserAutomationUntilTerminal({
           automationSessionId: session.automationSessionId,
           sessionGeneration: session.generation,
           navigationEpoch: session.navigationEpoch,
@@ -342,9 +344,30 @@ export async function runBrowserAutomation(
           idempotency: { epoch: identity.idempotencyEpoch, key: randomUUID() },
           correlationId: randomUUID()
         })
+      let result:
+        | Awaited<ReturnType<AgentWorkspaceClient['invokeBrowserAutomationUntilTerminal']>>
+        | undefined
+      try {
+        try {
+          result = await invoke()
+        } catch (error) {
+          if (!(error instanceof ServerError) || error.code !== 'stale_navigation') throw error
+        }
+        if (result === undefined || result.operation.errorCode === 'stale_navigation') {
+          const current = (await client.listBrowserAutomationSessions()).sessions.find(
+            (item) => item.automationSessionId === session.automationSessionId
+          )
+          if (!current) throw new Error('Browser automation session was not found')
+          session = current
+          result = await invoke()
+        }
         if (result.operation.state !== 'succeeded') {
+          const error = result.operation.error
           throw new Error(
-            `Browser operation ${result.operation.state}: ${result.operation.errorCode ?? 'unknown'}`
+            `Browser operation ${result.operation.state}: ${result.operation.errorCode ?? 'unknown'}` +
+              (error === undefined
+                ? ''
+                : `\n${error.message}${error.stack === undefined ? '' : `\n${error.stack}`}`)
           )
         }
       } catch (error) {
@@ -393,6 +416,10 @@ export async function runBrowserAutomation(
           await client.releaseBrowserAutomationScreenshot(request)
         }
       }
+      const output = parsed.output === undefined ? {} : { output: resolve(parsed.output) }
+      if (!parsed.verbose && parsed.sessionId !== undefined) {
+        return { ...result.operation.result, ...output }
+      }
       return {
         session: {
           ...session,
@@ -402,7 +429,7 @@ export async function runBrowserAutomation(
               : result.operation.navigationEpoch
         },
         ...result,
-        ...(parsed.output === undefined ? {} : { output: resolve(parsed.output) })
+        ...output
       }
     }
     case 'browser-automation.list':
@@ -433,6 +460,7 @@ export async function followBrowserDiagnostics(
   while (!signal.aborted) {
     const result = (await runBrowserAutomation(client, {
       ...parsed,
+      verbose: true,
       operation: {
         ...parsed.operation,
         ...(after === undefined ? {} : { after }),
@@ -444,7 +472,9 @@ export async function followBrowserDiagnostics(
       }
     }
     const diagnostics = result.operation.result
-    if (diagnostics?.entries?.length || diagnostics?.dropped) emit(result)
+    if (diagnostics?.entries?.length || diagnostics?.dropped) {
+      emit(parsed.verbose ? result : diagnostics)
+    }
     if (diagnostics?.cursor !== undefined) after = diagnostics.cursor
     clear = false
     try {

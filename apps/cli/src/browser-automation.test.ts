@@ -5,7 +5,7 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 
-import type { AgentWorkspaceClient } from '@agent-workspace/client-runtime'
+import { ServerError, type AgentWorkspaceClient } from '@agent-workspace/client-runtime'
 import {
   parseBrowserAutomation,
   runBrowserAutomation,
@@ -114,13 +114,15 @@ void test('browser commands construct operations and use the current session epo
   const session = { automationSessionId: randomUUID(), generation: 4, navigationEpoch: 9 }
   const epoch = randomUUID()
   const requests: unknown[] = []
+  let navigationEpoch = session.navigationEpoch
   const client = {
     identify: () => Promise.resolve({ idempotencyEpoch: epoch }),
-    listBrowserAutomationSessions: () => Promise.resolve({ sessions: [session] }),
+    listBrowserAutomationSessions: () =>
+      Promise.resolve({ sessions: [{ ...session, navigationEpoch }] }),
     invokeBrowserAutomationUntilTerminal: (request: unknown) => {
       requests.push(request)
       return Promise.resolve({
-        operation: { state: 'succeeded', result: { kind: 'evaluation', value: 2 } }
+        operation: { state: 'succeeded', navigationEpoch, result: { kind: 'evaluation', value: 2 } }
       })
     }
   } as unknown as AgentWorkspaceClient
@@ -128,7 +130,7 @@ void test('browser commands construct operations and use the current session epo
     ['browser', 'eval', '--session-id', session.automationSessionId, '--expression', '1+1'],
     '/private/session'
   )!
-  await runBrowserAutomation(client, parsed)
+  assert.deepEqual(await runBrowserAutomation(client, parsed), { kind: 'evaluation', value: 2 })
   const request = requests[0] as {
     operation: unknown
     sessionGeneration: number
@@ -139,6 +141,24 @@ void test('browser commands construct operations and use the current session epo
   assert.equal(request.sessionGeneration, 4)
   assert.equal(request.navigationEpoch, 9)
   assert.equal(request.idempotency.epoch, epoch)
+  navigationEpoch = 10
+  const verbose = parseBrowserAutomation(
+    [
+      'browser',
+      'eval',
+      '--session-id',
+      session.automationSessionId,
+      '--expression',
+      '1+1',
+      '--verbose'
+    ],
+    '/private/session'
+  )!
+  assert.deepEqual(await runBrowserAutomation(client, verbose), {
+    session: { ...session, navigationEpoch: 10 },
+    operation: { state: 'succeeded', navigationEpoch: 10, result: { kind: 'evaluation', value: 2 } }
+  })
+  assert.equal((requests[1] as { navigationEpoch: number }).navigationEpoch, 10)
   const parse = (tail: string[]) => parseBrowserAutomation(['browser', ...tail], '/private/session')
   assert.throws(() => parse(['click', '--selector', '#button']), /--session-id is required/)
   assert.throws(
@@ -158,6 +178,10 @@ void test('browser commands construct operations and use the current session epo
     () => parse(['console', '--session-id', session.automationSessionId, '--clear', 'yes']),
     /--clear must be true or false/
   )
+  assert.throws(
+    () => parse(['snapshot', '--session-id', session.automationSessionId, '--verbose', 'yes']),
+    /--verbose must be true or false/
+  )
   assert.deepEqual(
     (
       parse([
@@ -171,6 +195,100 @@ void test('browser commands construct operations and use the current session epo
       ]) as { operation: unknown }
     ).operation,
     { kind: 'typeText', selector: 'input', text: '' }
+  )
+})
+
+void test('browser operations refresh and retry stale_navigation only once with new identities', async () => {
+  for (const transportError of [false, true]) {
+    const sessionId = randomUUID()
+    const requests: {
+      navigationEpoch: number
+      operationId: string
+      idempotency: { key: string }
+    }[] = []
+    let lists = 0
+    let repeated = false
+    const client = {
+      identify: () => Promise.resolve({ idempotencyEpoch: randomUUID() }),
+      listBrowserAutomationSessions: () =>
+        Promise.resolve({
+          sessions: [
+            {
+              automationSessionId: sessionId,
+              generation: 1,
+              navigationEpoch: ++lists
+            }
+          ]
+        }),
+      invokeBrowserAutomationUntilTerminal: (request: (typeof requests)[number]) => {
+        requests.push(request)
+        if (requests.length % 2 === 1 || repeated) {
+          if (transportError) {
+            return Promise.reject(new ServerError(409, 'stale_navigation', 'Page navigated'))
+          }
+          return Promise.resolve({ operation: { state: 'failed', errorCode: 'stale_navigation' } })
+        }
+        return Promise.resolve({
+          operation: { state: 'succeeded', result: { kind: 'evaluation', value: 'ready' } }
+        })
+      }
+    } as unknown as AgentWorkspaceClient
+    const parsed = parseBrowserAutomation(
+      ['browser', 'eval', '--session-id', sessionId, '--expression', 'document.readyState'],
+      '/private/session'
+    )!
+    assert.deepEqual(await runBrowserAutomation(client, parsed), {
+      kind: 'evaluation',
+      value: 'ready'
+    })
+    assert.equal(lists, 2)
+    assert.deepEqual(
+      requests.map((request) => request.navigationEpoch),
+      [1, 2]
+    )
+    assert.notEqual(requests[0]!.operationId, requests[1]!.operationId)
+    assert.notEqual(requests[0]!.idempotency.key, requests[1]!.idempotency.key)
+    repeated = true
+    await assert.rejects(runBrowserAutomation(client, parsed), /stale_navigation|Page navigated/)
+    assert.equal(requests.length, 4)
+    assert.equal(lists, 4)
+  }
+})
+
+void test('browser eval failures include the page error and its stack', async () => {
+  const sessionId = randomUUID()
+  const pageError = {
+    message: 'ReferenceError: nope is not defined',
+    stack: 'ReferenceError: nope is not defined\n    at eval (test-page:1)'
+  }
+  const client = {
+    identify: () => Promise.resolve({ idempotencyEpoch: randomUUID() }),
+    listBrowserAutomationSessions: () =>
+      Promise.resolve({
+        sessions: [
+          {
+            automationSessionId: sessionId,
+            generation: 1,
+            navigationEpoch: 0
+          }
+        ]
+      }),
+    invokeBrowserAutomationUntilTerminal: () =>
+      Promise.resolve({
+        operation: { state: 'failed', errorCode: 'evaluation_failed', error: pageError }
+      })
+  } as unknown as AgentWorkspaceClient
+  await assert.rejects(
+    runBrowserAutomation(
+      client,
+      parseBrowserAutomation(
+        ['browser', 'eval', '--session-id', sessionId, '--expression', 'nope.x'],
+        '/private/session'
+      )!
+    ),
+    {
+      message: `Browser operation failed: evaluation_failed\n${pageError.message}\n${pageError.stack}`
+    }
   )
 })
 
@@ -295,7 +413,11 @@ void test('screenshot output verifies bytes and releases its handle, including o
       ['browser', 'screenshot', '--session-id', session.automationSessionId, '--output', output],
       '/private/session'
     )!
-    await runBrowserAutomation(client, parsed)
+    assert.deepEqual(await runBrowserAutomation(client, parsed), {
+      kind: 'screenshot',
+      handle,
+      output
+    })
     assert.deepEqual(await readFile(output), png)
     assert.equal(released, 1)
     kind = 'recording'
@@ -430,5 +552,5 @@ void test('diagnostic follow advances its cursor, clears once and stops without 
     { kind: 'console', clear: true },
     { kind: 'console', clear: false, after: 1 }
   ])
-  assert.equal(emitted.length, 1)
+  assert.deepEqual(emitted, [{ kind: 'console', entries: [{ sequence: 1 }], cursor: 1 }])
 })

@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto'
 import { test } from 'node:test'
 
 import type { AgentWorkspaceClient } from '@agent-workspace/client-runtime'
+import { paneSplitRequestSchema } from '@agent-workspace/contracts'
 import { parseParityCommand, parityRequest, runParityCommand } from './parity-commands'
 
 const epoch = randomUUID()
@@ -16,6 +17,58 @@ function parse(args: string[]) {
   assert.ok(parsed)
   return parsed
 }
+
+void test('workspace close targets an ID with automatic revision and preserves explicit retry identity', async () => {
+  const seen: unknown[] = []
+  let snapshots = 0
+  const client = {
+    stateSnapshot: () => {
+      snapshots += 1
+      return Promise.resolve({ snapshot: { revision: 12 } })
+    },
+    closeWorkspace: (request: unknown) => {
+      seen.push(request)
+      return Promise.resolve({ revision: 13 })
+    }
+  } as unknown as AgentWorkspaceClient
+  const automatic = parse(['workspace', 'close', '--workspace-id', workspaceId])
+  assert.deepEqual(await runParityCommand(client, automatic, epoch), { revision: 13 })
+  const request = seen[0] as { idempotencyKey: string }
+  assert.match(request.idempotencyKey, /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/u)
+  assert.deepEqual(request, {
+    workspaceId,
+    expectedRevision: 12,
+    idempotencyEpoch: epoch,
+    idempotencyKey: request.idempotencyKey
+  })
+  assert.equal(automatic.values.has('--expected-revision'), false)
+  await runParityCommand(
+    client,
+    parse([
+      'workspace',
+      'close',
+      '--workspace-id',
+      workspaceId,
+      '--expected-revision',
+      '12',
+      '--idempotency-key',
+      key
+    ]),
+    epoch
+  )
+  assert.deepEqual(seen[1], {
+    workspaceId,
+    expectedRevision: 12,
+    idempotencyEpoch: epoch,
+    idempotencyKey: key
+  })
+  assert.equal(snapshots, 1)
+  assert.throws(() => parse(['workspace', 'close']), /--workspace-id is required/)
+  assert.throws(
+    () => parse(['workspace', 'close', '--workspace-id', workspaceId, '--idempotency-key', key]),
+    /--idempotency-key requires --expected-revision/
+  )
+})
 
 test('close-selected preserves replacement defaults, revision, key, and command tail', async () => {
   const parsed = parse([
@@ -90,7 +143,7 @@ test('pane split dispatches terminal, browser, and existing tab through validate
   for (const { tail, kind } of cases) {
     const parsed = parse([...base, ...tail])
     const request = parityRequest(parsed, epoch)
-    assert.equal('content' in request ? request.content.kind : undefined, kind)
+    assert.equal(paneSplitRequestSchema.parse(request).content.kind, kind)
     await runParityCommand(client, parsed, epoch)
     assert.deepEqual(seen.at(-1), request)
   }
